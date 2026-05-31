@@ -26,10 +26,24 @@ pub enum BehaviorIntent {
     Turret {
         priority: Vec<TargetRule>,
     },
-    DronePort,
+    DronePort {
+        commands: Vec<DronePortCommand>,
+    },
     CarrierDrone {
         command: DroneCommand,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DronePortCommand {
+    AutoDispatch,
+    ChargeDockedDrones,
+    CreateDeliveryJob {
+        item: ItemKind,
+        amount: u32,
+        dropoff_tag: String,
+    },
+    DispatchIdleDrones,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -71,6 +85,7 @@ pub struct BehaviorHostInput {
     pub ammo_count: i32,
     pub router_output_available: [bool; 4],
     pub router_item_output_available: BTreeMap<ItemKind, [bool; 4]>,
+    pub drone_port_stock_counts: BTreeMap<ItemKind, i32>,
     pub drone_battery_percent: i32,
     pub drone_logic_fuel: u64,
     pub drone_has_job: bool,
@@ -115,6 +130,10 @@ mod host_cost {
     pub const ATTACK_NEAREST: u64 = 4;
     pub const ATTACK_BEST: u64 = 8;
     pub const DISPATCH: u64 = 5;
+    pub const DRONE_PORT_STOCK: u64 = 2;
+    pub const DRONE_PORT_CHARGE: u64 = 2;
+    pub const DRONE_PORT_CREATE_JOB: u64 = 6;
+    pub const DRONE_PORT_DISPATCH_IDLE: u64 = 5;
     pub const DRONE_SENSOR: u64 = 1;
     pub const DRONE_JOB: u64 = 5;
     pub const DRONE_ACTION: u64 = 2;
@@ -495,7 +514,93 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !charge_host(&mut caller, host_cost::DISPATCH) {
                 return 0;
             }
-            caller.data_mut().intent = BehaviorIntent::DronePort;
+            push_drone_port_command(caller.data_mut(), DronePortCommand::AutoDispatch);
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "stock_count",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_PORT_STOCK) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .drone_port_stock_counts
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "charge_docked_drones",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_PORT_CHARGE) {
+                return 0;
+            }
+            push_drone_port_command(caller.data_mut(), DronePortCommand::ChargeDockedDrones);
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "create_delivery_job",
+        |mut caller: Caller<'_, BehaviorHostState>,
+         item: i32,
+         amount: i32,
+         dropoff_tag: i32|
+         -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_PORT_CREATE_JOB) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            let Some(dropoff_tag) = dropoff_tag_from_code(dropoff_tag) else {
+                return 0;
+            };
+            let Ok(amount) = u32::try_from(amount) else {
+                return 0;
+            };
+            if amount == 0 {
+                return 0;
+            }
+            if caller
+                .data()
+                .input
+                .drone_port_stock_counts
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
+                < i32::try_from(amount).unwrap_or(i32::MAX)
+            {
+                return 0;
+            }
+            push_drone_port_command(
+                caller.data_mut(),
+                DronePortCommand::CreateDeliveryJob {
+                    item,
+                    amount,
+                    dropoff_tag: dropoff_tag.to_string(),
+                },
+            );
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "dispatch_idle_drones",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_PORT_DISPATCH_IDLE) {
+                return 0;
+            }
+            push_drone_port_command(caller.data_mut(), DronePortCommand::DispatchIdleDrones);
             1
         },
     )?;
@@ -634,6 +739,17 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     Ok(())
 }
 
+fn push_drone_port_command(state: &mut BehaviorHostState, command: DronePortCommand) {
+    match &mut state.intent {
+        BehaviorIntent::DronePort { commands } => commands.push(command),
+        _ => {
+            state.intent = BehaviorIntent::DronePort {
+                commands: vec![command],
+            };
+        }
+    }
+}
+
 fn charge_host(caller: &mut Caller<'_, BehaviorHostState>, cost: u64) -> bool {
     let Ok(fuel) = caller.get_fuel() else {
         caller.data_mut().host_over_budget = true;
@@ -699,7 +815,9 @@ fn action_code_to_intent(kind: BehaviorKind, action_code: i32) -> Result<Behavio
         31 if kind == BehaviorKind::Turret => Ok(BehaviorIntent::Turret {
             priority: vec![TargetRule::LowestHp, TargetRule::Nearest],
         }),
-        40 if kind == BehaviorKind::DronePort => Ok(BehaviorIntent::DronePort),
+        40 if kind == BehaviorKind::DronePort => Ok(BehaviorIntent::DronePort {
+            commands: vec![DronePortCommand::AutoDispatch],
+        }),
         50 if kind == BehaviorKind::CarrierDrone => Ok(BehaviorIntent::CarrierDrone {
             command: DroneCommand::ReturnToPort,
         }),
@@ -798,6 +916,13 @@ fn item_from_code(code: i32) -> Option<ItemKind> {
         2 => Some(ItemKind::Ammo),
         3 => Some(ItemKind::CpuPart),
         4 => Some(ItemKind::DronePart),
+        _ => None,
+    }
+}
+
+fn dropoff_tag_from_code(code: i32) -> Option<&'static str> {
+    match code {
+        0 => Some("frontline"),
         _ => None,
     }
 }
@@ -1171,6 +1296,58 @@ mod tests {
     }
 
     #[test]
+    fn xac_script_can_drive_drone_port_stock_delivery_api() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = include_str!("../../../assets/builtin/drone_port/basic.xac");
+        let wat = compile_source_to_wat(BehaviorKind::DronePort, source).unwrap();
+        assert!(wat.contains(r#""stock_count""#));
+        assert!(wat.contains(r#""create_delivery_job""#));
+        assert!(wat.contains(r#""charge_docked_drones""#));
+        assert!(wat.contains(r#""dispatch_idle_drones""#));
+
+        let compiled = runtime
+            .compile_wat(BehaviorKind::DronePort, source)
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 120, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::DronePort { ref commands }
+                if commands == &vec![
+                    DronePortCommand::ChargeDockedDrones,
+                    DronePortCommand::DispatchIdleDrones
+                ]
+        ));
+
+        let mut stock = BTreeMap::new();
+        stock.insert(ItemKind::Ammo, 60);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                120,
+                BehaviorHostInput {
+                    drone_port_stock_counts: stock,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::DronePort { ref commands }
+                if commands == &vec![
+                    DronePortCommand::ChargeDockedDrones,
+                    DronePortCommand::CreateDeliveryJob {
+                        item: ItemKind::Ammo,
+                        amount: 10,
+                        dropoff_tag: "frontline".to_string()
+                    },
+                    DronePortCommand::DispatchIdleDrones
+                ]
+        ));
+    }
+
+    #[test]
     fn xac_script_can_branch_on_remaining_fuel() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
@@ -1340,6 +1517,10 @@ mod tests {
         let eval = runtime
             .evaluate_compiled(&drone_port, 30, BehaviorHostInput::default())
             .unwrap();
-        assert!(matches!(eval.intent, BehaviorIntent::DronePort));
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::DronePort { commands }
+                if commands == vec![DronePortCommand::AutoDispatch]
+        ));
     }
 }

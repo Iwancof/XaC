@@ -99,6 +99,7 @@ impl Simulation {
                     (item, by_dir)
                 })
                 .collect(),
+            drone_port_stock_counts: self.network_stock_counts(block_id),
             net_i32: self.network_i32_values(block.network_id),
             net_writable: block
                 .network_id
@@ -232,8 +233,32 @@ impl Simulation {
                 self.run_assembler(block_id);
             }
             BehaviorIntent::Turret { priority } => self.run_turret_once(block_id, &priority),
-            BehaviorIntent::DronePort => self.ensure_drone_and_job(block_id),
+            BehaviorIntent::DronePort { commands } => {
+                self.apply_drone_port_commands(block_id, commands);
+            }
             BehaviorIntent::CarrierDrone { .. } => {}
         }
+    }
+
+    fn network_stock_counts(&self, block_id: &str) -> BTreeMap<ItemKind, i32> {
+        let mut counts = BTreeMap::new();
+        let Some(block) = self.blocks.get(block_id) else {
+            return counts;
+        };
+        let ids: Vec<&str> = block
+            .network_id
+            .and_then(|network_id| self.networks.get(&network_id))
+            .map(|network| network.block_ids.iter().map(String::as_str).collect())
+            .unwrap_or_else(|| vec![block_id]);
+        for id in ids {
+            let Some(block) = self.blocks.get(id) else {
+                continue;
+            };
+            for (item, amount) in &block.inventory.items {
+                let total = counts.entry(item.clone()).or_insert(0_i32);
+                *total = total.saturating_add(i32::try_from(*amount).unwrap_or(i32::MAX));
+            }
+        }
+        counts
     }
 }

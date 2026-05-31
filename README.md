@@ -99,6 +99,16 @@ if has_pending_job return
 idle
 ```
 
+Drone ports are also code-driven. The default port charges docked drones, checks
+network ammo stock, creates a frontline delivery job, and dispatches an idle
+carrier:
+
+```text
+charge_docked_drones
+if stock_count ammo > 50 create_delivery_job ammo 10 frontline
+dispatch_idle_drones
+```
+
 Routers can make availability checks before moving items:
 
 ```text

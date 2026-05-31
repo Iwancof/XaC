@@ -93,6 +93,14 @@ interface drone-api {
   idle: func() -> bool;
 }
 
+interface drone-port-api {
+  stock-count: func(item-kind: string) -> s32;
+  charge-docked-drones: func() -> bool;
+  create-delivery-job: func(item-kind: string, amount: s32, dropoff-tag: string) -> bool;
+  dispatch-idle-drones: func() -> bool;
+  dispatch: func() -> bool;
+}
+
 world router-behavior {
   import common-api;
   import router-api;
@@ -113,6 +121,14 @@ world turret-behavior {
 world assembler-behavior {
   import common-api;
   import assembler-api;
+
+  export init: func();
+  export tick: func();
+}
+
+world drone-port-behavior {
+  import common-api;
+  import drone-port-api;
 
   export init: func();
   export tick: func();

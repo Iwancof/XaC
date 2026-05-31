@@ -59,6 +59,10 @@ enum HostImport {
     TurretAttackNearest,
     TurretAttackBest,
     DronePortDispatch,
+    DronePortStockCount,
+    DronePortChargeDockedDrones,
+    DronePortCreateDeliveryJob,
+    DronePortDispatchIdleDrones,
     DroneBatteryPercent,
     DroneLogicFuelRemaining,
     DroneHasJob,
@@ -115,6 +119,18 @@ impl HostImport {
             HostImport::DronePortDispatch => {
                 r#"  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))"#
             }
+            HostImport::DronePortStockCount => {
+                r#"  (import "xac:drone_port" "stock_count" (func $stock_count (param i32) (result i32)))"#
+            }
+            HostImport::DronePortChargeDockedDrones => {
+                r#"  (import "xac:drone_port" "charge_docked_drones" (func $charge_docked_drones (result i32)))"#
+            }
+            HostImport::DronePortCreateDeliveryJob => {
+                r#"  (import "xac:drone_port" "create_delivery_job" (func $create_delivery_job (param i32 i32 i32) (result i32)))"#
+            }
+            HostImport::DronePortDispatchIdleDrones => {
+                r#"  (import "xac:drone_port" "dispatch_idle_drones" (func $dispatch_idle_drones (result i32)))"#
+            }
             HostImport::DroneBatteryPercent => {
                 r#"  (import "xac:drone" "battery_percent" (func $battery_percent (result i32)))"#
             }
@@ -157,6 +173,7 @@ enum Condition {
     OutputItemAvailable { item: ItemKind, dir: Direction },
     CanProduce,
     AmmoGtZero,
+    StockCountGt { item: ItemKind, value: i32 },
     BatteryPercentLt { value: i32 },
     LogicFuelLt { value: u64 },
     HasJob,
@@ -173,17 +190,34 @@ enum ScriptAction {
     Mine,
     PushAny,
     PushDir(Direction),
-    PushItemDir { item: ItemKind, dir: Direction },
-    SetRecipe { recipe: ItemKind },
+    PushItemDir {
+        item: ItemKind,
+        dir: Direction,
+    },
+    SetRecipe {
+        recipe: ItemKind,
+    },
     Produce,
     AttackNearest,
-    AttackBest { policy: i32 },
+    AttackBest {
+        policy: i32,
+    },
     Dispatch,
+    ChargeDockedDrones,
+    CreateDeliveryJob {
+        item: ItemKind,
+        amount: i32,
+        dropoff_tag: i32,
+    },
+    DispatchIdleDrones,
     ReturnToPort,
     ClaimDeliveryJob,
     Deliver,
     Idle,
-    NetSet { key: i32, value: i32 },
+    NetSet {
+        key: i32,
+        value: i32,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -240,6 +274,13 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         )),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
+        ["if", "stock_count", item, ">", value, rest @ ..] => Ok((
+            Condition::StockCountGt {
+                item: parse_item_or_err(line_no, item)?,
+                value: parse_i32(line_no, "stock count threshold", value)?,
+            },
+            rest,
+        )),
         ["if", "battery_percent", "<", value, rest @ ..] => Ok((
             Condition::BatteryPercentLt {
                 value: parse_i32(line_no, "battery percent threshold", value)?,
@@ -339,6 +380,40 @@ fn parse_script_action(
             imports.insert(HostImport::DronePortDispatch);
             Ok(ScriptAction::Dispatch)
         }
+        ["charge_docked_drones"] => {
+            ensure_kind(
+                kind,
+                BehaviorKind::DronePort,
+                line_no,
+                "charge_docked_drones",
+            )?;
+            imports.insert(HostImport::DronePortChargeDockedDrones);
+            Ok(ScriptAction::ChargeDockedDrones)
+        }
+        ["create_delivery_job", item, amount, dropoff_tag] => {
+            ensure_kind(
+                kind,
+                BehaviorKind::DronePort,
+                line_no,
+                "create_delivery_job",
+            )?;
+            imports.insert(HostImport::DronePortCreateDeliveryJob);
+            Ok(ScriptAction::CreateDeliveryJob {
+                item: parse_item_or_err(line_no, item)?,
+                amount: parse_i32(line_no, "delivery amount", amount)?,
+                dropoff_tag: parse_dropoff_tag(line_no, dropoff_tag)?,
+            })
+        }
+        ["dispatch_idle_drones"] => {
+            ensure_kind(
+                kind,
+                BehaviorKind::DronePort,
+                line_no,
+                "dispatch_idle_drones",
+            )?;
+            imports.insert(HostImport::DronePortDispatchIdleDrones);
+            Ok(ScriptAction::DispatchIdleDrones)
+        }
         ["return_to_port"] => {
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "return_to_port")?;
             imports.insert(HostImport::DroneReturnToPort);
@@ -402,6 +477,10 @@ fn add_condition_import(
         Condition::AmmoGtZero => {
             ensure_kind(kind, BehaviorKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
+        }
+        Condition::StockCountGt { .. } => {
+            ensure_kind(kind, BehaviorKind::DronePort, line_no, "stock_count")?;
+            imports.insert(HostImport::DronePortStockCount);
         }
         Condition::BatteryPercentLt { .. } => {
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "battery_percent")?;
@@ -475,6 +554,17 @@ fn parse_item(item: &str) -> Option<ItemKind> {
         "cpu_part" | "cpu-part" => Some(ItemKind::CpuPart),
         "drone_part" | "drone-part" => Some(ItemKind::DronePart),
         _ => None,
+    }
+}
+
+fn parse_item_or_err(line_no: usize, item: &str) -> Result<ItemKind> {
+    parse_item(item).ok_or_else(|| anyhow!("line {line_no}: unknown item {item}"))
+}
+
+fn parse_dropoff_tag(line_no: usize, tag: &str) -> Result<i32> {
+    match tag {
+        "frontline" => Ok(0),
+        _ => Err(anyhow!("line {line_no}: unknown dropoff tag {tag}")),
     }
 }
 
@@ -557,6 +647,12 @@ fn render_condition(condition: Condition) -> String {
         }
         Condition::CanProduce => "(call $can_produce)".to_string(),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
+        Condition::StockCountGt { item, value } => {
+            format!(
+                "(i32.gt_s (call $stock_count (i32.const {})) (i32.const {value}))",
+                item_code(&item)
+            )
+        }
         Condition::BatteryPercentLt { value } => {
             format!("(i32.lt_s (call $battery_percent) (i32.const {value}))")
         }
@@ -603,6 +699,20 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
             policy
         )),
         ScriptAction::Dispatch => out.push(format!("{indent}(drop (call $dispatch))")),
+        ScriptAction::ChargeDockedDrones => {
+            out.push(format!("{indent}(drop (call $charge_docked_drones))"))
+        }
+        ScriptAction::CreateDeliveryJob {
+            item,
+            amount,
+            dropoff_tag,
+        } => out.push(format!(
+            "{indent}(drop (call $create_delivery_job (i32.const {}) (i32.const {amount}) (i32.const {dropoff_tag})))",
+            item_code(&item)
+        )),
+        ScriptAction::DispatchIdleDrones => {
+            out.push(format!("{indent}(drop (call $dispatch_idle_drones))"))
+        }
         ScriptAction::ReturnToPort => out.push(format!("{indent}(drop (call $return_to_port))")),
         ScriptAction::ClaimDeliveryJob => {
             out.push(format!("{indent}(drop (call $claim_delivery_job))"))

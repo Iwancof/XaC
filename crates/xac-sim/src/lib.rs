@@ -891,6 +891,10 @@ mod tests {
         sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
             .unwrap();
         let port_id = sim.selected_id.clone().unwrap();
+        let port_source = sim.open_behavior("builtin.drone_port.basic").unwrap();
+        assert!(port_source.source.contains("stock_count ammo"));
+        assert!(port_source.source.contains("create_delivery_job ammo"));
+        assert!(port_source.source.contains("dispatch_idle_drones"));
         sim.place_block(BlockKind::Turret, Pos { x: 42, y: 30 }, Direction::East)
             .unwrap();
         let turret_id = sim.selected_id.clone().unwrap();

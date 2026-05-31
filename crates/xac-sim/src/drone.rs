@@ -1,6 +1,7 @@
 use xac_core::{BehaviorKind, BlockKind, DeliveryJob, Drone, DroneState, Inventory, ItemKind};
-use xac_wasm::{BehaviorHostInput, BehaviorIntent, DroneCommand};
+use xac_wasm::{BehaviorHostInput, BehaviorIntent, DroneCommand, DronePortCommand};
 
+use crate::block_defs::can_accept_item;
 use crate::geometry::block_center;
 use crate::Simulation;
 
@@ -18,64 +19,164 @@ impl Simulation {
         }
     }
 
-    pub(crate) fn ensure_drone_and_job(&mut self, port_id: &str) {
-        let Some(port) = self.blocks.get(port_id).cloned() else {
-            return;
-        };
-        if !self.drones.values().any(|drone| drone.home_port == port_id) {
-            let id = self.make_id("drone");
-            self.drones.insert(
-                id.clone(),
-                Drone {
-                    id,
-                    home_port: port_id.to_string(),
-                    behavior_ref: Some("builtin.carrier_drone.basic".to_string()),
-                    pos: block_center(&port),
-                    battery: 100.0,
-                    logic_fuel: 1000,
-                    cargo: Inventory::with_capacity(20),
-                    state: DroneState::Docked,
-                    job: None,
-                },
-            );
+    pub(crate) fn apply_drone_port_commands(
+        &mut self,
+        port_id: &str,
+        commands: Vec<DronePortCommand>,
+    ) {
+        for command in commands {
+            match command {
+                DronePortCommand::AutoDispatch => self.ensure_drone_and_job(port_id),
+                DronePortCommand::ChargeDockedDrones => {
+                    self.charge_docked_drones_at_port(port_id);
+                }
+                DronePortCommand::CreateDeliveryJob {
+                    item,
+                    amount,
+                    dropoff_tag,
+                } => {
+                    self.create_delivery_job_from_port(port_id, item, amount, &dropoff_tag, 50);
+                }
+                DronePortCommand::DispatchIdleDrones => {
+                    self.dispatch_idle_drones_from_port(port_id);
+                }
+            }
         }
+    }
 
+    pub(crate) fn ensure_drone_and_job(&mut self, port_id: &str) {
+        self.ensure_carrier_drone(port_id);
         if !self.tick.is_multiple_of(60) {
             return;
         }
-        let Some(dropoff) = self
-            .blocks
-            .values()
-            .find(|b| b.kind == BlockKind::Turret && b.inventory.count(&ItemKind::Ammo) < 10)
-            .map(|b| b.id.clone())
-        else {
+        self.create_delivery_job_from_port(port_id, ItemKind::Ammo, 10, "frontline", 50);
+    }
+
+    fn ensure_carrier_drone(&mut self, port_id: &str) {
+        let Some(port) = self.blocks.get(port_id).cloned() else {
             return;
         };
-        if self.delivery_job_exists(&dropoff, &ItemKind::Ammo) {
+        if self.drones.values().any(|drone| drone.home_port == port_id) {
             return;
         }
-        let Some(pickup) = self
-            .blocks
+        let id = self.make_id("drone");
+        self.drones.insert(
+            id.clone(),
+            Drone {
+                id,
+                home_port: port_id.to_string(),
+                behavior_ref: Some("builtin.carrier_drone.basic".to_string()),
+                pos: block_center(&port),
+                battery: 100.0,
+                logic_fuel: 1000,
+                cargo: Inventory::with_capacity(20),
+                state: DroneState::Docked,
+                job: None,
+            },
+        );
+    }
+
+    fn charge_docked_drones_at_port(&mut self, port_id: &str) {
+        let drone_ids: Vec<_> = self
+            .drones
             .values()
-            .find(|b| {
-                matches!(
-                    b.kind,
-                    BlockKind::Storage | BlockKind::Core | BlockKind::Assembler
-                ) && b.inventory.count(&ItemKind::Ammo) >= 5
-            })
-            .map(|b| b.id.clone())
-        else {
-            return;
+            .filter(|drone| drone.home_port == port_id)
+            .map(|drone| drone.id.clone())
+            .collect();
+        for drone_id in drone_ids {
+            if self.drone_at_home(&drone_id) {
+                self.charge_docked_drone(&drone_id);
+            }
+        }
+    }
+
+    fn dispatch_idle_drones_from_port(&mut self, port_id: &str) {
+        self.ensure_carrier_drone(port_id);
+        let drone_ids: Vec<_> = self
+            .drones
+            .values()
+            .filter(|drone| drone.home_port == port_id && drone.job.is_none())
+            .map(|drone| drone.id.clone())
+            .collect();
+        for drone_id in drone_ids {
+            self.claim_drone_job(&drone_id);
+        }
+    }
+
+    fn create_delivery_job_from_port(
+        &mut self,
+        port_id: &str,
+        item: ItemKind,
+        amount: u32,
+        dropoff_tag: &str,
+        priority: i32,
+    ) -> bool {
+        if amount == 0 {
+            return false;
+        }
+        let Some(dropoff) = self.find_delivery_dropoff(&item, amount, dropoff_tag) else {
+            return false;
+        };
+        if self.delivery_job_exists(&dropoff, &item) {
+            return false;
+        }
+        let Some(pickup) = self.find_delivery_pickup(port_id, &item, amount) else {
+            return false;
         };
         let job_id = self.make_id("job");
         self.pending_jobs.push(DeliveryJob {
             id: job_id,
-            item: ItemKind::Ammo,
-            amount: 10,
+            item: item.clone(),
+            amount,
             pickup,
             dropoff,
-            priority: 50,
+            priority,
         });
+        if let Some(port) = self.blocks.get_mut(port_id) {
+            port.status = format!("queued {} delivery", item.as_str());
+        }
+        true
+    }
+
+    fn find_delivery_dropoff(
+        &self,
+        item: &ItemKind,
+        amount: u32,
+        dropoff_tag: &str,
+    ) -> Option<String> {
+        self.blocks
+            .values()
+            .find(|block| {
+                block.tags.iter().any(|tag| tag == dropoff_tag)
+                    && can_accept_item(block.kind, item)
+                    && block.inventory.count(item) < amount
+                    && block.inventory.has_space(amount)
+            })
+            .map(|block| block.id.clone())
+    }
+
+    fn find_delivery_pickup(&self, port_id: &str, item: &ItemKind, amount: u32) -> Option<String> {
+        let candidates: Vec<String> = self
+            .blocks
+            .get(port_id)
+            .and_then(|port| port.network_id)
+            .and_then(|network_id| self.networks.get(&network_id))
+            .map(|network| network.block_ids.clone())
+            .unwrap_or_else(|| vec![port_id.to_string()]);
+        candidates.into_iter().find(|id| {
+            self.blocks
+                .get(id)
+                .map(|block| {
+                    matches!(
+                        block.kind,
+                        BlockKind::Storage
+                            | BlockKind::Core
+                            | BlockKind::Assembler
+                            | BlockKind::DronePort
+                    ) && block.inventory.count(item) >= amount
+                })
+                .unwrap_or(false)
+        })
     }
 
     fn run_carrier_drone_behavior(&mut self, drone_id: &str) -> Option<DroneCommand> {
