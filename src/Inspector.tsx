@@ -1,4 +1,4 @@
-import { Box, Code2, Copy, GitBranch, Hammer, Save, Trash2 } from "lucide-react";
+import { Box, Code2, Copy, GitBranch, Hammer, RotateCw, Save, Trash2 } from "lucide-react";
 import type { BehaviorSource, Block, BuildResult, GameSnapshot } from "./types";
 
 interface InspectorProps {
@@ -13,6 +13,7 @@ interface InspectorProps {
   onBuild: () => void;
   onOpenBehavior: (behaviorId: string) => void;
   onDeconstruct: () => void;
+  onRotate: () => void;
 }
 
 export function Inspector({
@@ -26,7 +27,8 @@ export function Inspector({
   onSave,
   onBuild,
   onOpenBehavior,
-  onDeconstruct
+  onDeconstruct,
+  onRotate
 }: InspectorProps) {
   const selectedNetwork = selectedBlock?.network_id
     ? snapshot?.networks.find((network) => network.id === selectedBlock.network_id)
@@ -93,6 +95,10 @@ export function Inspector({
           )}
           {selectedBlock.kind !== "core" && (
             <div className="behavior-actions">
+              <button onClick={onRotate} title="Rotate selected block clockwise" aria-label="Rotate selected block">
+                <RotateCw size={16} />
+                Rotate
+              </button>
               <button className="danger" onClick={onDeconstruct} title="Deconstruct selected block">
                 <Trash2 size={16} />
                 Deconstruct

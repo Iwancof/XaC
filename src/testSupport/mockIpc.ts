@@ -79,6 +79,8 @@ mockIPC((cmd, args = {}) => {
       return placeBlock(args as { kind: BlockKind; x: number; y: number; dir: Direction });
     case "deconstruct_block":
       return deconstructBlock((args as { blockId?: string }).blockId ?? "");
+    case "rotate_block":
+      return rotateBlock((args as { blockId?: string }).blockId ?? "");
     case "select_entity":
       state.selectedId = (args as { id?: string | null }).id ?? null;
       return snapshot();
@@ -204,6 +206,17 @@ function deconstructBlock(blockId: string) {
     state.selectedId = null;
   }
   log("info", blockId, `deconstructed ${displayKind(block.kind)}`);
+  return snapshot();
+}
+
+function rotateBlock(blockId: string) {
+  const block = state.blocks.find((item) => item.id === blockId);
+  if (!block) {
+    throw new Error(`unknown block: ${blockId}`);
+  }
+  block.dir = rotateDirection(block.dir);
+  block.status = `facing ${block.dir}`;
+  log("info", blockId, `rotated ${displayKind(block.kind)} to ${block.dir}`);
   return snapshot();
 }
 
@@ -450,6 +463,16 @@ function step(pos: Pos, dir: Direction): Pos {
     west: { x: -1, y: 0 }
   };
   return { x: pos.x + delta[dir].x, y: pos.y + delta[dir].y };
+}
+
+function rotateDirection(dir: Direction): Direction {
+  const next: Record<Direction, Direction> = {
+    north: "east",
+    east: "south",
+    south: "west",
+    west: "north"
+  };
+  return next[dir];
 }
 
 function defaultBehaviorFor(kind: BlockKind) {

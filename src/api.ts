@@ -31,6 +31,10 @@ export function deconstructBlock(blockId: string) {
   return invoke<GameSnapshot>("deconstruct_block", { blockId });
 }
 
+export function rotateBlock(blockId: string) {
+  return invoke<GameSnapshot>("rotate_block", { blockId });
+}
+
 export function selectEntity(id: string | null) {
   return invoke<GameSnapshot>("select_entity", { id });
 }

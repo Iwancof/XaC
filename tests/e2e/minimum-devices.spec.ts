@@ -57,6 +57,14 @@ test("places minimum devices from the right block list and opens drill behavior"
   }
   await expect(page.locator(".metrics")).toContainText("blocks 22");
   await expect(page.locator(".inspector")).toContainText("conveyor");
+  const rotateSelectedBlock = page.getByRole("button", { name: "Rotate selected block", exact: true });
+  await rotateSelectedBlock.click();
+  await expect(page.locator(".inspector")).toContainText("facing south");
+  await expect(page.locator(".log-panel")).toContainText("rotated Conveyor to south");
+  await rotateSelectedBlock.click();
+  await rotateSelectedBlock.click();
+  await rotateSelectedBlock.click();
+  await expect(page.locator(".inspector")).toContainText("facing east");
 
   await page.getByRole("button", { name: /Ore Drill/ }).click();
   await expect(page.getByText("Placing drill")).toBeVisible();
@@ -129,6 +137,16 @@ mine
   expect(placeCalls.some((call) => call.args.kind === "wire" && call.args.x === 30 && call.args.y === 29)).toBe(true);
   expect(placeCalls.some((call) => call.args.kind === "conveyor" && call.args.x === 29 && call.args.y === 30)).toBe(true);
   expect(placeCalls.at(-1)?.args).toEqual({ kind: "drill", x: 20, y: 30, dir: "east" });
+
+  const rotateCalls = await page.evaluate(() => {
+    return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "rotate_block") ?? [];
+  });
+  expect(rotateCalls).toEqual([
+    { cmd: "rotate_block", args: { blockId: "conveyor_9" } },
+    { cmd: "rotate_block", args: { blockId: "conveyor_9" } },
+    { cmd: "rotate_block", args: { blockId: "conveyor_9" } },
+    { cmd: "rotate_block", args: { blockId: "conveyor_9" } }
+  ]);
 
   const deconstructCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "deconstruct_block") ?? [];

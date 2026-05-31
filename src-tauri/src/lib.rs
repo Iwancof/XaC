@@ -58,6 +58,15 @@ fn deconstruct_block(
 }
 
 #[tauri::command]
+fn rotate_block(
+    state: tauri::State<'_, AppState>,
+    block_id: String,
+) -> Result<GameSnapshot, String> {
+    let mut sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.rotate_block(&block_id).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn select_entity(
     state: tauri::State<'_, AppState>,
     id: Option<String>,
@@ -141,6 +150,7 @@ pub fn run() {
             advance,
             place_block,
             deconstruct_block,
+            rotate_block,
             select_entity,
             open_behavior,
             edit_builtin_copy,

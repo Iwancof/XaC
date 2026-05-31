@@ -6,6 +6,7 @@ import {
   Pause,
   Play,
   Radar,
+  RotateCw,
   Route,
   StepForward
 } from "lucide-react";
@@ -19,6 +20,7 @@ import {
   getSnapshot,
   openBehavior,
   placeBlock,
+  rotateBlock,
   saveBehavior,
   selectEntity,
   setRunning,
@@ -47,6 +49,13 @@ const OVERLAYS: Array<{ id: Overlay; label: string; icon: typeof Layers }> = [
   { id: "logistics", label: "Logistics", icon: Route },
   { id: "attack", label: "Attack", icon: Radar }
 ];
+
+const NEXT_DIRECTION: Record<Direction, Direction> = {
+  north: "east",
+  east: "south",
+  south: "west",
+  west: "north"
+};
 
 export function App() {
   const [snapshot, setSnapshot] = useState<GameSnapshot | null>(null);
@@ -191,6 +200,20 @@ export function App() {
     }
   };
 
+  const handleRotateSelected = async () => {
+    if (!selectedBlock) return;
+    try {
+      setSnapshot(await rotateBlock(selectedBlock.id));
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const rotatePlacementDirection = () => {
+    setDirection((current) => NEXT_DIRECTION[current]);
+  };
+
   const core = snapshot?.blocks.find((block) => block.kind === "core");
   const selectedBehaviorId = selectedBlock?.behavior_ref ?? null;
 
@@ -271,6 +294,14 @@ export function App() {
                 <option value="south">South</option>
                 <option value="west">West</option>
               </select>
+              <button
+                onClick={rotatePlacementDirection}
+                title="Rotate placement direction clockwise"
+                aria-label="Rotate placement direction"
+              >
+                <RotateCw size={16} />
+                Rotate
+              </button>
             </div>
           </section>
 
@@ -286,6 +317,7 @@ export function App() {
             onBuild={handleBuild}
             onOpenBehavior={loadBehavior}
             onDeconstruct={handleDeconstruct}
+            onRotate={handleRotateSelected}
           />
           <section className="editor-panel">
             <div className="panel-heading">

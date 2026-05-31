@@ -179,6 +179,22 @@ impl Simulation {
         Ok(self.snapshot())
     }
 
+    pub fn rotate_block(&mut self, block_id: &str) -> Result<GameSnapshot> {
+        let Some(block) = self.blocks.get_mut(block_id) else {
+            return Err(anyhow!("unknown block: {block_id}"));
+        };
+        block.dir = block.dir.rotate_cw();
+        let kind = block.kind;
+        let dir = block.dir;
+        block.status = format!("facing {dir:?}");
+        self.log(
+            LogLevel::Info,
+            block_id.to_string(),
+            format!("rotated {} to {dir:?}", kind_name(kind)),
+        );
+        Ok(self.snapshot())
+    }
+
     pub fn select_entity(&mut self, id: Option<EntityId>) -> GameSnapshot {
         self.selected_id = id;
         self.snapshot()
@@ -404,6 +420,40 @@ mod tests {
         let err = sim.deconstruct_block(&core_id).unwrap_err();
         assert!(err.to_string().contains("core cannot be deconstructed"));
         assert!(sim.blocks.contains_key(&core_id));
+    }
+
+    #[test]
+    fn rotating_conveyor_changes_logistics_direction() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Storage, Pos { x: 35, y: 30 }, Direction::East)
+            .unwrap();
+        let east_storage_id = sim.selected_id.clone().unwrap();
+        sim.place_block(BlockKind::Storage, Pos { x: 34, y: 31 }, Direction::East)
+            .unwrap();
+        let south_storage_id = sim.selected_id.clone().unwrap();
+        sim.place_block(BlockKind::Conveyor, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let conveyor_id = sim.selected_id.clone().unwrap();
+        sim.blocks
+            .get_mut(&conveyor_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ore, 1);
+
+        sim.rotate_block(&conveyor_id).unwrap();
+        assert_eq!(sim.blocks[&conveyor_id].dir, Direction::South);
+        sim.step_ticks(1);
+
+        assert_eq!(
+            sim.blocks[&east_storage_id].inventory.count(&ItemKind::Ore),
+            0
+        );
+        assert_eq!(
+            sim.blocks[&south_storage_id]
+                .inventory
+                .count(&ItemKind::Ore),
+            1
+        );
     }
 
     #[test]
