@@ -23,13 +23,8 @@ import type {
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
-const DRILL_SOURCE = `(module
-  (import "xac:drill" "output_blocked" (func $output_blocked (result i32)))
-  (import "xac:drill" "mine" (func $mine (result i32)))
-  (func (export "tick")
-    (if (i32.eqz (call $output_blocked))
-      (then
-        (drop (call $mine))))))
+const DRILL_SOURCE = `if output_blocked return
+mine
 `;
 
 type CommandCall = {
@@ -242,7 +237,7 @@ function copyBehavior(blockId: string, fork: boolean): BehaviorSource {
   }
 
   const id = makeId("behavior");
-  const sourcePath = `projects/default_project/blocks/${id}/src/behavior.wat`;
+  const sourcePath = `projects/default_project/blocks/${id}/src/behavior.xac`;
   state.behaviors[id] = {
     summary: {
       ...original.summary,
@@ -316,7 +311,7 @@ function builtinBehaviors(): Record<string, MutableBehavior> {
         world: "drill-behavior",
         builtin: true,
         used_by: 0,
-        source_path: "assets/builtin/drill/basic.wat",
+        source_path: "assets/builtin/drill/basic.xac",
         build_status: "builtin"
       },
       source: DRILL_SOURCE

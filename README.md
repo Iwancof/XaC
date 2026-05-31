@@ -6,7 +6,7 @@ The current implementation is a vertical slice:
 
 - Tauri v2 desktop shell
 - Rust fixed-tick simulation and Tauri IPC
-- WAT-to-Wasm behavior compilation with Wasmtime fuel budgeting
+- XaC Script / WAT-to-Wasm behavior compilation with Wasmtime fuel budgeting
 - Host-imported block APIs for behaviors such as drill `mine`
 - React/TypeScript IDE UI
 - PixiJS grid rendering and overlays
@@ -46,11 +46,19 @@ desktop workspace or launching a Tauri window.
 ## MVP Notes
 
 The WIT draft lives at `assets/wit/xac.mvp.wit`. The current vertical slice
-accepts WebAssembly Text (`.wat`) behavior source, compiles it to Wasm with
+accepts short XaC Script behavior source such as:
+
+```text
+if output_blocked return
+mine
+```
+
+The backend lowers that source to WebAssembly Text, compiles it to Wasm with
 Wasmtime, links a small host API surface such as `xac:drill/mine`, and runs
 each `tick()` with fuel derived from the block's effective network CPU rate.
-The older `tick() -> i32` action-code ABI remains as a compatibility fallback;
-new built-ins call host imports so player code can exercise real block
+Raw WebAssembly Text (`.wat`) is still accepted for lower-level tests and power
+users. The older `tick() -> i32` action-code ABI remains as a compatibility
+fallback; new built-ins call host imports so player code can exercise real block
 capabilities. The current map model supports a 4x4 Core footprint, wire-backed
 CPU networks, and non-grid-bound enemy/drone positions.
 

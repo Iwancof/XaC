@@ -77,10 +77,8 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".behavior-meta")).toContainText("Basic Drill");
   await expect(page.locator(".behavior-meta")).toContainText("builtin.drill.basic");
   await expect(page.locator(".behavior-meta")).toContainText("read-only preset");
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /\(module/);
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /xac:drill/);
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /\(call \$output_blocked\)/);
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /\(call \$mine\)/);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /if output_blocked return/);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /mine/);
 
   const placeCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "place_block") ?? [];

@@ -169,7 +169,7 @@ impl Simulation {
             .config_root
             .join("projects/default_project/blocks")
             .join(&new_id)
-            .join("src/behavior.wat")
+            .join("src/behavior.xac")
             .to_string_lossy()
             .to_string();
         let summary = BehaviorSummary {
@@ -217,7 +217,7 @@ impl Simulation {
             .config_root
             .join("projects/default_project/blocks")
             .join(&new_id)
-            .join("src/behavior.wat")
+            .join("src/behavior.xac")
             .to_string_lossy()
             .to_string();
         let summary = BehaviorSummary {
@@ -844,10 +844,8 @@ mod tests {
         assert_eq!(drill.behavior_ref.as_deref(), Some("builtin.drill.basic"));
 
         let source = sim.open_behavior("builtin.drill.basic").unwrap();
-        assert!(source.source.contains("(module"));
-        assert!(source.source.contains(r#"(export "tick")"#));
-        assert!(source.source.contains(r#"(import "xac:drill" "mine""#));
-        assert!(source.source.contains(r#"(call $output_blocked)"#));
+        assert!(source.source.contains("if output_blocked return"));
+        assert!(source.source.contains("mine"));
 
         let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
         let starting_core_ore = sim.blocks[&core_id].inventory.count(&ItemKind::Ore);
@@ -882,7 +880,7 @@ mod tests {
 
         let result = sim.build_behavior(&behavior_id).unwrap();
         assert!(!result.success);
-        assert!(result.message.contains("parse behavior WAT"));
+        assert!(result.message.contains("parse behavior source as WAT"));
     }
 
     #[test]

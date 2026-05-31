@@ -4,6 +4,9 @@ use sha2::{Digest, Sha256};
 use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
 use xac_core::{BlockKind, Direction, EnemyKind};
 
+mod script;
+use script::{compile_xac_script, is_wat_source};
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BehaviorIntent {
     Noop,
@@ -95,7 +98,8 @@ impl BehaviorRuntime {
     }
 
     pub fn compile_wat(&self, kind: BlockKind, source: &str) -> Result<CompiledBehavior> {
-        let wasm = wat::parse_str(source).context("parse behavior WAT")?;
+        let wat_source = compile_source_to_wat(kind, source)?;
+        let wasm = wat::parse_str(&wat_source).context("parse behavior source as WAT")?;
         let wasm_hash = hash_bytes(&wasm);
         let module = Module::new(&self.engine, &wasm).context("compile behavior wasm")?;
 
@@ -318,8 +322,22 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     Ok(())
 }
 
+pub fn compile_source_to_wat(kind: BlockKind, source: &str) -> Result<String> {
+    if is_wat_source(source) {
+        Ok(source.to_string())
+    } else {
+        compile_xac_script(kind, source).map_err(|error| anyhow!("compile XaC script: {error}"))
+    }
+}
+
 pub fn hash_wasm_source(source: &str) -> Result<String> {
     let wasm = wat::parse_str(source).context("parse behavior WAT")?;
+    Ok(hash_bytes(&wasm))
+}
+
+pub fn hash_behavior_source(kind: BlockKind, source: &str) -> Result<String> {
+    let wat_source = compile_source_to_wat(kind, source)?;
+    let wasm = wat::parse_str(&wat_source).context("parse behavior source as WAT")?;
     Ok(hash_bytes(&wasm))
 }
 
@@ -494,6 +512,43 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn compiles_xac_script_to_host_imported_wasm() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = r#"
+            # short player-facing drill code
+            if output_blocked return
+            mine
+        "#;
+        let wat = compile_source_to_wat(BlockKind::Drill, source).unwrap();
+        assert!(wat.contains(r#"(import "xac:drill" "mine""#));
+        assert!(wat.contains("(call $output_blocked)"));
+
+        let compiled = runtime.compile_wat(BlockKind::Drill, source).unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                30,
+                BehaviorHostInput {
+                    output_blocked: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn xac_script_rejects_wrong_block_capability() {
+        let err = compile_source_to_wat(BlockKind::Turret, "mine").unwrap_err();
+        assert!(err.to_string().contains("only available to Drill"));
     }
 
     #[test]
