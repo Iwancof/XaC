@@ -782,6 +782,33 @@ mod tests {
     }
 
     #[test]
+    fn assembler_script_uses_output_count_to_switch_recipe_goal() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let assembler_id = sim.selected_id.clone().unwrap();
+        assign_script(
+            &mut sim,
+            &assembler_id,
+            "set_recipe plate\nif output_count ammo < 5 set_recipe ammo\nif can_produce produce",
+        );
+        {
+            let assembler = sim.blocks.get_mut(&assembler_id).unwrap();
+            assembler.inventory.add(ItemKind::Ammo, 5);
+            assembler.inventory.add(ItemKind::Ore, 2);
+        }
+
+        sim.step_ticks(80);
+
+        let assembler = &sim.blocks[&assembler_id];
+        assert_eq!(assembler.recipe.as_deref(), Some("plate"));
+        assert!(
+            assembler.inventory.count(&ItemKind::Plate) > 0,
+            "custom assembler code should read output_count and choose plate when ammo is stocked"
+        );
+    }
+
+    #[test]
     fn turret_builtin_calls_host_api_and_attacks_enemy() {
         let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)

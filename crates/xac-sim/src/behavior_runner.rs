@@ -81,6 +81,12 @@ impl Simulation {
         let Some(block) = self.blocks.get(block_id) else {
             return BehaviorHostInput::default();
         };
+        let block_inventory_counts: BTreeMap<ItemKind, i32> = block
+            .inventory
+            .items
+            .iter()
+            .map(|(item, amount)| (item.clone(), i32::try_from(*amount).unwrap_or(i32::MAX)))
+            .collect();
         BehaviorHostInput {
             output_blocked: self.output_blocked(block_id),
             can_produce: self.can_produce(block_id),
@@ -88,6 +94,8 @@ impl Simulation {
                 self.can_progress_recipe(block_id, ItemKind::Plate.as_str()),
                 self.can_progress_recipe(block_id, ItemKind::Ammo.as_str()),
             ],
+            assembler_input_counts: block_inventory_counts.clone(),
+            assembler_output_counts: block_inventory_counts,
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
             router_output_available: Direction::all()
                 .map(|dir| self.output_available(block_id, dir)),

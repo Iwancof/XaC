@@ -1,2 +1,3 @@
-set_recipe ammo
+set_recipe plate
+if output_count ammo < 100 set_recipe ammo
 if can_produce produce

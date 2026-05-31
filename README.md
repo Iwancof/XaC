@@ -69,7 +69,15 @@ if fuel_remaining > 12 mine
 
 Assembler production reads `assets/recipes.toml`; `set_recipe ammo` records an
 explicit recipe goal on the block and can build missing intermediate plate from
-the same recipe table.
+the same recipe table. Assembler scripts can branch on local inventory before
+choosing a recipe:
+
+```text
+set_recipe plate
+if output_count ammo < 100 set_recipe ammo
+if can_produce produce
+```
+
 Script can also touch the shared network store through integer keys:
 
 ```text

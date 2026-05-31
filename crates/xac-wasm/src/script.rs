@@ -54,6 +54,8 @@ enum HostImport {
     RouterOutputItemAvailable,
     AssemblerSetRecipe,
     AssemblerCanProduce,
+    AssemblerInputCount,
+    AssemblerOutputCount,
     AssemblerProduce,
     TurretAmmoCount,
     TurretAttackNearest,
@@ -103,6 +105,12 @@ impl HostImport {
             }
             HostImport::AssemblerCanProduce => {
                 r#"  (import "xac:assembler" "can_produce" (func $can_produce (result i32)))"#
+            }
+            HostImport::AssemblerInputCount => {
+                r#"  (import "xac:assembler" "input_count" (func $input_count (param i32) (result i32)))"#
+            }
+            HostImport::AssemblerOutputCount => {
+                r#"  (import "xac:assembler" "output_count" (func $output_count (param i32) (result i32)))"#
             }
             HostImport::AssemblerProduce => {
                 r#"  (import "xac:assembler" "produce" (func $produce (result i32)))"#
@@ -170,17 +178,54 @@ impl HostImport {
 enum Condition {
     OutputBlocked,
     OutputAvailable(Direction),
-    OutputItemAvailable { item: ItemKind, dir: Direction },
+    OutputItemAvailable {
+        item: ItemKind,
+        dir: Direction,
+    },
     CanProduce,
+    AssemblerInputCount {
+        item: ItemKind,
+        comparison: CountComparison,
+        value: i32,
+    },
+    AssemblerOutputCount {
+        item: ItemKind,
+        comparison: CountComparison,
+        value: i32,
+    },
     AmmoGtZero,
-    StockCountGt { item: ItemKind, value: i32 },
-    BatteryPercentLt { value: i32 },
-    LogicFuelLt { value: u64 },
+    StockCountGt {
+        item: ItemKind,
+        value: i32,
+    },
+    BatteryPercentLt {
+        value: i32,
+    },
+    LogicFuelLt {
+        value: u64,
+    },
     HasJob,
     HasPendingJob,
-    FuelGt { value: u64 },
-    NetGt { key: i32, value: i32 },
-    NetEq { key: i32, value: i32 },
+    FuelGt {
+        value: u64,
+    },
+    NetGt {
+        key: i32,
+        value: i32,
+    },
+    NetEq {
+        key: i32,
+        value: i32,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+enum CountComparison {
+    Lt,
+    Le,
+    Eq,
+    Ge,
+    Gt,
 }
 
 #[derive(Clone, Debug)]
@@ -273,6 +318,22 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
             rest,
         )),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
+        ["if", "input_count", item, comparison, value, rest @ ..] => Ok((
+            Condition::AssemblerInputCount {
+                item: parse_item_or_err(line_no, item)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "input count threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "output_count", item, comparison, value, rest @ ..] => Ok((
+            Condition::AssemblerOutputCount {
+                item: parse_item_or_err(line_no, item)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "output count threshold", value)?,
+            },
+            rest,
+        )),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
         ["if", "stock_count", item, ">", value, rest @ ..] => Ok((
             Condition::StockCountGt {
@@ -474,6 +535,14 @@ fn add_condition_import(
             ensure_kind(kind, BehaviorKind::Assembler, line_no, "can_produce")?;
             imports.insert(HostImport::AssemblerCanProduce);
         }
+        Condition::AssemblerInputCount { .. } => {
+            ensure_kind(kind, BehaviorKind::Assembler, line_no, "input_count")?;
+            imports.insert(HostImport::AssemblerInputCount);
+        }
+        Condition::AssemblerOutputCount { .. } => {
+            ensure_kind(kind, BehaviorKind::Assembler, line_no, "output_count")?;
+            imports.insert(HostImport::AssemblerOutputCount);
+        }
         Condition::AmmoGtZero => {
             ensure_kind(kind, BehaviorKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
@@ -568,6 +637,19 @@ fn parse_dropoff_tag(line_no: usize, tag: &str) -> Result<i32> {
     }
 }
 
+fn parse_count_comparison(line_no: usize, comparison: &str) -> Result<CountComparison> {
+    match comparison {
+        "<" => Ok(CountComparison::Lt),
+        "<=" => Ok(CountComparison::Le),
+        "==" => Ok(CountComparison::Eq),
+        ">=" => Ok(CountComparison::Ge),
+        ">" => Ok(CountComparison::Gt),
+        _ => Err(anyhow!(
+            "line {line_no}: unknown count comparison {comparison}"
+        )),
+    }
+}
+
 fn parse_attack_policy(line_no: usize, policies: &[&str]) -> Result<i32> {
     let mut codes = Vec::new();
     for raw_policy in policies {
@@ -646,6 +728,16 @@ fn render_condition(condition: Condition) -> String {
             )
         }
         Condition::CanProduce => "(call $can_produce)".to_string(),
+        Condition::AssemblerInputCount {
+            item,
+            comparison,
+            value,
+        } => render_count_condition("input_count", &item, comparison, value),
+        Condition::AssemblerOutputCount {
+            item,
+            comparison,
+            value,
+        } => render_count_condition("output_count", &item, comparison, value),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
         Condition::StockCountGt { item, value } => {
             format!(
@@ -671,6 +763,25 @@ fn render_condition(condition: Condition) -> String {
             format!("(i32.eq (call $net_get_i32 (i32.const {key})) (i32.const {value}))")
         }
     }
+}
+
+fn render_count_condition(
+    function_name: &str,
+    item: &ItemKind,
+    comparison: CountComparison,
+    value: i32,
+) -> String {
+    let op = match comparison {
+        CountComparison::Lt => "i32.lt_s",
+        CountComparison::Le => "i32.le_s",
+        CountComparison::Eq => "i32.eq",
+        CountComparison::Ge => "i32.ge_s",
+        CountComparison::Gt => "i32.gt_s",
+    };
+    format!(
+        "({op} (call ${function_name} (i32.const {})) (i32.const {value}))",
+        item_code(item)
+    )
 }
 
 fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {

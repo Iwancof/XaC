@@ -82,6 +82,8 @@ pub struct BehaviorHostInput {
     pub output_blocked: bool,
     pub can_produce: bool,
     pub assembler_can_produce: [bool; 2],
+    pub assembler_input_counts: BTreeMap<ItemKind, i32>,
+    pub assembler_output_counts: BTreeMap<ItemKind, i32>,
     pub ammo_count: i32,
     pub router_output_available: [bool; 4],
     pub router_item_output_available: BTreeMap<ItemKind, [bool; 4]>,
@@ -126,6 +128,7 @@ mod host_cost {
     pub const SET_RECIPE: u64 = 2;
     pub const CAN_PRODUCE: u64 = 1;
     pub const PRODUCE: u64 = 2;
+    pub const ASSEMBLER_COUNT: u64 = 1;
     pub const AMMO_COUNT: u64 = 1;
     pub const ATTACK_NEAREST: u64 = 4;
     pub const ATTACK_BEST: u64 = 8;
@@ -445,6 +448,44 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             } else {
                 0
             }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:assembler",
+        "input_count",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::ASSEMBLER_COUNT) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .assembler_input_counts
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:assembler",
+        "output_count",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::ASSEMBLER_COUNT) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .assembler_output_counts
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
         },
     )?;
     linker.func_wrap(
@@ -1222,6 +1263,54 @@ mod tests {
             eval.intent,
             BehaviorIntent::Router { item, preferred }
                 if item == Some(ItemKind::Ammo) && preferred == vec![Direction::East]
+        ));
+    }
+
+    #[test]
+    fn xac_script_can_select_assembler_recipe_from_inventory_counts() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = r#"
+            set_recipe plate
+            if output_count ammo < 5 set_recipe ammo
+            if can_produce produce
+        "#;
+        let wat = compile_source_to_wat(BehaviorKind::Assembler, source).unwrap();
+        assert!(wat.contains(r#""output_count""#));
+
+        let compiled = runtime
+            .compile_wat(BehaviorKind::Assembler, source)
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    assembler_can_produce: [true, true],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
+        ));
+
+        let mut output_counts = BTreeMap::new();
+        output_counts.insert(ItemKind::Ammo, 5);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    assembler_can_produce: [true, true],
+                    assembler_output_counts: output_counts,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Plate
         ));
     }
 

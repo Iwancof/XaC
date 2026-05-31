@@ -44,6 +44,8 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "output_blocked",
         "output_available",
         "can_produce",
+        "input_count",
+        "output_count",
         "ammo_count",
         "fuel_remaining",
         "battery_percent",

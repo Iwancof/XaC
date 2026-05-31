@@ -55,6 +55,8 @@ pub(crate) fn next_recipe_for_goal(block: &Block, goal: Option<&str>) -> Option<
                     return Some(prerequisite);
                 }
             }
+
+            return None;
         }
     }
 
