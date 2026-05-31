@@ -6,7 +6,11 @@ use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
 use xac_core::{BlockKind, Direction, EnemyKind, ItemKind};
 
 mod script;
-use script::{compile_xac_script, is_wat_source};
+use script::{
+    compile_xac_script, is_wat_source, ATTACK_POLICY_ARMORED, ATTACK_POLICY_GRUNT,
+    ATTACK_POLICY_LOWEST_HP, ATTACK_POLICY_NEAREST, ATTACK_POLICY_RUNNER,
+    ATTACK_POLICY_WIRE_CUTTER,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BehaviorIntent {
@@ -401,10 +405,8 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if caller.data().input.ammo_count <= 0 {
                 return 0;
             }
-            let priority = if policy == 1 {
-                vec![TargetRule::LowestHp, TargetRule::Nearest]
-            } else {
-                vec![TargetRule::Nearest]
+            let Some(priority) = attack_policy_to_rules(policy) else {
+                return 0;
             };
             caller.data_mut().intent = BehaviorIntent::Turret { priority };
             1
@@ -519,6 +521,37 @@ fn action_code_to_intent(kind: BlockKind, action_code: i32) -> Result<BehaviorIn
             "behavior returned invalid action code {code} for {kind:?}"
         )),
     }
+}
+
+fn attack_policy_to_rules(policy: i32) -> Option<Vec<TargetRule>> {
+    if policy == 1 {
+        return Some(vec![TargetRule::LowestHp, TargetRule::Nearest]);
+    }
+    if policy <= 0 {
+        return Some(vec![TargetRule::Nearest]);
+    }
+
+    let mut encoded = policy as u32;
+    let mut rules = Vec::new();
+    while encoded > 0 {
+        let code = (encoded & 0x0f) as i32;
+        let rule = match code {
+            ATTACK_POLICY_NEAREST => TargetRule::Nearest,
+            ATTACK_POLICY_LOWEST_HP => TargetRule::LowestHp,
+            ATTACK_POLICY_RUNNER => TargetRule::Kind(EnemyKind::Runner),
+            ATTACK_POLICY_WIRE_CUTTER => TargetRule::Kind(EnemyKind::WireCutter),
+            ATTACK_POLICY_ARMORED => TargetRule::Kind(EnemyKind::Armored),
+            ATTACK_POLICY_GRUNT => TargetRule::Kind(EnemyKind::Grunt),
+            _ => return None,
+        };
+        rules.push(rule);
+        encoded >>= 4;
+    }
+
+    if rules.is_empty() {
+        rules.push(TargetRule::Nearest);
+    }
+    Some(rules)
 }
 
 fn router_dir(dir: Direction) -> Result<BehaviorIntent> {
@@ -743,7 +776,7 @@ mod tests {
         let eval = runtime
             .evaluate_compiled(
                 &compiled,
-                50,
+                120,
                 BehaviorHostInput {
                     ammo_count: 3,
                     net_writable: true,
@@ -758,6 +791,40 @@ mod tests {
             BehaviorIntent::Turret { priority } if matches!(
                 priority.as_slice(),
                 [TargetRule::LowestHp, TargetRule::Nearest]
+            )
+        ));
+    }
+
+    #[test]
+    fn xac_script_attack_best_accepts_enemy_kind_priority() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BlockKind::Turret,
+                "if ammo_count > 0 attack_best runner wire_cutter armored nearest",
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    ammo_count: 3,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Turret { priority } if matches!(
+                priority.as_slice(),
+                [
+                    TargetRule::Kind(EnemyKind::Runner),
+                    TargetRule::Kind(EnemyKind::WireCutter),
+                    TargetRule::Kind(EnemyKind::Armored),
+                    TargetRule::Nearest
+                ]
             )
         ));
     }

@@ -775,6 +775,67 @@ mod tests {
     }
 
     #[test]
+    fn turret_priority_script_targets_wire_cutter_before_nearest_grunt() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+        assign_script(
+            &mut sim,
+            &turret_id,
+            "if ammo_count > 0 attack_best wire_cutter runner armored nearest",
+        );
+        sim.blocks
+            .get_mut(&turret_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ammo, 3);
+        sim.fuel_banks.insert(turret_id.clone(), 100.0);
+
+        let grunt_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            grunt_id.clone(),
+            Enemy {
+                id: grunt_id.clone(),
+                kind: EnemyKind::Grunt,
+                pos: WorldPos { x: 35.5, y: 32.5 },
+                hp: 30,
+                max_hp: 30,
+                speed_ticks: 8,
+                move_cooldown: 0,
+                move_speed: 0.0,
+                target_id: None,
+            },
+        );
+        let cutter_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            cutter_id.clone(),
+            Enemy {
+                id: cutter_id.clone(),
+                kind: EnemyKind::WireCutter,
+                pos: WorldPos { x: 38.5, y: 32.5 },
+                hp: 38,
+                max_hp: 38,
+                speed_ticks: 5,
+                move_cooldown: 0,
+                move_speed: 0.0,
+                target_id: None,
+            },
+        );
+
+        sim.step_ticks(1);
+
+        assert_eq!(
+            sim.enemies[&grunt_id].hp, 30,
+            "nearest grunt should not be targeted while a prioritized wire_cutter is in range"
+        );
+        assert!(
+            sim.enemies[&cutter_id].hp < 38,
+            "custom turret code should prioritize wire_cutter before nearest"
+        );
+    }
+
+    #[test]
     fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
         let mut sim = test_sim("sim");
         let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();

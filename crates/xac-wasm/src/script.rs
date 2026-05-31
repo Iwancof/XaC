@@ -2,6 +2,13 @@ use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
 use xac_core::{BlockKind, Direction, ItemKind};
 
+pub(crate) const ATTACK_POLICY_NEAREST: i32 = 2;
+pub(crate) const ATTACK_POLICY_LOWEST_HP: i32 = 3;
+pub(crate) const ATTACK_POLICY_RUNNER: i32 = 4;
+pub(crate) const ATTACK_POLICY_WIRE_CUTTER: i32 = 5;
+pub(crate) const ATTACK_POLICY_ARMORED: i32 = 6;
+pub(crate) const ATTACK_POLICY_GRUNT: i32 = 7;
+
 pub(crate) fn is_wat_source(source: &str) -> bool {
     source
         .lines()
@@ -126,7 +133,7 @@ enum ScriptAction {
     SetRecipe { recipe: ItemKind },
     Produce,
     AttackNearest,
-    AttackBest { lowest_hp: bool },
+    AttackBest { policy: i32 },
     Dispatch,
     NetSet { key: i32, value: i32 },
 }
@@ -244,11 +251,11 @@ fn parse_script_action(
             imports.insert(HostImport::TurretAttackNearest);
             Ok(ScriptAction::AttackNearest)
         }
-        ["attack_best", policy] => {
+        ["attack_best", policies @ ..] if !policies.is_empty() => {
             ensure_kind(kind, BlockKind::Turret, line_no, "attack_best")?;
             imports.insert(HostImport::TurretAttackBest);
             Ok(ScriptAction::AttackBest {
-                lowest_hp: parse_attack_policy(line_no, policy)?,
+                policy: parse_attack_policy(line_no, policies)?,
             })
         }
         ["dispatch"] => {
@@ -329,12 +336,41 @@ fn parse_recipe(line_no: usize, recipe: &str) -> Result<ItemKind> {
     }
 }
 
-fn parse_attack_policy(line_no: usize, policy: &str) -> Result<bool> {
-    match policy {
-        "lowest_hp" | "weakest" => Ok(true),
-        "nearest" => Ok(false),
-        _ => Err(anyhow!("line {line_no}: unknown attack policy {policy}")),
+fn parse_attack_policy(line_no: usize, policies: &[&str]) -> Result<i32> {
+    let mut codes = Vec::new();
+    for raw_policy in policies {
+        for policy in raw_policy
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        {
+            let code = match policy {
+                "nearest" => ATTACK_POLICY_NEAREST,
+                "lowest_hp" | "weakest" => ATTACK_POLICY_LOWEST_HP,
+                "runner" => ATTACK_POLICY_RUNNER,
+                "wire_cutter" | "wire-cutter" => ATTACK_POLICY_WIRE_CUTTER,
+                "armored" => ATTACK_POLICY_ARMORED,
+                "grunt" => ATTACK_POLICY_GRUNT,
+                _ => return Err(anyhow!("line {line_no}: unknown attack policy {policy}")),
+            };
+            codes.push(code);
+        }
     }
+    if !codes.contains(&ATTACK_POLICY_NEAREST) {
+        codes.push(ATTACK_POLICY_NEAREST);
+    }
+    encode_attack_policy(line_no, &codes)
+}
+
+fn encode_attack_policy(line_no: usize, codes: &[i32]) -> Result<i32> {
+    let mut encoded = 0_i32;
+    for (index, code) in codes.iter().enumerate() {
+        if index >= 7 {
+            return Err(anyhow!("line {line_no}: attack policy is too long"));
+        }
+        encoded |= *code << (index * 4);
+    }
+    Ok(encoded)
 }
 
 fn parse_i32(line_no: usize, label: &str, value: &str) -> Result<i32> {
@@ -400,9 +436,9 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
         )),
         ScriptAction::Produce => out.push(format!("{indent}(drop (call $produce))")),
         ScriptAction::AttackNearest => out.push(format!("{indent}(drop (call $attack_nearest))")),
-        ScriptAction::AttackBest { lowest_hp } => out.push(format!(
+        ScriptAction::AttackBest { policy } => out.push(format!(
             "{indent}(drop (call $attack_best (i32.const {})))",
-            if lowest_hp { 1 } else { 0 }
+            policy
         )),
         ScriptAction::Dispatch => out.push(format!("{indent}(drop (call $dispatch))")),
         ScriptAction::NetSet { key, value } => out.push(format!(

@@ -77,6 +77,12 @@ net_set 7 42
 if net 7 == 42 attack_best lowest_hp
 ```
 
+Turret scripts can prioritize enemy kinds directly:
+
+```text
+if ammo_count > 0 attack_best wire_cutter runner armored nearest
+```
+
 Routers can make availability checks before moving items:
 
 ```text
