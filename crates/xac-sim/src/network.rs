@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use xac_core::{BlockKind, Direction, Network};
+use xac_core::{BlockKind, Direction, DroneState, Network};
 
 use crate::geometry::footprint_positions;
 use crate::Simulation;
@@ -44,7 +44,8 @@ impl Simulation {
                 .iter()
                 .filter_map(|id| self.blocks.get(id))
                 .filter(|b| b.kind.is_programmable())
-                .count() as u32;
+                .count() as u32
+                + self.docked_drone_count_in_network(&block_ids);
             let effective_per_device = if active_devices > 0 {
                 cpu_pool / active_devices as f32
             } else {
@@ -101,6 +102,18 @@ impl Simulation {
             }
         }
         block_ids.into_iter().collect()
+    }
+
+    fn docked_drone_count_in_network(&self, block_ids: &[String]) -> u32 {
+        self.drones
+            .values()
+            .filter(|drone| {
+                drone.state == DroneState::Docked
+                    && block_ids
+                        .iter()
+                        .any(|block_id| block_id == &drone.home_port)
+            })
+            .count() as u32
     }
 }
 

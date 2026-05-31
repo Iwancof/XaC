@@ -143,30 +143,8 @@ impl Simulation {
         }
 
         self.blocks.remove(block_id);
-        self.fuel_banks.remove(block_id);
         self.set_tile_footprint(block.kind, block.pos, None);
-        self.pending_jobs
-            .retain(|job| job.pickup != block_id && job.dropoff != block_id);
-        let removed_home_drones: Vec<_> = self
-            .drones
-            .values()
-            .filter(|drone| drone.home_port == block_id)
-            .map(|drone| drone.id.clone())
-            .collect();
-        for drone_id in removed_home_drones {
-            self.drones.remove(&drone_id);
-        }
-        for drone in self.drones.values_mut() {
-            if drone
-                .job
-                .as_ref()
-                .map(|job| job.pickup == block_id || job.dropoff == block_id)
-                .unwrap_or(false)
-            {
-                drone.job = None;
-                drone.state = xac_core::DroneState::Returning;
-            }
-        }
+        self.remove_block_references(block_id);
         if self.selected_id.as_deref() == Some(block_id) {
             self.selected_id = None;
         }
@@ -303,8 +281,8 @@ impl Simulation {
             .collect();
         for (id, kind, pos) in destroyed_blocks {
             self.blocks.remove(&id);
-            self.fuel_banks.remove(&id);
             self.set_tile_footprint(kind, pos, None);
+            self.remove_block_references(&id);
             self.log(LogLevel::Warn, id, "block destroyed".to_string());
         }
         self.recompute_networks();
@@ -358,6 +336,33 @@ impl Simulation {
         }
     }
 
+    fn remove_block_references(&mut self, block_id: &str) {
+        self.fuel_banks.remove(block_id);
+        self.pending_jobs
+            .retain(|job| job.pickup != block_id && job.dropoff != block_id);
+        let removed_home_drones: Vec<_> = self
+            .drones
+            .values()
+            .filter(|drone| drone.home_port == block_id)
+            .map(|drone| drone.id.clone())
+            .collect();
+        for drone_id in removed_home_drones {
+            self.drones.remove(&drone_id);
+            self.fuel_banks.remove(&drone_id);
+        }
+        for drone in self.drones.values_mut() {
+            if drone
+                .job
+                .as_ref()
+                .map(|job| job.pickup == block_id || job.dropoff == block_id)
+                .unwrap_or(false)
+            {
+                drone.job = None;
+                drone.state = xac_core::DroneState::Returning;
+            }
+        }
+    }
+
     fn log(&mut self, level: LogLevel, source: impl Into<String>, message: String) {
         self.logs.push_back(LogEntry {
             tick: self.tick,
@@ -378,7 +383,7 @@ mod tests {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
-    use xac_core::{DroneState, WorldPos};
+    use xac_core::{BehaviorKind, BehaviorSummary, DroneState, Inventory, WorldPos};
 
     static TEST_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1111,6 +1116,116 @@ mod tests {
     }
 
     #[test]
+    fn docked_carrier_drone_banks_wasm_fuel_from_home_network_cpu() {
+        fn setup(port_pos: Pos, turret_pos: Pos) -> (Simulation, EntityId) {
+            let mut sim = test_sim("sim");
+            let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+            sim.place_block(BlockKind::DronePort, port_pos, Direction::East)
+                .unwrap();
+            let port_id = sim.selected_id.clone().unwrap();
+            sim.blocks.get_mut(&port_id).unwrap().behavior_ref = None;
+            sim.place_block(BlockKind::Turret, turret_pos, Direction::East)
+                .unwrap();
+            let turret_id = sim.selected_id.clone().unwrap();
+            let behavior_id = install_test_drone_behavior(&mut sim);
+            let drone_id = sim.make_id("drone");
+            let port = sim.blocks[&port_id].clone();
+            sim.drones.insert(
+                drone_id.clone(),
+                Drone {
+                    id: drone_id.clone(),
+                    home_port: port_id,
+                    behavior_ref: Some(behavior_id),
+                    pos: geometry::block_center(&port),
+                    battery: 100.0,
+                    logic_fuel: 1000,
+                    cargo: Inventory::with_capacity(20),
+                    state: DroneState::Docked,
+                    job: None,
+                },
+            );
+            let job_id = sim.make_id("job");
+            sim.pending_jobs.push(DeliveryJob {
+                id: job_id,
+                item: ItemKind::Ammo,
+                amount: 10,
+                pickup: core_id,
+                dropoff: turret_id,
+                priority: 50,
+            });
+            sim.recompute_networks();
+            (sim, drone_id)
+        }
+
+        let (mut connected, connected_drone_id) = setup(Pos { x: 34, y: 30 }, Pos { x: 42, y: 30 });
+        let (mut isolated, isolated_drone_id) = setup(Pos { x: 42, y: 42 }, Pos { x: 44, y: 42 });
+
+        connected.step_ticks(25);
+        isolated.step_ticks(25);
+
+        assert!(
+            connected.drones[&connected_drone_id].job.is_some(),
+            "docked drone on the core network should bank enough network CPU fuel to run its Wasm behavior"
+        );
+        assert!(
+            isolated.drones[&isolated_drone_id].job.is_none(),
+            "docked drone on a small isolated drone_port network should still be banking fuel"
+        );
+    }
+
+    #[test]
+    fn destroyed_drone_port_cleans_home_drone_and_delivery_jobs() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let port_id = sim.selected_id.clone().unwrap();
+        sim.blocks.get_mut(&port_id).unwrap().behavior_ref = None;
+        sim.place_block(BlockKind::Turret, Pos { x: 42, y: 30 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+        let drone_id = sim.make_id("drone");
+        let port = sim.blocks[&port_id].clone();
+        sim.drones.insert(
+            drone_id.clone(),
+            Drone {
+                id: drone_id.clone(),
+                home_port: port_id.clone(),
+                behavior_ref: Some("builtin.carrier_drone.basic".to_string()),
+                pos: geometry::block_center(&port),
+                battery: 100.0,
+                logic_fuel: 1000,
+                cargo: Inventory::with_capacity(20),
+                state: DroneState::Docked,
+                job: None,
+            },
+        );
+        sim.fuel_banks.insert(drone_id.clone(), 50.0);
+        let job_id = sim.make_id("job");
+        sim.pending_jobs.push(DeliveryJob {
+            id: job_id,
+            item: ItemKind::Ammo,
+            amount: 10,
+            pickup: port_id.clone(),
+            dropoff: turret_id,
+            priority: 50,
+        });
+        sim.blocks.get_mut(&port_id).unwrap().hp = 0;
+
+        sim.step_ticks(1);
+
+        assert!(!sim.blocks.contains_key(&port_id));
+        assert!(
+            !sim.drones.contains_key(&drone_id),
+            "destroying a drone_port should remove its home carrier"
+        );
+        assert!(!sim.fuel_banks.contains_key(&drone_id));
+        assert!(
+            sim.pending_jobs.is_empty(),
+            "delivery jobs referencing the destroyed port should be removed"
+        );
+    }
+
+    #[test]
     fn wire_cutter_breaks_wire_and_splits_cpu_network() {
         let mut sim = test_sim("sim");
         for x in 20..=30 {
@@ -1170,6 +1285,28 @@ mod tests {
             .build_behavior(&behavior.summary.id)
             .expect("custom XaC script should build");
         assert!(result.success);
+    }
+
+    fn install_test_drone_behavior(sim: &mut Simulation) -> BehaviorId {
+        let behavior_id = sim.make_id("behavior");
+        sim.behaviors.insert(
+            behavior_id.clone(),
+            BehaviorPackage {
+                summary: BehaviorSummary {
+                    id: behavior_id.clone(),
+                    display_name: "Test Drone Claim".to_string(),
+                    base_kind: BehaviorKind::CarrierDrone,
+                    world: "carrier-drone-behavior".to_string(),
+                    builtin: false,
+                    used_by: 0,
+                    source_path: "test://carrier-drone-claim.wat".to_string(),
+                    build_status: "test".to_string(),
+                },
+                source: xac_wasm::wat_const_action(51),
+                wasm_hash: None,
+            },
+        );
+        behavior_id
     }
 
     fn test_sim(name: &str) -> Simulation {
