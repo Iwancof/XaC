@@ -126,7 +126,7 @@ export function GridWorld({
     }
   }, [snapshot, selectedId, buildKind, direction, overlay]);
 
-  return <div ref={hostRef} className="grid-world" />;
+  return <div ref={hostRef} className="grid-world" data-testid="grid-world" />;
 }
 
 function renderWorld(

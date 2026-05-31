@@ -60,5 +60,12 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
     }
   }, [value]);
 
-  return <div className="code-editor" ref={hostRef} />;
+  return (
+    <div
+      className="code-editor"
+      data-testid="code-editor"
+      data-source={import.meta.env.VITE_XAC_MOCK_IPC === "1" ? value : undefined}
+      ref={hostRef}
+    />
+  );
 }

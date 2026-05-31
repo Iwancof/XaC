@@ -4,3 +4,5 @@
 /src-tauri/target/
 /.vite/
 *.log
+/test-results/
+/playwright-report/

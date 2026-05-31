@@ -32,7 +32,15 @@ sudo pacman -S --needed webkit2gtk-4.1
 ```bash
 npm run check
 cargo test --workspace
+npm run test:e2e
 ```
+
+`npm run test:e2e` starts Vite on `127.0.0.1:5174` with
+`VITE_XAC_MOCK_IPC=1`, replaces Tauri IPC with a deterministic in-browser
+simulation, and drives the real React/Pixi UI with Playwright. Use this for
+concrete user-operation checks such as selecting a block in the right panel,
+clicking the map, and opening built-in behavior source without moving the
+desktop workspace or launching a Tauri window.
 
 ## MVP Notes
 
@@ -40,3 +48,10 @@ The WIT draft lives at `assets/wit/xac.mvp.wit`. The current vertical slice
 uses a small Wasmtime core module shim to consume real fuel while behavior
 source is edited as short pseudo-code/config. The crate boundary is set up so
 `xac-wasm` can replace that shim with per-world Component Model bindings.
+
+## UI Direction
+
+XaC should move toward a Mindustry-like construction workflow: a compact
+icon-first build palette, clear selected-tool state, fast cancel/rotate/copy
+actions near the construction controls, and persistent combat/wave status that
+does not obscure the factory grid.
