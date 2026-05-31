@@ -138,6 +138,13 @@ if has_pending_job return
 idle
 ```
 
+The spec-style ratio sensor is also available for code that prefers normalized
+values:
+
+```text
+if battery_ratio < 0.25 return_to_port
+```
+
 Carrier drone code can also bypass the delivery-job helper and command the
 physical drone directly. `move_to` advances the free-moving drone toward a tile,
 `load` and `unload` transfer cargo to the touched block, and `cargo_count`

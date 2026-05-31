@@ -57,6 +57,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "output_count",
         "ammo_count",
         "fuel_remaining",
+        "battery_ratio",
         "battery_percent",
         "logic_fuel_remaining",
         "has_job",

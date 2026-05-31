@@ -94,6 +94,7 @@ interface assembler-api {
 }
 
 interface drone-api {
+  battery-ratio: func() -> f32;
   battery-percent: func() -> s32;
   logic-fuel-remaining: func() -> u64;
   has-job: func() -> bool;

@@ -413,6 +413,7 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
                         | "load"
                         | "unload"
                         | "cargo_count"
+                        | "battery_ratio"
                         | "idle"
                 )
         }
@@ -972,6 +973,16 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 return 0;
             }
             caller.data().input.drone_battery_percent
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "battery_ratio",
+        |mut caller: Caller<'_, BehaviorHostState>| -> f32 {
+            if !charge_host(&mut caller, host_cost::DRONE_SENSOR) {
+                return 0.0;
+            }
+            caller.data().input.drone_battery_percent.clamp(0, 100) as f32 / 100.0
         },
     )?;
     linker.func_wrap(
@@ -2176,6 +2187,81 @@ mod tests {
             eval.intent,
             BehaviorIntent::CarrierDrone {
                 command: DroneCommand::ClaimDeliveryJob
+            }
+        ));
+    }
+
+    #[test]
+    fn carrier_drone_wat_can_read_battery_ratio() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::CarrierDrone,
+                r#"(module
+                  (import "xac:drone" "battery_ratio" (func $battery_ratio (result f32)))
+                  (import "xac:drone" "return_to_port" (func $return_to_port (result i32)))
+                  (func (export "tick")
+                    (if (f32.lt (call $battery_ratio) (f32.const 0.25))
+                      (then
+                        (drop (call $return_to_port))))))"#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    drone_battery_percent: 20,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::ReturnToPort
+            }
+        ));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    drone_battery_percent: 50,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn xac_script_can_branch_on_battery_ratio() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "if battery_ratio < 0.25 return_to_port";
+        let wat = compile_source_to_wat(BehaviorKind::CarrierDrone, source).unwrap();
+        assert!(wat.contains(r#""battery_ratio""#));
+        assert!(wat.contains("f32.lt"));
+        let compiled = runtime
+            .compile_wat(BehaviorKind::CarrierDrone, source)
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    drone_battery_percent: 24,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::ReturnToPort
             }
         ));
     }

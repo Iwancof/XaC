@@ -71,6 +71,7 @@ enum HostImport {
     DronePortCreateDeliveryJob,
     DronePortDispatchIdleDrones,
     DroneBatteryPercent,
+    DroneBatteryRatio,
     DroneLogicFuelRemaining,
     DroneHasJob,
     DroneHasPendingJob,
@@ -168,6 +169,9 @@ impl HostImport {
             }
             HostImport::DroneBatteryPercent => {
                 r#"  (import "xac:drone" "battery_percent" (func $battery_percent (result i32)))"#
+            }
+            HostImport::DroneBatteryRatio => {
+                r#"  (import "xac:drone" "battery_ratio" (func $battery_ratio (result f32)))"#
             }
             HostImport::DroneLogicFuelRemaining => {
                 r#"  (import "xac:drone" "logic_fuel_remaining" (func $logic_fuel_remaining (result i64)))"#
@@ -271,6 +275,9 @@ enum Condition {
     },
     BatteryPercentLt {
         value: i32,
+    },
+    BatteryRatioLt {
+        value: f32,
     },
     LogicFuelLt {
         value: u64,
@@ -480,6 +487,12 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         ["if", "battery_percent", "<", value, rest @ ..] => Ok((
             Condition::BatteryPercentLt {
                 value: parse_i32(line_no, "battery percent threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "battery_ratio", "<", value, rest @ ..] => Ok((
+            Condition::BatteryRatioLt {
+                value: parse_f32(line_no, "battery ratio threshold", value)?,
             },
             rest,
         )),
@@ -757,6 +770,10 @@ fn add_condition_import(
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "battery_percent")?;
             imports.insert(HostImport::DroneBatteryPercent);
         }
+        Condition::BatteryRatioLt { .. } => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "battery_ratio")?;
+            imports.insert(HostImport::DroneBatteryRatio);
+        }
         Condition::LogicFuelLt { .. } => {
             ensure_kind(
                 kind,
@@ -905,6 +922,17 @@ fn parse_u64(line_no: usize, label: &str, value: &str) -> Result<u64> {
         .map_err(|_| anyhow!("line {line_no}: invalid {label} {value}"))
 }
 
+fn parse_f32(line_no: usize, label: &str, value: &str) -> Result<f32> {
+    let parsed = value
+        .parse::<f32>()
+        .map_err(|_| anyhow!("line {line_no}: invalid {label} {value}"))?;
+    if parsed.is_finite() {
+        Ok(parsed)
+    } else {
+        Err(anyhow!("line {line_no}: invalid {label} {value}"))
+    }
+}
+
 fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
     match statement {
         ScriptStatement::Action(action) => render_action(action.clone(), "    ", out),
@@ -978,6 +1006,9 @@ fn render_condition(condition: Condition) -> String {
         }
         Condition::BatteryPercentLt { value } => {
             format!("(i32.lt_s (call $battery_percent) (i32.const {value}))")
+        }
+        Condition::BatteryRatioLt { value } => {
+            format!("(f32.lt (call $battery_ratio) (f32.const {value}))")
         }
         Condition::LogicFuelLt { value } => {
             format!("(i64.lt_u (call $logic_fuel_remaining) (i64.const {value}))")
