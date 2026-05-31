@@ -1,4 +1,4 @@
-import { Box, Code2, Copy, GitBranch, Hammer, Save } from "lucide-react";
+import { Box, Code2, Copy, GitBranch, Hammer, Save, Trash2 } from "lucide-react";
 import type { BehaviorSource, Block, BuildResult, GameSnapshot } from "./types";
 
 interface InspectorProps {
@@ -12,6 +12,7 @@ interface InspectorProps {
   onSave: () => void;
   onBuild: () => void;
   onOpenBehavior: (behaviorId: string) => void;
+  onDeconstruct: () => void;
 }
 
 export function Inspector({
@@ -24,7 +25,8 @@ export function Inspector({
   onFork,
   onSave,
   onBuild,
-  onOpenBehavior
+  onOpenBehavior,
+  onDeconstruct
 }: InspectorProps) {
   const selectedNetwork = selectedBlock?.network_id
     ? snapshot?.networks.find((network) => network.id === selectedBlock.network_id)
@@ -86,6 +88,14 @@ export function Inspector({
               <button onClick={onFork} title="Fork behavior for this block">
                 <GitBranch size={16} />
                 Fork
+              </button>
+            </div>
+          )}
+          {selectedBlock.kind !== "core" && (
+            <div className="behavior-actions">
+              <button className="danger" onClick={onDeconstruct} title="Deconstruct selected block">
+                <Trash2 size={16} />
+                Deconstruct
               </button>
             </div>
           )}

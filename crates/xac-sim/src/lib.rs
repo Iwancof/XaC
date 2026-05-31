@@ -134,6 +134,51 @@ impl Simulation {
         Ok(self.snapshot())
     }
 
+    pub fn deconstruct_block(&mut self, block_id: &str) -> Result<GameSnapshot> {
+        let Some(block) = self.blocks.get(block_id).cloned() else {
+            return Err(anyhow!("unknown block: {block_id}"));
+        };
+        if block.kind == BlockKind::Core {
+            return Err(anyhow!("core cannot be deconstructed"));
+        }
+
+        self.blocks.remove(block_id);
+        self.fuel_banks.remove(block_id);
+        self.set_tile_footprint(block.kind, block.pos, None);
+        self.pending_jobs
+            .retain(|job| job.pickup != block_id && job.dropoff != block_id);
+        let removed_home_drones: Vec<_> = self
+            .drones
+            .values()
+            .filter(|drone| drone.home_port == block_id)
+            .map(|drone| drone.id.clone())
+            .collect();
+        for drone_id in removed_home_drones {
+            self.drones.remove(&drone_id);
+        }
+        for drone in self.drones.values_mut() {
+            if drone
+                .job
+                .as_ref()
+                .map(|job| job.pickup == block_id || job.dropoff == block_id)
+                .unwrap_or(false)
+            {
+                drone.job = None;
+                drone.state = xac_core::DroneState::Returning;
+            }
+        }
+        if self.selected_id.as_deref() == Some(block_id) {
+            self.selected_id = None;
+        }
+        self.log(
+            LogLevel::Info,
+            block_id.to_string(),
+            format!("deconstructed {}", kind_name(block.kind)),
+        );
+        self.recompute_networks();
+        Ok(self.snapshot())
+    }
+
     pub fn select_entity(&mut self, id: Option<EntityId>) -> GameSnapshot {
         self.selected_id = id;
         self.snapshot()
@@ -330,6 +375,35 @@ mod tests {
             .unwrap();
         let snapshot = sim.snapshot();
         assert!(snapshot.networks.iter().any(|n| n.cpu_pool >= 200.0));
+    }
+
+    #[test]
+    fn deconstructing_wire_removes_footprint_and_recomputes_network() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Wire, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let wire_id = sim.selected_id.clone().unwrap();
+        sim.place_block(BlockKind::CpuNode, Pos { x: 35, y: 32 }, Direction::East)
+            .unwrap();
+        assert!(sim.snapshot().networks.iter().any(|n| n.cpu_pool >= 200.0));
+
+        sim.deconstruct_block(&wire_id).unwrap();
+
+        assert!(!sim.blocks.contains_key(&wire_id));
+        assert_eq!(sim.block_id_at(Pos { x: 34, y: 32 }), None);
+        assert!(
+            !sim.snapshot().networks.iter().any(|n| n.cpu_pool >= 200.0),
+            "deconstructing the connecting wire should split the cpu node from the core network"
+        );
+    }
+
+    #[test]
+    fn core_cannot_be_deconstructed() {
+        let mut sim = test_sim("sim");
+        let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+        let err = sim.deconstruct_block(&core_id).unwrap_err();
+        assert!(err.to_string().contains("core cannot be deconstructed"));
+        assert!(sim.blocks.contains_key(&core_id));
     }
 
     #[test]

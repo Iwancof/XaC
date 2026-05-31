@@ -51,6 +51,17 @@ button:disabled {
   cursor: not-allowed;
 }
 
+button.danger {
+  border-color: #5c2d35;
+  color: #fecdd3;
+  background: #30171c;
+}
+
+button.danger:hover:not(:disabled) {
+  border-color: #f43f5e;
+  background: #421b23;
+}
+
 .app-shell {
   height: 100vh;
   display: grid;

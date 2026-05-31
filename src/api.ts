@@ -27,6 +27,10 @@ export function placeBlock(kind: BlockKind, x: number, y: number, dir: Direction
   return invoke<GameSnapshot>("place_block", { kind, x, y, dir });
 }
 
+export function deconstructBlock(blockId: string) {
+  return invoke<GameSnapshot>("deconstruct_block", { blockId });
+}
+
 export function selectEntity(id: string | null) {
   return invoke<GameSnapshot>("select_entity", { id });
 }

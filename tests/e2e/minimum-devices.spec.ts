@@ -104,6 +104,11 @@ mine
   await buildButton.click();
   await expect(page.locator(".build-ok")).toContainText("mock build succeeded");
 
+  await page.getByRole("button", { name: "Deconstruct", exact: true }).click();
+  await expect(page.locator(".metrics")).toContainText("blocks 22");
+  await expect(page.locator(".inspector")).toContainText("Select a block");
+  await expect(page.locator(".log-panel")).toContainText("deconstructed Drill");
+
   const behaviorCalls = await page.evaluate(() => {
     return (
       window.__XAC_TEST_STATE__?.calls.filter((call) =>
@@ -124,4 +129,9 @@ mine
   expect(placeCalls.some((call) => call.args.kind === "wire" && call.args.x === 30 && call.args.y === 29)).toBe(true);
   expect(placeCalls.some((call) => call.args.kind === "conveyor" && call.args.x === 29 && call.args.y === 30)).toBe(true);
   expect(placeCalls.at(-1)?.args).toEqual({ kind: "drill", x: 20, y: 30, dir: "east" });
+
+  const deconstructCalls = await page.evaluate(() => {
+    return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "deconstruct_block") ?? [];
+  });
+  expect(deconstructCalls).toEqual([{ cmd: "deconstruct_block", args: { blockId: "drill_1" } }]);
 });

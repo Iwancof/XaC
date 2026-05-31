@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   advance,
   buildBehavior,
+  deconstructBlock,
   editBuiltinCopy,
   forkBehavior,
   getSnapshot,
@@ -176,6 +177,20 @@ export function App() {
     }
   };
 
+  const handleDeconstruct = async () => {
+    if (!selectedBlock) return;
+    try {
+      setSnapshot(await deconstructBlock(selectedBlock.id));
+      setBehavior(null);
+      setEditorValue("");
+      setSavedValue("");
+      setBuildResult(null);
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   const core = snapshot?.blocks.find((block) => block.kind === "core");
   const selectedBehaviorId = selectedBlock?.behavior_ref ?? null;
 
@@ -270,6 +285,7 @@ export function App() {
             onSave={handleSave}
             onBuild={handleBuild}
             onOpenBehavior={loadBehavior}
+            onDeconstruct={handleDeconstruct}
           />
           <section className="editor-panel">
             <div className="panel-heading">

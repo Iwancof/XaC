@@ -77,6 +77,8 @@ mockIPC((cmd, args = {}) => {
     }
     case "place_block":
       return placeBlock(args as { kind: BlockKind; x: number; y: number; dir: Direction });
+    case "deconstruct_block":
+      return deconstructBlock((args as { blockId?: string }).blockId ?? "");
     case "select_entity":
       state.selectedId = (args as { id?: string | null }).id ?? null;
       return snapshot();
@@ -186,6 +188,22 @@ function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number
   state.blocks.push(block);
   state.selectedId = block.id;
   log("info", block.id, `placed ${displayKind(kind)} at ${x},${y}`);
+  return snapshot();
+}
+
+function deconstructBlock(blockId: string) {
+  const block = state.blocks.find((item) => item.id === blockId);
+  if (!block) {
+    throw new Error(`unknown block: ${blockId}`);
+  }
+  if (block.kind === "core") {
+    throw new Error("core cannot be deconstructed");
+  }
+  state.blocks = state.blocks.filter((item) => item.id !== blockId);
+  if (state.selectedId === blockId) {
+    state.selectedId = null;
+  }
+  log("info", blockId, `deconstructed ${displayKind(block.kind)}`);
   return snapshot();
 }
 

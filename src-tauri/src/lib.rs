@@ -48,6 +48,16 @@ fn place_block(
 }
 
 #[tauri::command]
+fn deconstruct_block(
+    state: tauri::State<'_, AppState>,
+    block_id: String,
+) -> Result<GameSnapshot, String> {
+    let mut sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.deconstruct_block(&block_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn select_entity(
     state: tauri::State<'_, AppState>,
     id: Option<String>,
@@ -130,6 +140,7 @@ pub fn run() {
             step_ticks,
             advance,
             place_block,
+            deconstruct_block,
             select_entity,
             open_behavior,
             edit_builtin_copy,
