@@ -139,6 +139,16 @@ impl Simulation {
         true
     }
 
+    pub(crate) fn output_available(&self, block_id: &str, dir: Direction) -> bool {
+        let Some(src_pos) = self.blocks.get(block_id).map(|block| block.pos) else {
+            return false;
+        };
+        let Some(dst_id) = self.block_id_at(src_pos.step(dir)) else {
+            return false;
+        };
+        self.transferable_item(block_id, &dst_id, 1).is_some()
+    }
+
     fn transferable_item(
         &self,
         src_id: &str,

@@ -34,6 +34,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "net",
         "net_set",
         "output_blocked",
+        "output_available",
         "can_produce",
         "ammo_count",
         "ammo",

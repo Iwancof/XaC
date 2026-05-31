@@ -474,6 +474,8 @@ impl Simulation {
             output_blocked: self.output_blocked(block_id),
             can_produce: self.can_produce(block_id),
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
+            router_output_available: Direction::all()
+                .map(|dir| self.output_available(block_id, dir)),
             net_i32: self.network_i32_values(block.network_id),
             net_writable: block
                 .network_id
@@ -835,7 +837,7 @@ mod tests {
         sim.place_block(BlockKind::Router, Pos { x: 22, y: 30 }, Direction::East)
             .unwrap();
         let router_id = sim.selected_id.clone().unwrap();
-        assign_script(&mut sim, &router_id, "push east");
+        assign_script(&mut sim, &router_id, "if output_available east push east");
 
         sim.place_block(BlockKind::Assembler, Pos { x: 23, y: 30 }, Direction::East)
             .unwrap();

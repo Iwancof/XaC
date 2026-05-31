@@ -63,6 +63,12 @@ net_set 7 42
 if net 7 == 42 attack_best lowest_hp
 ```
 
+Routers can make availability checks before moving items:
+
+```text
+if output_available east push east
+```
+
 Raw WebAssembly Text (`.wat`) is still accepted for lower-level tests and power
 users. The older `tick() -> i32` action-code ABI remains as a compatibility
 fallback; new built-ins call host imports so player code can exercise real block

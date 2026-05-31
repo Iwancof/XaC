@@ -42,6 +42,7 @@ enum HostImport {
     DrillMine,
     RouterPushAny,
     RouterPushDir,
+    RouterOutputAvailable,
     AssemblerSetRecipe,
     AssemblerCanProduce,
     AssemblerProduce,
@@ -65,6 +66,9 @@ impl HostImport {
             }
             HostImport::RouterPushDir => {
                 r#"  (import "xac:router" "push_dir" (func $push_dir (param i32) (result i32)))"#
+            }
+            HostImport::RouterOutputAvailable => {
+                r#"  (import "xac:router" "output_available" (func $output_available (param i32) (result i32)))"#
             }
             HostImport::AssemblerSetRecipe => {
                 r#"  (import "xac:assembler" "set_recipe" (func $set_recipe (param i32) (result i32)))"#
@@ -100,6 +104,7 @@ impl HostImport {
 #[derive(Clone, Copy, Debug)]
 enum Condition {
     OutputBlocked,
+    OutputAvailable(Direction),
     CanProduce,
     AmmoGtZero,
     NetGt { key: i32, value: i32 },
@@ -162,6 +167,10 @@ fn parse_script_statement(
 fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition, &'a [&'a str])> {
     match tokens {
         ["if", "output_blocked", rest @ ..] => Ok((Condition::OutputBlocked, rest)),
+        ["if", "output_available", dir, rest @ ..] => Ok((
+            Condition::OutputAvailable(parse_direction(line_no, dir)?),
+            rest,
+        )),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
         ["if", "net", key, ">", value, rest @ ..] => Ok((
@@ -259,6 +268,10 @@ fn add_condition_import(
             ensure_kind(kind, BlockKind::Drill, line_no, "output_blocked")?;
             imports.insert(HostImport::DrillOutputBlocked);
         }
+        Condition::OutputAvailable(_) => {
+            ensure_kind(kind, BlockKind::Router, line_no, "output_available")?;
+            imports.insert(HostImport::RouterOutputAvailable);
+        }
         Condition::CanProduce => {
             ensure_kind(kind, BlockKind::Assembler, line_no, "can_produce")?;
             imports.insert(HostImport::AssemblerCanProduce);
@@ -331,6 +344,12 @@ fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
 fn render_condition(condition: Condition) -> String {
     match condition {
         Condition::OutputBlocked => "(call $output_blocked)".to_string(),
+        Condition::OutputAvailable(dir) => {
+            format!(
+                "(call $output_available (i32.const {}))",
+                direction_code(dir)
+            )
+        }
         Condition::CanProduce => "(call $can_produce)".to_string(),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
         Condition::NetGt { key, value } => {

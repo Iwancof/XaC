@@ -47,6 +47,7 @@ pub struct BehaviorHostInput {
     pub output_blocked: bool,
     pub can_produce: bool,
     pub ammo_count: i32,
+    pub router_output_available: [bool; 4],
     pub net_i32: BTreeMap<i32, i32>,
     pub net_writable: bool,
 }
@@ -247,17 +248,27 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:router",
         "push_dir",
         |mut caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
-            let dir = match dir {
-                0 => Direction::North,
-                1 => Direction::East,
-                2 => Direction::South,
-                3 => Direction::West,
-                _ => return 0,
+            let Some(dir) = direction_from_code(dir) else {
+                return 0;
             };
             caller.data_mut().intent = BehaviorIntent::Router {
                 preferred: vec![dir],
             };
             1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:router",
+        "output_available",
+        |caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
+            let Some(dir) = direction_from_code(dir) else {
+                return 0;
+            };
+            if caller.data().input.router_output_available[direction_index(dir)] {
+                1
+            } else {
+                0
+            }
         },
     )?;
     linker.func_wrap(
@@ -411,6 +422,25 @@ fn router_dir(dir: Direction) -> Result<BehaviorIntent> {
     Ok(BehaviorIntent::Router {
         preferred: vec![dir],
     })
+}
+
+fn direction_from_code(code: i32) -> Option<Direction> {
+    match code {
+        0 => Some(Direction::North),
+        1 => Some(Direction::East),
+        2 => Some(Direction::South),
+        3 => Some(Direction::West),
+        _ => None,
+    }
+}
+
+fn direction_index(dir: Direction) -> usize {
+    match dir {
+        Direction::North => 0,
+        Direction::East => 1,
+        Direction::South => 2,
+        Direction::West => 3,
+    }
 }
 
 pub fn wat_const_action(action_code: i32) -> String {
@@ -610,6 +640,33 @@ mod tests {
                 priority.as_slice(),
                 [TargetRule::LowestHp, TargetRule::Nearest]
             )
+        ));
+    }
+
+    #[test]
+    fn xac_script_can_gate_router_push_on_output_availability() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(BlockKind::Router, "if output_available east push east")
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                30,
+                BehaviorHostInput {
+                    router_output_available: [false, true, false, false],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Router { preferred } if preferred == vec![Direction::East]
         ));
     }
 
