@@ -31,21 +31,28 @@ test("places minimum devices from the right block list and opens drill behavior"
 
   await page.getByRole("button", { name: /Core/ }).click();
   await expect(page.getByText("Placing core")).toBeVisible();
-  await canvas.click({ position: tileCenter(10, 10) });
+  await canvas.click({ position: tileCenter(20, 29) });
   await expect(page.locator(".metrics")).toContainText("blocks 2");
   await expect(page.locator(".inspector")).toContainText("core");
+
+  await page.getByRole("button", { name: /CPU Node/ }).click();
+  await expect(page.getByText("Placing cpu node")).toBeVisible();
+  await canvas.click({ position: tileCenter(20, 28) });
+  await expect(page.locator(".metrics")).toContainText("blocks 3");
+  await expect(page.locator(".inspector")).toContainText("cpu_node");
 
   await page.getByRole("button", { name: /Belt Conveyor/ }).click();
   await expect(page.getByText("Placing conveyor")).toBeVisible();
   await canvas.click({ position: tileCenter(21, 30) });
-  await expect(page.locator(".metrics")).toContainText("blocks 3");
+  await expect(page.locator(".metrics")).toContainText("blocks 4");
   await expect(page.locator(".inspector")).toContainText("conveyor");
 
   await page.getByRole("button", { name: /Ore Drill/ }).click();
   await expect(page.getByText("Placing drill")).toBeVisible();
   await canvas.click({ position: tileCenter(20, 30) });
-  await expect(page.locator(".metrics")).toContainText("blocks 4");
+  await expect(page.locator(".metrics")).toContainText("blocks 5");
   await expect(page.locator(".inspector")).toContainText("drill");
+  await expect(page.locator(".inspector")).toContainText("network CPU 320");
   await expect(page.locator(".log-panel")).toContainText("placed Drill at 20,30");
 
   await page.getByRole("button", { name: /\+40/ }).click();
@@ -56,14 +63,16 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".behavior-meta")).toContainText("Basic Drill");
   await expect(page.locator(".behavior-meta")).toContainText("builtin.drill.basic");
   await expect(page.locator(".behavior-meta")).toContainText("read-only preset");
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /loop:/);
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /self\.mine\(\)/);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /\(module/);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /\(loop/);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /\(i32\.const 1\)/);
 
   const placeCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "place_block") ?? [];
   });
   expect(placeCalls.map((call: IpcCall) => call.args)).toEqual([
-    { kind: "core", x: 10, y: 10, dir: "east" },
+    { kind: "core", x: 20, y: 29, dir: "east" },
+    { kind: "cpu_node", x: 20, y: 28, dir: "east" },
     { kind: "conveyor", x: 21, y: 30, dir: "east" },
     { kind: "drill", x: 20, y: 30, dir: "east" }
   ]);

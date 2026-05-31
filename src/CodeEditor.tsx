@@ -17,22 +17,38 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
 
   useEffect(() => {
     if (!hostRef.current) return;
-    monaco.languages.register({ id: "xac-pseudo" });
-    monaco.languages.setMonarchTokensProvider("xac-pseudo", {
-      keywords: ["export", "tick", "self", "if", "else", "return", "prefer"],
+    monaco.languages.register({ id: "xac-wat" });
+    monaco.languages.setMonarchTokensProvider("xac-wat", {
+      keywords: [
+        "module",
+        "func",
+        "export",
+        "param",
+        "result",
+        "local",
+        "local.get",
+        "local.set",
+        "block",
+        "loop",
+        "br",
+        "br_if",
+        "i32.const",
+        "i32.add",
+        "i32.ge_s"
+      ],
       tokenizer: {
         root: [
-          [/[a-zA-Z_][\w-]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
+          [/[a-zA-Z_][\w.-]*/, { cases: { "@keywords": "keyword", "@default": "identifier" } }],
           [/".*?"/, "string"],
-          [/[{}()[\],.:]/, "delimiter"],
-          [/#.*$/, "comment"]
+          [/[()[\]]/, "delimiter"],
+          [/;;.*$/, "comment"]
         ]
       }
     });
 
     const editor = monaco.editor.create(hostRef.current, {
       value,
-      language: "xac-pseudo",
+      language: "xac-wat",
       theme: "vs-dark",
       minimap: { enabled: false },
       fontSize: 13,

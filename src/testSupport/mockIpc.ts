@@ -23,12 +23,17 @@ import type {
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
-const DRILL_SOURCE = `export tick(self):
-    loop:
-        if self.output_blocked():
-            return
-        self.mine()
-        return
+const DRILL_SOURCE = `(module
+  (func $spin (param $n i32)
+    (local $i i32)
+    (local.set $i (i32.const 0))
+    (block $exit
+      (loop $loop
+        (br_if $exit (i32.ge_s (local.get $i) (local.get $n)))
+        (local.set $i (i32.add (local.get $i) (i32.const 1)))
+        (br $loop))))
+  (func (export "tick") (result i32)
+    (i32.const 1)))
 `;
 
 type CommandCall = {
@@ -220,7 +225,7 @@ function copyBehavior(blockId: string, fork: boolean): BehaviorSource {
   }
 
   const id = makeId("behavior");
-  const sourcePath = `projects/default_project/blocks/${id}/src/behavior.rs`;
+  const sourcePath = `projects/default_project/blocks/${id}/src/behavior.wat`;
   state.behaviors[id] = {
     summary: {
       ...original.summary,
@@ -294,7 +299,7 @@ function builtinBehaviors(): Record<string, MutableBehavior> {
         world: "drill-behavior",
         builtin: true,
         used_by: 0,
-        source_path: "assets/builtin/drill/basic.rs",
+        source_path: "assets/builtin/drill/basic.wat",
         build_status: "builtin"
       },
       source: DRILL_SOURCE
@@ -312,16 +317,20 @@ function behaviorSummaries(): BehaviorSummary[] {
 function recomputeNetworks(blocks: Block[]): Network[] {
   const blockIds = blocks.filter((block) => isNetworkNode(block.kind)).map((block) => block.id);
   const activeDevices = blocks.filter((block) => block.active).length;
+  const cpuPool = blocks
+    .filter((block) => isNetworkNode(block.kind))
+    .reduce((sum, block) => sum + networkCpu(block.kind), 0);
+  const effectivePerDevice = activeDevices ? cpuPool / activeDevices : 0;
   for (const block of blocks) {
     block.network_id = isNetworkNode(block.kind) ? 1 : null;
-    block.effective_cpu_rate = block.active ? Math.max(localCpuRate(block.kind), 120 / Math.max(1, activeDevices)) : 0;
+    block.effective_cpu_rate = block.active ? localCpuRate(block.kind) + effectivePerDevice : 0;
   }
   return [
     {
       id: 1,
-      cpu_pool: 120,
+      cpu_pool: cpuPool,
       active_devices: activeDevices,
-      effective_per_device: activeDevices ? 120 / activeDevices : 0,
+      effective_per_device: effectivePerDevice,
       block_ids: blockIds,
       store: {},
       read_only_cache: false
@@ -374,6 +383,13 @@ function localCpuRate(kind: BlockKind) {
   if (kind === "drill" || kind === "router") return 1;
   if (kind === "assembler") return 2;
   if (kind === "turret" || kind === "drone_port") return 3;
+  return 0;
+}
+
+function networkCpu(kind: BlockKind) {
+  if (kind === "core") return 120;
+  if (kind === "cpu_node") return 80;
+  if (kind === "drone_port") return 20;
   return 0;
 }
 

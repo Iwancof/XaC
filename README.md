@@ -6,11 +6,11 @@ The current implementation is a vertical slice:
 
 - Tauri v2 desktop shell
 - Rust fixed-tick simulation and Tauri IPC
-- Wasmtime fuel-backed behavior evaluation shim
+- WAT-to-Wasm behavior compilation with Wasmtime fuel budgeting
 - React/TypeScript IDE UI
 - PixiJS grid rendering and overlays
 - Monaco behavior editor
-- Built-in block presets with copy-on-write and fork/edit flow
+- Built-in WAT behavior presets with copy-on-write and fork/edit flow
 
 ## Run
 
@@ -45,9 +45,11 @@ desktop workspace or launching a Tauri window.
 ## MVP Notes
 
 The WIT draft lives at `assets/wit/xac.mvp.wit`. The current vertical slice
-uses a small Wasmtime core module shim to consume real fuel while behavior
-source is edited as short pseudo-code/config. The crate boundary is set up so
-`xac-wasm` can replace that shim with per-world Component Model bindings.
+accepts WebAssembly Text (`.wat`) behavior source, compiles it to Wasm with
+Wasmtime, and runs each `tick() -> i32` export with fuel derived from the
+block's effective network CPU rate. The integer return value is the temporary
+MVP action-code ABI; the crate boundary is set up so `xac-wasm` can replace it
+with per-world Component Model / WIT bindings.
 
 ## UI Direction
 

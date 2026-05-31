@@ -7,7 +7,7 @@ use xac_core::{
     Direction, Drone, DroneState, Enemy, EnemyKind, EntityId, GameSnapshot, Inventory, ItemKind,
     LogEntry, LogLevel, Network, Pos, TerrainKind, Tile,
 };
-use xac_wasm::{hash_source, BehaviorIntent, BehaviorRuntime, TargetRule};
+use xac_wasm::{hash_wasm_source, BehaviorIntent, BehaviorRuntime, CompiledBehavior, TargetRule};
 
 pub const MAP_WIDTH: i32 = 64;
 pub const MAP_HEIGHT: i32 = 64;
@@ -31,6 +31,8 @@ pub struct Simulation {
     drones: BTreeMap<EntityId, Drone>,
     networks: BTreeMap<u32, Network>,
     behaviors: BTreeMap<BehaviorId, BehaviorPackage>,
+    compiled_behaviors: BTreeMap<BehaviorId, CompiledBehavior>,
+    fuel_banks: BTreeMap<EntityId, f32>,
     pending_jobs: Vec<DeliveryJob>,
     logs: VecDeque<LogEntry>,
     selected_id: Option<EntityId>,
@@ -52,6 +54,8 @@ impl Simulation {
             drones: BTreeMap::new(),
             networks: BTreeMap::new(),
             behaviors: builtin_behaviors(),
+            compiled_behaviors: BTreeMap::new(),
+            fuel_banks: BTreeMap::new(),
             pending_jobs: Vec::new(),
             logs: VecDeque::new(),
             selected_id: None,
@@ -108,6 +112,7 @@ impl Simulation {
         }
         self.tiles[idx].block_id = Some(id.clone());
         self.blocks.insert(id.clone(), block);
+        self.fuel_banks.insert(id.clone(), 0.0);
         self.selected_id = Some(id.clone());
         self.log(
             LogLevel::Info,
@@ -156,7 +161,7 @@ impl Simulation {
             .config_root
             .join("projects/default_project/blocks")
             .join(&new_id)
-            .join("src/behavior.rs")
+            .join("src/behavior.wat")
             .to_string_lossy()
             .to_string();
         let summary = BehaviorSummary {
@@ -204,7 +209,7 @@ impl Simulation {
             .config_root
             .join("projects/default_project/blocks")
             .join(&new_id)
-            .join("src/behavior.rs")
+            .join("src/behavior.wat")
             .to_string_lossy()
             .to_string();
         let summary = BehaviorSummary {
@@ -247,7 +252,9 @@ impl Simulation {
             ));
         }
         package.source = source;
+        package.wasm_hash = None;
         package.summary.build_status = "saved".to_string();
+        self.compiled_behaviors.remove(behavior_id);
         self.log(
             LogLevel::Info,
             behavior_id.to_string(),
@@ -264,10 +271,11 @@ impl Simulation {
                 .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
             (package.summary.base_kind, package.source.clone())
         };
-        let fuel = 30;
-        match self.runtime.evaluate(kind, &source, fuel) {
-            Ok(eval) => {
-                let wasm_hash = Some(eval.wasm_hash.clone());
+        match self.runtime.compile_wat(kind, &source) {
+            Ok(compiled) => {
+                let wasm_hash = Some(compiled.wasm_hash().to_string());
+                self.compiled_behaviors
+                    .insert(behavior_id.to_string(), compiled);
                 if let Some(package) = self.behaviors.get_mut(behavior_id) {
                     package.wasm_hash = wasm_hash.clone();
                     package.summary.build_status = "built".to_string();
@@ -275,7 +283,7 @@ impl Simulation {
                 self.log(
                     LogLevel::Info,
                     behavior_id.to_string(),
-                    format!("build ok; fuel spent {}", eval.fuel_spent),
+                    "build ok; WAT compiled to wasm".to_string(),
                 );
                 Ok(BuildResult {
                     behavior_id: behavior_id.to_string(),
@@ -345,7 +353,7 @@ impl Simulation {
         if self.tick % 80 == 20 {
             self.spawn_wave_enemy();
         }
-        if self.tick % 300 == 0 {
+        if self.tick.is_multiple_of(300) {
             self.spawn_enemy(EnemyKind::WireCutter);
         }
 
@@ -353,7 +361,6 @@ impl Simulation {
         self.run_programmable_behaviors();
         self.run_block_physics();
         self.run_drones();
-        self.run_turrets();
         self.run_enemies();
         self.cleanup_destroyed();
     }
@@ -378,13 +385,24 @@ impl Simulation {
             let Some(behavior_ref) = behavior_ref else {
                 continue;
             };
-            let source = match self.behaviors.get(&behavior_ref) {
-                Some(package) => package.source.clone(),
-                None => continue,
+            let fuel = self.grant_behavior_fuel(&id, cpu_rate);
+            if fuel == 0 {
+                continue;
+            }
+            let compiled = match self.compiled_behavior(&behavior_ref, kind) {
+                Ok(compiled) => compiled,
+                Err(error) => {
+                    if let Some(block) = self.blocks.get_mut(&id) {
+                        block.status = "runtime error".to_string();
+                    }
+                    self.log(LogLevel::Error, id, error.to_string());
+                    continue;
+                }
             };
-            let fuel = ((cpu_rate / TICKS_PER_SECOND as f32).ceil() as u64).max(1);
-            match self.runtime.evaluate(kind, &source, fuel) {
+
+            match self.runtime.evaluate_compiled(&compiled, fuel) {
                 Ok(eval) => {
+                    self.spend_behavior_fuel(&id, eval.fuel_spent);
                     if eval.over_budget {
                         if let Some(block) = self.blocks.get_mut(&id) {
                             block.status = "over_budget".to_string();
@@ -402,6 +420,7 @@ impl Simulation {
                     self.apply_behavior_intent(&id, eval.intent);
                 }
                 Err(error) => {
+                    self.spend_behavior_fuel(&id, fuel);
                     if let Some(block) = self.blocks.get_mut(&id) {
                         block.status = "runtime error".to_string();
                     }
@@ -411,8 +430,58 @@ impl Simulation {
         }
     }
 
+    fn grant_behavior_fuel(&mut self, block_id: &str, cpu_rate: f32) -> u64 {
+        let bank = self.fuel_banks.entry(block_id.to_string()).or_insert(0.0);
+        let max_bank = cpu_rate.max(1.0);
+        *bank = (*bank + cpu_rate / TICKS_PER_SECOND as f32).min(max_bank);
+        bank.floor() as u64
+    }
+
+    fn spend_behavior_fuel(&mut self, block_id: &str, fuel_spent: u64) {
+        if let Some(bank) = self.fuel_banks.get_mut(block_id) {
+            *bank = (*bank - fuel_spent as f32).max(0.0);
+        }
+    }
+
+    fn compiled_behavior(
+        &mut self,
+        behavior_id: &str,
+        expected_kind: BlockKind,
+    ) -> Result<CompiledBehavior> {
+        if let Some(compiled) = self.compiled_behaviors.get(behavior_id) {
+            return Ok(compiled.clone());
+        }
+
+        let (kind, source) = {
+            let package = self
+                .behaviors
+                .get(behavior_id)
+                .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
+            (package.summary.base_kind, package.source.clone())
+        };
+        if kind != expected_kind {
+            return Err(anyhow!(
+                "behavior {behavior_id} targets {kind:?}, but block is {expected_kind:?}"
+            ));
+        }
+
+        let compiled = self.runtime.compile_wat(kind, &source)?;
+        let wasm_hash = compiled.wasm_hash().to_string();
+        if let Some(package) = self.behaviors.get_mut(behavior_id) {
+            package.wasm_hash = Some(wasm_hash);
+            if package.summary.build_status != "built" {
+                package.summary.build_status = "compiled".to_string();
+            }
+        }
+        self.compiled_behaviors
+            .insert(behavior_id.to_string(), compiled.clone());
+        Ok(compiled)
+    }
+
     fn apply_behavior_intent(&mut self, block_id: &str, intent: BehaviorIntent) {
         match intent {
+            BehaviorIntent::Noop => {}
+            BehaviorIntent::DrillDefault => self.run_drill(block_id),
             BehaviorIntent::Router { preferred } => {
                 let dirs = if preferred.is_empty() {
                     Direction::all().to_vec()
@@ -433,27 +502,16 @@ impl Simulation {
                         "recipe: plate priority".to_string()
                     };
                 }
+                self.run_assembler(block_id);
             }
+            BehaviorIntent::Turret { priority } => self.run_turret_once(block_id, &priority),
             BehaviorIntent::DronePort => self.ensure_drone_and_job(block_id),
-            BehaviorIntent::Turret { .. }
-            | BehaviorIntent::DrillDefault
-            | BehaviorIntent::CarrierDrone => {}
+            BehaviorIntent::CarrierDrone => {}
         }
     }
 
     fn run_block_physics(&mut self) {
         let ids: Vec<_> = self.blocks.keys().cloned().collect();
-
-        for id in ids.clone() {
-            let Some(kind) = self.blocks.get(&id).map(|b| b.kind) else {
-                continue;
-            };
-            match kind {
-                BlockKind::Drill => self.run_drill(&id),
-                BlockKind::Assembler => self.run_assembler(&id),
-                _ => {}
-            }
-        }
 
         for id in ids {
             let Some(kind) = self.blocks.get(&id).map(|b| b.kind) else {
@@ -522,32 +580,21 @@ impl Simulation {
         }
     }
 
-    fn run_turrets(&mut self) {
-        let turret_ids: Vec<_> = self
-            .blocks
-            .values()
-            .filter(|b| b.kind == BlockKind::Turret && b.inventory.count(&ItemKind::Ammo) > 0)
-            .map(|b| b.id.clone())
-            .collect();
-        for turret_id in turret_ids {
-            let Some(turret) = self.blocks.get(&turret_id).cloned() else {
-                continue;
-            };
-            let priority = turret
-                .behavior_ref
-                .as_ref()
-                .and_then(|id| self.behaviors.get(id))
-                .map(|package| infer_turret_rules(&package.source))
-                .unwrap_or_else(|| vec![TargetRule::Nearest]);
-            let target = self.choose_target(turret.pos, &priority);
-            if let Some(enemy_id) = target {
-                if let Some(enemy) = self.enemies.get_mut(&enemy_id) {
-                    enemy.hp -= 12;
-                }
-                if let Some(block) = self.blocks.get_mut(&turret_id) {
-                    block.inventory.remove(&ItemKind::Ammo, 1);
-                    block.status = format!("attacking {enemy_id}");
-                }
+    fn run_turret_once(&mut self, turret_id: &str, priority: &[TargetRule]) {
+        let Some(turret) = self.blocks.get(turret_id).cloned() else {
+            return;
+        };
+        if turret.kind != BlockKind::Turret || turret.inventory.count(&ItemKind::Ammo) == 0 {
+            return;
+        }
+        let target = self.choose_target(turret.pos, priority);
+        if let Some(enemy_id) = target {
+            if let Some(enemy) = self.enemies.get_mut(&enemy_id) {
+                enemy.hp -= 12;
+            }
+            if let Some(block) = self.blocks.get_mut(turret_id) {
+                block.inventory.remove(&ItemKind::Ammo, 1);
+                block.status = format!("attacking {enemy_id}");
             }
         }
     }
@@ -600,16 +647,6 @@ impl Simulation {
     }
 
     fn run_drones(&mut self) {
-        let port_ids: Vec<_> = self
-            .blocks
-            .values()
-            .filter(|b| b.kind == BlockKind::DronePort)
-            .map(|b| b.id.clone())
-            .collect();
-        for port_id in port_ids {
-            self.ensure_drone_and_job(&port_id);
-        }
-
         let drone_ids: Vec<_> = self.drones.keys().cloned().collect();
         for drone_id in drone_ids {
             let job_needed = self
@@ -691,7 +728,7 @@ impl Simulation {
                 },
             );
         }
-        if self.tick % 60 != 0 {
+        if !self.tick.is_multiple_of(60) {
             return;
         }
         let Some(dropoff) = self
@@ -946,6 +983,7 @@ impl Simulation {
             .collect();
         for (id, pos) in destroyed_blocks {
             self.blocks.remove(&id);
+            self.fuel_banks.remove(&id);
             self.set_tile_block(pos, None);
             self.log(LogLevel::Warn, id, "block destroyed".to_string());
         }
@@ -1090,55 +1128,62 @@ fn default_behavior_for(kind: BlockKind) -> Option<&'static str> {
 
 fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
     let mut packages = BTreeMap::new();
-    for (id, display_name, base_kind, world, source) in [
+    for (id, display_name, base_kind, world, source_path, source) in [
         (
             "builtin.drill.basic",
             "Basic Drill",
             BlockKind::Drill,
             "drill-behavior",
-            include_str!("../../../assets/builtin/drill/basic.rs"),
+            "assets/builtin/drill/basic.wat",
+            include_str!("../../../assets/builtin/drill/basic.wat"),
         ),
         (
             "builtin.router.basic",
             "Basic Router",
             BlockKind::Router,
             "router-behavior",
-            include_str!("../../../assets/builtin/router/basic.rs"),
+            "assets/builtin/router/basic.wat",
+            include_str!("../../../assets/builtin/router/basic.wat"),
         ),
         (
             "builtin.router.ammo_east",
             "Ammo East Router",
             BlockKind::Router,
             "router-behavior",
-            include_str!("../../../assets/builtin/router/ammo_east.rs"),
+            "assets/builtin/router/ammo_east.wat",
+            include_str!("../../../assets/builtin/router/ammo_east.wat"),
         ),
         (
             "builtin.assembler.basic",
             "Basic Assembler",
             BlockKind::Assembler,
             "assembler-behavior",
-            include_str!("../../../assets/builtin/assembler/basic.rs"),
+            "assets/builtin/assembler/basic.wat",
+            include_str!("../../../assets/builtin/assembler/basic.wat"),
         ),
         (
             "builtin.turret.basic",
             "Basic Turret",
             BlockKind::Turret,
             "turret-behavior",
-            include_str!("../../../assets/builtin/turret/basic.rs"),
+            "assets/builtin/turret/basic.wat",
+            include_str!("../../../assets/builtin/turret/basic.wat"),
         ),
         (
             "builtin.turret.priority",
             "Priority Turret",
             BlockKind::Turret,
             "turret-behavior",
-            include_str!("../../../assets/builtin/turret/priority.rs"),
+            "assets/builtin/turret/priority.wat",
+            include_str!("../../../assets/builtin/turret/priority.wat"),
         ),
         (
             "builtin.drone_port.basic",
             "Basic Drone Port",
             BlockKind::DronePort,
             "drone-port-behavior",
-            include_str!("../../../assets/builtin/drone_port/basic.rs"),
+            "assets/builtin/drone_port/basic.wat",
+            include_str!("../../../assets/builtin/drone_port/basic.wat"),
         ),
     ] {
         let id = id.to_string();
@@ -1152,11 +1197,11 @@ fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
                     world: world.to_string(),
                     builtin: true,
                     used_by: 0,
-                    source_path: format!("assets/builtin/{}/behavior.rs", display_name),
+                    source_path: source_path.to_string(),
                     build_status: "builtin".to_string(),
                 },
                 source: source.to_string(),
-                wasm_hash: Some(hash_source(source)),
+                wasm_hash: Some(hash_wasm_source(source).expect("valid builtin WAT")),
             },
         );
     }
@@ -1216,24 +1261,6 @@ fn block_at_snapshot(blocks: &BTreeMap<EntityId, Block>, pos: Pos) -> Option<Ent
         .map(|block| block.id.clone())
 }
 
-fn infer_turret_rules(source: &str) -> Vec<TargetRule> {
-    let lower = source.to_ascii_lowercase();
-    let mut rules = Vec::new();
-    for (needle, kind) in [
-        ("runner", EnemyKind::Runner),
-        ("wire_cutter", EnemyKind::WireCutter),
-        ("wire-cutter", EnemyKind::WireCutter),
-        ("armored", EnemyKind::Armored),
-        ("grunt", EnemyKind::Grunt),
-    ] {
-        if lower.contains(needle) {
-            rules.push(TargetRule::Kind(kind));
-        }
-    }
-    rules.push(TargetRule::Nearest);
-    rules
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1264,7 +1291,7 @@ mod tests {
     fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
         let mut sim = Simulation::new("/tmp/xac-test").unwrap();
 
-        sim.place_block(BlockKind::Core, Pos { x: 31, y: 32 }, Direction::East)
+        sim.place_block(BlockKind::Core, Pos { x: 20, y: 29 }, Direction::East)
             .unwrap();
         sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
             .unwrap();
@@ -1277,13 +1304,83 @@ mod tests {
         assert_eq!(drill.behavior_ref.as_deref(), Some("builtin.drill.basic"));
 
         let source = sim.open_behavior("builtin.drill.basic").unwrap();
-        assert!(source.source.contains("loop:"));
-        assert!(source.source.contains("self.mine()"));
+        assert!(source.source.contains("(module"));
+        assert!(source.source.contains(r#"(export "tick")"#));
+        assert!(source.source.contains("(loop"));
+        assert!(source.source.contains("(i32.const 1)"));
 
         sim.step_ticks(260);
         let conveyor_id = sim.block_id_at(Pos { x: 21, y: 30 }).unwrap();
         let mined = sim.blocks[&drill_id].inventory.count(&ItemKind::Ore)
             + sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore);
         assert!(mined > 0, "drill should mine ore from its tile");
+    }
+
+    #[test]
+    fn behavior_build_compiles_wat_and_save_invalidates_cache() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        sim.place_block(BlockKind::Turret, Pos { x: 33, y: 32 }, Direction::East)
+            .unwrap();
+        let block_id = sim.selected_id.clone().unwrap();
+        let source = sim.edit_builtin_copy(&block_id).unwrap();
+        let behavior_id = source.summary.id;
+
+        sim.save_behavior(&behavior_id, xac_wasm::wat_const_action(30))
+            .unwrap();
+        let result = sim.build_behavior(&behavior_id).unwrap();
+        assert!(result.success);
+        assert!(result.wasm_hash.is_some());
+        assert!(sim.compiled_behaviors.contains_key(&behavior_id));
+
+        sim.save_behavior(&behavior_id, "(module".to_string())
+            .unwrap();
+        assert!(!sim.compiled_behaviors.contains_key(&behavior_id));
+        assert!(sim.behaviors[&behavior_id].wasm_hash.is_none());
+
+        let result = sim.build_behavior(&behavior_id).unwrap();
+        assert!(!result.success);
+        assert!(result.message.contains("parse behavior WAT"));
+    }
+
+    #[test]
+    fn cpu_node_increases_wasm_driven_drill_throughput() {
+        fn setup(with_cpu_node: bool) -> (Simulation, EntityId) {
+            let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+            sim.place_block(BlockKind::Core, Pos { x: 20, y: 29 }, Direction::East)
+                .unwrap();
+            if with_cpu_node {
+                sim.place_block(BlockKind::CpuNode, Pos { x: 20, y: 28 }, Direction::East)
+                    .unwrap();
+            }
+            for x in 21..29 {
+                sim.place_block(BlockKind::Router, Pos { x, y: 29 }, Direction::East)
+                    .unwrap();
+            }
+            sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+                .unwrap();
+            let drill_id = sim.selected_id.clone().unwrap();
+            (sim, drill_id)
+        }
+
+        let (mut slow_sim, slow_drill_id) = setup(false);
+        let (mut fast_sim, fast_drill_id) = setup(true);
+
+        slow_sim.step_ticks(260);
+        fast_sim.step_ticks(260);
+
+        let slow_rate = slow_sim.blocks[&slow_drill_id].effective_cpu_rate;
+        let fast_rate = fast_sim.blocks[&fast_drill_id].effective_cpu_rate;
+        let slow_ore = slow_sim.blocks[&slow_drill_id]
+            .inventory
+            .count(&ItemKind::Ore);
+        let fast_ore = fast_sim.blocks[&fast_drill_id]
+            .inventory
+            .count(&ItemKind::Ore);
+
+        assert!(fast_rate > slow_rate);
+        assert!(
+            fast_ore > slow_ore,
+            "cpu node should increase WAT-driven drill throughput: slow={slow_ore}, fast={fast_ore}"
+        );
     }
 }

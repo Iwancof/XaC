@@ -26,10 +26,11 @@ impl Pos {
     }
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
     North,
+    #[default]
     East,
     South,
     West,
@@ -52,12 +53,6 @@ impl Direction {
             Direction::South,
             Direction::West,
         ]
-    }
-}
-
-impl Default for Direction {
-    fn default() -> Self {
-        Self::East
     }
 }
 
