@@ -23,7 +23,7 @@ pub enum BehaviorIntent {
         preferred: Vec<Direction>,
     },
     Assembler {
-        recipe: ItemKind,
+        commands: Vec<AssemblerCommand>,
     },
     Turret {
         priority: Vec<TargetRule>,
@@ -43,6 +43,12 @@ pub enum BehaviorIntent {
 pub enum DrillCommand {
     Mine,
     Output { item: ItemKind },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum AssemblerCommand {
+    SetRecipe { recipe: ItemKind },
+    Produce { recipe: ItemKind },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -97,6 +103,7 @@ pub struct BehaviorHostInput {
     pub drill_ore_kind: Option<ItemKind>,
     pub can_produce: bool,
     pub assembler_can_produce: [bool; 2],
+    pub assembler_current_recipe: Option<ItemKind>,
     pub assembler_input_counts: BTreeMap<ItemKind, i32>,
     pub assembler_output_counts: BTreeMap<ItemKind, i32>,
     pub ammo_count: i32,
@@ -127,10 +134,14 @@ struct BehaviorHostState {
 
 impl BehaviorHostState {
     fn new(input: BehaviorHostInput) -> Self {
+        let assembler_recipe = input
+            .assembler_current_recipe
+            .clone()
+            .unwrap_or(ItemKind::Ammo);
         Self {
             input,
             intent: BehaviorIntent::Noop,
-            assembler_recipe: ItemKind::Ammo,
+            assembler_recipe,
             net_writes: Vec::new(),
             host_over_budget: false,
         }
@@ -148,6 +159,7 @@ mod host_cost {
     pub const OUTPUT_AVAILABLE: u64 = 1;
     pub const OUTPUT_ITEM_AVAILABLE: u64 = 2;
     pub const SET_RECIPE: u64 = 2;
+    pub const CURRENT_RECIPE: u64 = 1;
     pub const CAN_PRODUCE: u64 = 1;
     pub const PRODUCE: u64 = 2;
     pub const ASSEMBLER_COUNT: u64 = 1;
@@ -355,7 +367,12 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
             module == "xac:assembler"
                 && matches!(
                     name,
-                    "set_recipe" | "can_produce" | "input_count" | "output_count" | "produce"
+                    "set_recipe"
+                        | "current_recipe"
+                        | "can_produce"
+                        | "input_count"
+                        | "output_count"
+                        | "produce"
                 )
         }
         BehaviorKind::Turret => {
@@ -669,8 +686,25 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             let Some(recipe) = recipe_from_code(recipe) else {
                 return 0;
             };
-            caller.data_mut().assembler_recipe = recipe;
+            caller.data_mut().assembler_recipe = recipe.clone();
+            push_assembler_command(caller.data_mut(), AssemblerCommand::SetRecipe { recipe });
             1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:assembler",
+        "current_recipe",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::CURRENT_RECIPE) {
+                return -1;
+            }
+            caller
+                .data()
+                .input
+                .assembler_current_recipe
+                .as_ref()
+                .map(recipe_code)
+                .unwrap_or(-1)
         },
     )?;
     linker.func_wrap(
@@ -741,7 +775,7 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !can_progress {
                 return 0;
             }
-            caller.data_mut().intent = BehaviorIntent::Assembler { recipe };
+            push_assembler_command(caller.data_mut(), AssemblerCommand::Produce { recipe });
             1
         },
     )?;
@@ -1156,6 +1190,17 @@ fn push_drill_command(state: &mut BehaviorHostState, command: DrillCommand) {
     }
 }
 
+fn push_assembler_command(state: &mut BehaviorHostState, command: AssemblerCommand) {
+    match &mut state.intent {
+        BehaviorIntent::Assembler { commands } => commands.push(command),
+        _ => {
+            state.intent = BehaviorIntent::Assembler {
+                commands: vec![command],
+            };
+        }
+    }
+}
+
 fn push_drone_port_command(state: &mut BehaviorHostState, command: DronePortCommand) {
     match &mut state.intent {
         BehaviorIntent::DronePort { commands } => commands.push(command),
@@ -1223,10 +1268,24 @@ fn action_code_to_intent(kind: BehaviorKind, action_code: i32) -> Result<Behavio
         13 if kind == BehaviorKind::Router => router_dir(Direction::South),
         14 if kind == BehaviorKind::Router => router_dir(Direction::West),
         20 if kind == BehaviorKind::Assembler => Ok(BehaviorIntent::Assembler {
-            recipe: ItemKind::Plate,
+            commands: vec![
+                AssemblerCommand::SetRecipe {
+                    recipe: ItemKind::Plate,
+                },
+                AssemblerCommand::Produce {
+                    recipe: ItemKind::Plate,
+                },
+            ],
         }),
         21 if kind == BehaviorKind::Assembler => Ok(BehaviorIntent::Assembler {
-            recipe: ItemKind::Ammo,
+            commands: vec![
+                AssemblerCommand::SetRecipe {
+                    recipe: ItemKind::Ammo,
+                },
+                AssemblerCommand::Produce {
+                    recipe: ItemKind::Ammo,
+                },
+            ],
         }),
         30 if kind == BehaviorKind::Turret => Ok(BehaviorIntent::Turret {
             priority: vec![TargetRule::Nearest],
@@ -1317,6 +1376,14 @@ fn recipe_from_code(code: i32) -> Option<ItemKind> {
         0 => Some(ItemKind::Plate),
         1 => Some(ItemKind::Ammo),
         _ => None,
+    }
+}
+
+fn recipe_code(recipe: &ItemKind) -> i32 {
+    match recipe {
+        ItemKind::Plate => 0,
+        ItemKind::Ammo => 1,
+        _ => -1,
     }
 }
 
@@ -1468,7 +1535,15 @@ mod tests {
         ));
         assert!(matches!(
             action_code_to_intent(BehaviorKind::Assembler, 21).unwrap(),
-            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
+            BehaviorIntent::Assembler { ref commands }
+                if commands == &vec![
+                    AssemblerCommand::SetRecipe {
+                        recipe: ItemKind::Ammo
+                    },
+                    AssemblerCommand::Produce {
+                        recipe: ItemKind::Ammo
+                    }
+                ]
         ));
     }
 
@@ -1932,7 +2007,18 @@ mod tests {
             .unwrap();
         assert!(matches!(
             eval.intent,
-            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
+            BehaviorIntent::Assembler { ref commands }
+                if commands == &vec![
+                    AssemblerCommand::SetRecipe {
+                        recipe: ItemKind::Plate
+                    },
+                    AssemblerCommand::SetRecipe {
+                        recipe: ItemKind::Ammo
+                    },
+                    AssemblerCommand::Produce {
+                        recipe: ItemKind::Ammo
+                    }
+                ]
         ));
 
         let mut output_counts = BTreeMap::new();
@@ -1950,7 +2036,77 @@ mod tests {
             .unwrap();
         assert!(matches!(
             eval.intent,
-            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Plate
+            BehaviorIntent::Assembler { ref commands }
+                if commands == &vec![
+                    AssemblerCommand::SetRecipe {
+                        recipe: ItemKind::Plate
+                    },
+                    AssemblerCommand::Produce {
+                        recipe: ItemKind::Plate
+                    }
+                ]
+        ));
+    }
+
+    #[test]
+    fn assembler_can_read_current_recipe_from_host_state() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::Assembler,
+                r#"(module
+                  (import "xac:assembler" "current_recipe" (func $current_recipe (result i32)))
+                  (import "xac:assembler" "set_recipe" (func $set_recipe (param i32) (result i32)))
+                  (func (export "tick")
+                    (if (i32.eq (call $current_recipe) (i32.const 0))
+                      (then
+                        (drop (call $set_recipe (i32.const 1)))))))"#,
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    assembler_current_recipe: Some(ItemKind::Plate),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Assembler { ref commands }
+                if commands == &vec![AssemblerCommand::SetRecipe {
+                    recipe: ItemKind::Ammo
+                }]
+        ));
+    }
+
+    #[test]
+    fn xac_script_can_branch_on_current_assembler_recipe() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "if current_recipe == ammo set_recipe plate";
+        let wat = compile_source_to_wat(BehaviorKind::Assembler, source).unwrap();
+        assert!(wat.contains(r#""current_recipe""#));
+        let compiled = runtime
+            .compile_wat(BehaviorKind::Assembler, source)
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    assembler_current_recipe: Some(ItemKind::Ammo),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Assembler { ref commands }
+                if commands == &vec![AssemblerCommand::SetRecipe {
+                    recipe: ItemKind::Plate
+                }]
         ));
     }
 
@@ -2306,7 +2462,15 @@ mod tests {
             .unwrap();
         assert!(matches!(
             eval.intent,
-            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
+            BehaviorIntent::Assembler { ref commands }
+                if commands == &vec![
+                    AssemblerCommand::SetRecipe {
+                        recipe: ItemKind::Ammo
+                    },
+                    AssemblerCommand::Produce {
+                        recipe: ItemKind::Ammo
+                    }
+                ]
         ));
 
         let turret = runtime

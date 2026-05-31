@@ -996,6 +996,31 @@ mod tests {
     }
 
     #[test]
+    fn assembler_script_can_read_current_recipe_without_producing() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let assembler_id = sim.selected_id.clone().unwrap();
+        assign_script(
+            &mut sim,
+            &assembler_id,
+            "if current_recipe == ammo set_recipe plate",
+        );
+        sim.blocks.get_mut(&assembler_id).unwrap().recipe = Some("ammo".to_string());
+        sim.fuel_banks.insert(assembler_id.clone(), 100.0);
+
+        sim.step_ticks(1);
+
+        let assembler = &sim.blocks[&assembler_id];
+        assert_eq!(assembler.recipe.as_deref(), Some("plate"));
+        assert_eq!(
+            assembler.inventory.total(),
+            0,
+            "set_recipe should update the assembler goal without requiring produce"
+        );
+    }
+
+    #[test]
     fn turret_builtin_calls_host_api_and_attacks_enemy() {
         let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)

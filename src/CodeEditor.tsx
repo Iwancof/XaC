@@ -28,6 +28,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "push",
         "push_any",
         "set_recipe",
+        "current_recipe",
         "produce",
         "attack_nearest",
         "attack_best",

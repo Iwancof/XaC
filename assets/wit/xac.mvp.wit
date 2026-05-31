@@ -86,6 +86,7 @@ interface turret-api {
 
 interface assembler-api {
   set-recipe: func(recipe-id: string) -> bool;
+  current-recipe: func() -> string;
   can-produce: func() -> bool;
   produce: func() -> bool;
   input-count: func(item-kind: string) -> s32;

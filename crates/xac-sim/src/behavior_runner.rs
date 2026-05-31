@@ -1,7 +1,10 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
 use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel, TerrainKind};
-use xac_wasm::{BehaviorHostInput, BehaviorIntent, CompiledBehavior, DrillCommand, NetStoreWrite};
+use xac_wasm::{
+    AssemblerCommand, BehaviorHostInput, BehaviorIntent, CompiledBehavior, DrillCommand,
+    NetStoreWrite,
+};
 
 use crate::block_defs::can_accept_item;
 use crate::{Simulation, TICKS_PER_SECOND};
@@ -98,6 +101,7 @@ impl Simulation {
                 self.can_progress_recipe(block_id, ItemKind::Plate.as_str()),
                 self.can_progress_recipe(block_id, ItemKind::Ammo.as_str()),
             ],
+            assembler_current_recipe: block.recipe.as_deref().and_then(ItemKind::from_id),
             assembler_input_counts: block_inventory_counts.clone(),
             assembler_output_counts: block_inventory_counts,
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
@@ -252,13 +256,25 @@ impl Simulation {
                     }
                 }
             }
-            BehaviorIntent::Assembler { recipe } => {
-                let recipe_id = recipe.as_str().to_string();
-                if let Some(block) = self.blocks.get_mut(block_id) {
-                    block.recipe = Some(recipe_id.clone());
-                    block.status = format!("recipe: {recipe_id} priority");
+            BehaviorIntent::Assembler { commands } => {
+                for command in commands {
+                    match command {
+                        AssemblerCommand::SetRecipe { recipe } => {
+                            let recipe_id = recipe.as_str().to_string();
+                            if let Some(block) = self.blocks.get_mut(block_id) {
+                                block.recipe = Some(recipe_id.clone());
+                                block.status = format!("recipe: {recipe_id} priority");
+                            }
+                        }
+                        AssemblerCommand::Produce { recipe } => {
+                            let recipe_id = recipe.as_str().to_string();
+                            if let Some(block) = self.blocks.get_mut(block_id) {
+                                block.recipe = Some(recipe_id);
+                            }
+                            self.run_assembler(block_id);
+                        }
+                    }
                 }
-                self.run_assembler(block_id);
             }
             BehaviorIntent::Turret { priority } => self.run_turret_once(block_id, &priority),
             BehaviorIntent::TurretScanIndex { index } => {

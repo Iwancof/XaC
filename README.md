@@ -85,6 +85,13 @@ if output_count ammo < 100 set_recipe ammo
 if can_produce produce
 ```
 
+They can also branch on the saved recipe goal without producing in the same
+tick:
+
+```text
+if current_recipe == ammo set_recipe plate
+```
+
 Script can also touch the shared network store through integer keys:
 
 ```text

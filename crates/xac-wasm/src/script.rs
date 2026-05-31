@@ -55,6 +55,7 @@ enum HostImport {
     RouterOutputAvailable,
     RouterOutputItemAvailable,
     AssemblerSetRecipe,
+    AssemblerCurrentRecipe,
     AssemblerCanProduce,
     AssemblerInputCount,
     AssemblerOutputCount,
@@ -119,6 +120,9 @@ impl HostImport {
             }
             HostImport::AssemblerSetRecipe => {
                 r#"  (import "xac:assembler" "set_recipe" (func $set_recipe (param i32) (result i32)))"#
+            }
+            HostImport::AssemblerCurrentRecipe => {
+                r#"  (import "xac:assembler" "current_recipe" (func $current_recipe (result i32)))"#
             }
             HostImport::AssemblerCanProduce => {
                 r#"  (import "xac:assembler" "can_produce" (func $can_produce (result i32)))"#
@@ -230,6 +234,9 @@ enum Condition {
         dir: Direction,
     },
     CanProduce,
+    CurrentRecipeEq {
+        recipe: ItemKind,
+    },
     AssemblerInputCount {
         item: ItemKind,
         comparison: CountComparison,
@@ -411,6 +418,12 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
             rest,
         )),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
+        ["if", "current_recipe", "==", recipe, rest @ ..] => Ok((
+            Condition::CurrentRecipeEq {
+                recipe: parse_recipe(line_no, recipe)?,
+            },
+            rest,
+        )),
         ["if", "input_count", item, comparison, value, rest @ ..] => Ok((
             Condition::AssemblerInputCount {
                 item: parse_item_or_err(line_no, item)?,
@@ -707,6 +720,10 @@ fn add_condition_import(
             ensure_kind(kind, BehaviorKind::Assembler, line_no, "can_produce")?;
             imports.insert(HostImport::AssemblerCanProduce);
         }
+        Condition::CurrentRecipeEq { .. } => {
+            ensure_kind(kind, BehaviorKind::Assembler, line_no, "current_recipe")?;
+            imports.insert(HostImport::AssemblerCurrentRecipe);
+        }
         Condition::AssemblerInputCount { .. } => {
             ensure_kind(kind, BehaviorKind::Assembler, line_no, "input_count")?;
             imports.insert(HostImport::AssemblerInputCount);
@@ -920,6 +937,12 @@ fn render_condition(condition: Condition) -> String {
             )
         }
         Condition::CanProduce => "(call $can_produce)".to_string(),
+        Condition::CurrentRecipeEq { recipe } => {
+            format!(
+                "(i32.eq (call $current_recipe) (i32.const {}))",
+                recipe_code(&recipe)
+            )
+        }
         Condition::AssemblerInputCount {
             item,
             comparison,
