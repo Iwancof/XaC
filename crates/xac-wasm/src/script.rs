@@ -49,7 +49,9 @@ enum HostImport {
     DrillMine,
     RouterPushAny,
     RouterPushDir,
+    RouterPushItemDir,
     RouterOutputAvailable,
+    RouterOutputItemAvailable,
     AssemblerSetRecipe,
     AssemblerCanProduce,
     AssemblerProduce,
@@ -75,8 +77,14 @@ impl HostImport {
             HostImport::RouterPushDir => {
                 r#"  (import "xac:router" "push_dir" (func $push_dir (param i32) (result i32)))"#
             }
+            HostImport::RouterPushItemDir => {
+                r#"  (import "xac:router" "push_item_dir" (func $push_item_dir (param i32 i32) (result i32)))"#
+            }
             HostImport::RouterOutputAvailable => {
                 r#"  (import "xac:router" "output_available" (func $output_available (param i32) (result i32)))"#
+            }
+            HostImport::RouterOutputItemAvailable => {
+                r#"  (import "xac:router" "output_item_available" (func $output_item_available (param i32 i32) (result i32)))"#
             }
             HostImport::AssemblerSetRecipe => {
                 r#"  (import "xac:assembler" "set_recipe" (func $set_recipe (param i32) (result i32)))"#
@@ -112,10 +120,11 @@ impl HostImport {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum Condition {
     OutputBlocked,
     OutputAvailable(Direction),
+    OutputItemAvailable { item: ItemKind, dir: Direction },
     CanProduce,
     AmmoGtZero,
     FuelGt { value: u64 },
@@ -130,6 +139,7 @@ enum ScriptAction {
     Mine,
     PushAny,
     PushDir(Direction),
+    PushItemDir { item: ItemKind, dir: Direction },
     SetRecipe { recipe: ItemKind },
     Produce,
     AttackNearest,
@@ -166,7 +176,7 @@ fn parse_script_statement(
     let tokens: Vec<_> = line.split_whitespace().collect();
     if tokens.first() == Some(&"if") {
         let (condition, action_tokens) = parse_condition(line_no, &tokens)?;
-        add_condition_import(kind, line_no, condition, imports)?;
+        add_condition_import(kind, line_no, &condition, imports)?;
         let action = parse_script_action(kind, line_no, action_tokens, imports)?;
         Ok(ScriptStatement::If { condition, action })
     } else {
@@ -179,6 +189,13 @@ fn parse_script_statement(
 fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition, &'a [&'a str])> {
     match tokens {
         ["if", "output_blocked", rest @ ..] => Ok((Condition::OutputBlocked, rest)),
+        ["if", "output_available", item, dir, rest @ ..] if parse_item(item).is_some() => Ok((
+            Condition::OutputItemAvailable {
+                item: parse_item(item).expect("guarded by parse_item"),
+                dir: parse_direction(line_no, dir)?,
+            },
+            rest,
+        )),
         ["if", "output_available", dir, rest @ ..] => Ok((
             Condition::OutputAvailable(parse_direction(line_no, dir)?),
             rest,
@@ -234,6 +251,13 @@ fn parse_script_action(
             imports.insert(HostImport::RouterPushDir);
             Ok(ScriptAction::PushDir(dir))
         }
+        ["push", item, dir] if parse_item(item).is_some() => {
+            ensure_kind(kind, BlockKind::Router, line_no, "push")?;
+            let item = parse_item(item).expect("guarded by parse_item");
+            let dir = parse_direction(line_no, dir)?;
+            imports.insert(HostImport::RouterPushItemDir);
+            Ok(ScriptAction::PushItemDir { item, dir })
+        }
         ["set_recipe", recipe] => {
             ensure_kind(kind, BlockKind::Assembler, line_no, "set_recipe")?;
             imports.insert(HostImport::AssemblerSetRecipe);
@@ -278,7 +302,7 @@ fn parse_script_action(
 fn add_condition_import(
     kind: BlockKind,
     line_no: usize,
-    condition: Condition,
+    condition: &Condition,
     imports: &mut BTreeSet<HostImport>,
 ) -> Result<()> {
     match condition {
@@ -289,6 +313,10 @@ fn add_condition_import(
         Condition::OutputAvailable(_) => {
             ensure_kind(kind, BlockKind::Router, line_no, "output_available")?;
             imports.insert(HostImport::RouterOutputAvailable);
+        }
+        Condition::OutputItemAvailable { .. } => {
+            ensure_kind(kind, BlockKind::Router, line_no, "output_available")?;
+            imports.insert(HostImport::RouterOutputItemAvailable);
         }
         Condition::CanProduce => {
             ensure_kind(kind, BlockKind::Assembler, line_no, "can_produce")?;
@@ -333,6 +361,17 @@ fn parse_recipe(line_no: usize, recipe: &str) -> Result<ItemKind> {
         "ammo" => Ok(ItemKind::Ammo),
         "plate" => Ok(ItemKind::Plate),
         _ => Err(anyhow!("line {line_no}: unknown recipe {recipe}")),
+    }
+}
+
+fn parse_item(item: &str) -> Option<ItemKind> {
+    match item {
+        "ore" => Some(ItemKind::Ore),
+        "plate" => Some(ItemKind::Plate),
+        "ammo" => Some(ItemKind::Ammo),
+        "cpu_part" | "cpu-part" => Some(ItemKind::CpuPart),
+        "drone_part" | "drone-part" => Some(ItemKind::DronePart),
+        _ => None,
     }
 }
 
@@ -389,7 +428,7 @@ fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
     match statement {
         ScriptStatement::Action(action) => render_action(action.clone(), "    ", out),
         ScriptStatement::If { condition, action } => {
-            out.push(format!("    (if {}", render_condition(*condition)));
+            out.push(format!("    (if {}", render_condition(condition.clone())));
             out.push("      (then".to_string());
             render_action(action.clone(), "        ", out);
             out.push("      ))".to_string());
@@ -403,6 +442,13 @@ fn render_condition(condition: Condition) -> String {
         Condition::OutputAvailable(dir) => {
             format!(
                 "(call $output_available (i32.const {}))",
+                direction_code(dir)
+            )
+        }
+        Condition::OutputItemAvailable { item, dir } => {
+            format!(
+                "(call $output_item_available (i32.const {}) (i32.const {}))",
+                item_code(&item),
                 direction_code(dir)
             )
         }
@@ -428,6 +474,11 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
         ScriptAction::PushAny => out.push(format!("{indent}(drop (call $push_any))")),
         ScriptAction::PushDir(dir) => out.push(format!(
             "{indent}(drop (call $push_dir (i32.const {})))",
+            direction_code(dir)
+        )),
+        ScriptAction::PushItemDir { item, dir } => out.push(format!(
+            "{indent}(drop (call $push_item_dir (i32.const {}) (i32.const {})))",
+            item_code(&item),
             direction_code(dir)
         )),
         ScriptAction::SetRecipe { recipe } => out.push(format!(
@@ -461,5 +512,15 @@ fn recipe_code(recipe: &ItemKind) -> i32 {
         ItemKind::Plate => 0,
         ItemKind::Ammo => 1,
         _ => 0,
+    }
+}
+
+fn item_code(item: &ItemKind) -> i32 {
+    match item {
+        ItemKind::Ore => 0,
+        ItemKind::Plate => 1,
+        ItemKind::Ammo => 2,
+        ItemKind::CpuPart => 3,
+        ItemKind::DronePart => 4,
     }
 }

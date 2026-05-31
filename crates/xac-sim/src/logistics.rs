@@ -40,6 +40,26 @@ impl Simulation {
     }
 
     pub(crate) fn transfer_from(&mut self, block_id: &str, dir: Direction, amount: u32) -> bool {
+        self.transfer_matching_item_from(block_id, dir, None, amount)
+    }
+
+    pub(crate) fn transfer_item_from(
+        &mut self,
+        block_id: &str,
+        dir: Direction,
+        item_kind: &ItemKind,
+        amount: u32,
+    ) -> bool {
+        self.transfer_matching_item_from(block_id, dir, Some(item_kind), amount)
+    }
+
+    fn transfer_matching_item_from(
+        &mut self,
+        block_id: &str,
+        dir: Direction,
+        item_filter: Option<&ItemKind>,
+        amount: u32,
+    ) -> bool {
         let (kind, src_pos) = match self.blocks.get(block_id) {
             Some(block) => (block.kind, block.pos),
             None => return false,
@@ -48,7 +68,9 @@ impl Simulation {
         let Some(dst_id) = self.block_id_at(dst_pos) else {
             return false;
         };
-        let Some((item_kind, available)) = self.transferable_item(block_id, &dst_id, amount) else {
+        let Some((item_kind, available)) =
+            self.transferable_item(block_id, &dst_id, item_filter, amount)
+        else {
             return false;
         };
         let moved = {
@@ -74,19 +96,39 @@ impl Simulation {
     }
 
     pub(crate) fn output_available(&self, block_id: &str, dir: Direction) -> bool {
+        self.output_matching_item_available(block_id, None, dir)
+    }
+
+    pub(crate) fn output_item_available(
+        &self,
+        block_id: &str,
+        item_kind: &ItemKind,
+        dir: Direction,
+    ) -> bool {
+        self.output_matching_item_available(block_id, Some(item_kind), dir)
+    }
+
+    fn output_matching_item_available(
+        &self,
+        block_id: &str,
+        item_filter: Option<&ItemKind>,
+        dir: Direction,
+    ) -> bool {
         let Some(src_pos) = self.blocks.get(block_id).map(|block| block.pos) else {
             return false;
         };
         let Some(dst_id) = self.block_id_at(src_pos.step(dir)) else {
             return false;
         };
-        self.transferable_item(block_id, &dst_id, 1).is_some()
+        self.transferable_item(block_id, &dst_id, item_filter, 1)
+            .is_some()
     }
 
     fn transferable_item(
         &self,
         src_id: &str,
         dst_id: &str,
+        item_filter: Option<&ItemKind>,
         amount: u32,
     ) -> Option<(ItemKind, u32)> {
         let src = self.blocks.get(src_id)?;
@@ -97,7 +139,11 @@ impl Simulation {
         src.inventory
             .items
             .iter()
-            .find(|(item_kind, available)| **available > 0 && can_accept_item(dst.kind, item_kind))
+            .find(|(item_kind, available)| {
+                **available > 0
+                    && item_filter.is_none_or(|filter| filter == *item_kind)
+                    && can_accept_item(dst.kind, item_kind)
+            })
             .map(|(kind, amount)| (kind.clone(), *amount))
     }
 }

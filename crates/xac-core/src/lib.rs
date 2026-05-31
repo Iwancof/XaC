@@ -110,6 +110,16 @@ pub enum ItemKind {
 }
 
 impl ItemKind {
+    pub fn all() -> [Self; 5] {
+        [
+            ItemKind::Ore,
+            ItemKind::Plate,
+            ItemKind::Ammo,
+            ItemKind::CpuPart,
+            ItemKind::DronePart,
+        ]
+    }
+
     pub fn from_id(id: &str) -> Option<Self> {
         match id {
             "ore" => Some(ItemKind::Ore),

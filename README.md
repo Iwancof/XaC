@@ -87,6 +87,7 @@ Routers can make availability checks before moving items:
 
 ```text
 if output_available east push east
+if output_available ammo east push ammo east
 ```
 
 Raw WebAssembly Text (`.wat`) is still accepted for lower-level tests and power

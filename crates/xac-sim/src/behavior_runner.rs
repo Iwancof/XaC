@@ -90,6 +90,14 @@ impl Simulation {
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
             router_output_available: Direction::all()
                 .map(|dir| self.output_available(block_id, dir)),
+            router_item_output_available: ItemKind::all()
+                .into_iter()
+                .map(|item| {
+                    let by_dir = Direction::all()
+                        .map(|dir| self.output_item_available(block_id, &item, dir));
+                    (item, by_dir)
+                })
+                .collect(),
             net_i32: self.network_i32_values(block.network_id),
             net_writable: block
                 .network_id
@@ -196,14 +204,19 @@ impl Simulation {
         match intent {
             BehaviorIntent::Noop => {}
             BehaviorIntent::DrillDefault => self.run_drill(block_id),
-            BehaviorIntent::Router { preferred } => {
+            BehaviorIntent::Router { item, preferred } => {
                 let dirs = if preferred.is_empty() {
                     Direction::all().to_vec()
                 } else {
                     preferred
                 };
                 for dir in dirs {
-                    if self.transfer_from(block_id, dir, 1) {
+                    let moved = if let Some(item) = item.as_ref() {
+                        self.transfer_item_from(block_id, dir, item, 1)
+                    } else {
+                        self.transfer_from(block_id, dir, 1)
+                    };
+                    if moved {
                         break;
                     }
                 }

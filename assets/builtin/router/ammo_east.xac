@@ -1,1 +1,1 @@
-push east
+if output_available ammo east push ammo east

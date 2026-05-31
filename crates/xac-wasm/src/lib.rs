@@ -16,9 +16,16 @@ use script::{
 pub enum BehaviorIntent {
     Noop,
     DrillDefault,
-    Router { preferred: Vec<Direction> },
-    Assembler { recipe: ItemKind },
-    Turret { priority: Vec<TargetRule> },
+    Router {
+        item: Option<ItemKind>,
+        preferred: Vec<Direction>,
+    },
+    Assembler {
+        recipe: ItemKind,
+    },
+    Turret {
+        priority: Vec<TargetRule>,
+    },
     DronePort,
     CarrierDrone,
 }
@@ -53,6 +60,7 @@ pub struct BehaviorHostInput {
     pub assembler_can_produce: [bool; 2],
     pub ammo_count: i32,
     pub router_output_available: [bool; 4],
+    pub router_item_output_available: BTreeMap<ItemKind, [bool; 4]>,
     pub net_i32: BTreeMap<i32, i32>,
     pub net_writable: bool,
 }
@@ -83,7 +91,9 @@ mod host_cost {
     pub const OUTPUT_BLOCKED: u64 = 1;
     pub const MINE: u64 = 2;
     pub const PUSH: u64 = 1;
+    pub const PUSH_ITEM: u64 = 2;
     pub const OUTPUT_AVAILABLE: u64 = 1;
+    pub const OUTPUT_ITEM_AVAILABLE: u64 = 2;
     pub const SET_RECIPE: u64 = 2;
     pub const CAN_PRODUCE: u64 = 1;
     pub const PRODUCE: u64 = 2;
@@ -283,6 +293,7 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 return 0;
             }
             caller.data_mut().intent = BehaviorIntent::Router {
+                item: None,
                 preferred: Direction::all().to_vec(),
             };
             1
@@ -299,6 +310,27 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 return 0;
             };
             caller.data_mut().intent = BehaviorIntent::Router {
+                item: None,
+                preferred: vec![dir],
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:router",
+        "push_item_dir",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32, dir: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::PUSH_ITEM) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            let Some(dir) = direction_from_code(dir) else {
+                return 0;
+            };
+            caller.data_mut().intent = BehaviorIntent::Router {
+                item: Some(item),
                 preferred: vec![dir],
             };
             1
@@ -315,6 +347,33 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 return 0;
             };
             if caller.data().input.router_output_available[direction_index(dir)] {
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:router",
+        "output_item_available",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32, dir: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::OUTPUT_ITEM_AVAILABLE) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            let Some(dir) = direction_from_code(dir) else {
+                return 0;
+            };
+            let available = caller
+                .data()
+                .input
+                .router_item_output_available
+                .get(&item)
+                .map(|by_dir| by_dir[direction_index(dir)])
+                .unwrap_or(false);
+            if available {
                 1
             } else {
                 0
@@ -498,6 +557,7 @@ fn action_code_to_intent(kind: BlockKind, action_code: i32) -> Result<BehaviorIn
         0 => Ok(BehaviorIntent::Noop),
         1 if kind == BlockKind::Drill => Ok(BehaviorIntent::DrillDefault),
         10 if kind == BlockKind::Router => Ok(BehaviorIntent::Router {
+            item: None,
             preferred: Direction::all().to_vec(),
         }),
         11 if kind == BlockKind::Router => router_dir(Direction::North),
@@ -556,6 +616,7 @@ fn attack_policy_to_rules(policy: i32) -> Option<Vec<TargetRule>> {
 
 fn router_dir(dir: Direction) -> Result<BehaviorIntent> {
     Ok(BehaviorIntent::Router {
+        item: None,
         preferred: vec![dir],
     })
 }
@@ -592,6 +653,17 @@ fn recipe_index(recipe: &ItemKind) -> usize {
         ItemKind::Plate => 0,
         ItemKind::Ammo => 1,
         _ => 0,
+    }
+}
+
+fn item_from_code(code: i32) -> Option<ItemKind> {
+    match code {
+        0 => Some(ItemKind::Ore),
+        1 => Some(ItemKind::Plate),
+        2 => Some(ItemKind::Ammo),
+        3 => Some(ItemKind::CpuPart),
+        4 => Some(ItemKind::DronePart),
+        _ => None,
     }
 }
 
@@ -696,7 +768,8 @@ mod tests {
     fn maps_router_and_assembler_actions() {
         assert!(matches!(
             action_code_to_intent(BlockKind::Router, 12).unwrap(),
-            BehaviorIntent::Router { preferred } if preferred == vec![Direction::East]
+            BehaviorIntent::Router { item, preferred }
+                if item.is_none() && preferred == vec![Direction::East]
         ));
         assert!(matches!(
             action_code_to_intent(BlockKind::Assembler, 21).unwrap(),
@@ -852,7 +925,41 @@ mod tests {
             .unwrap();
         assert!(matches!(
             eval.intent,
-            BehaviorIntent::Router { preferred } if preferred == vec![Direction::East]
+            BehaviorIntent::Router { item, preferred }
+                if item.is_none() && preferred == vec![Direction::East]
+        ));
+    }
+
+    #[test]
+    fn xac_script_can_push_specific_router_item() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "if output_available ammo east push ammo east";
+        let wat = compile_source_to_wat(BlockKind::Router, source).unwrap();
+        assert!(wat.contains(r#""output_item_available""#));
+        assert!(wat.contains(r#""push_item_dir""#));
+
+        let compiled = runtime.compile_wat(BlockKind::Router, source).unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 80, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+
+        let mut by_item = BTreeMap::new();
+        by_item.insert(ItemKind::Ammo, [false, true, false, false]);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    router_item_output_available: by_item,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Router { item, preferred }
+                if item == Some(ItemKind::Ammo) && preferred == vec![Direction::East]
         ));
     }
 
@@ -953,7 +1060,8 @@ mod tests {
             .unwrap();
         assert!(matches!(
             eval.intent,
-            BehaviorIntent::Router { preferred } if preferred == vec![Direction::East]
+            BehaviorIntent::Router { item, preferred }
+                if item.is_none() && preferred == vec![Direction::East]
         ));
 
         let assembler = runtime

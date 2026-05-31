@@ -50,8 +50,10 @@ interface router-api {
   use types.{item};
 
   push: func(dir: string, item: item) -> bool;
+  push-item-dir: func(item-kind: string, dir: string) -> bool;
   push-any: func(item: item) -> bool;
   output-available: func(dir: string) -> bool;
+  output-item-available: func(item-kind: string, dir: string) -> bool;
 }
 
 interface turret-api {
