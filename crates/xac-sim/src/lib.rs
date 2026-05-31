@@ -6,7 +6,9 @@ use xac_core::{
     Direction, Drone, Enemy, EnemyKind, EntityId, GameSnapshot, GameStatus, ItemKind, LogEntry,
     LogLevel, Network, Pos, TerrainKind, Tile,
 };
-use xac_wasm::{BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior};
+use xac_wasm::{
+    BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior, NetStoreWrite,
+};
 
 mod behavior;
 mod block_defs;
@@ -451,6 +453,7 @@ impl Simulation {
                     if let Some(package) = self.behaviors.get_mut(&behavior_ref) {
                         package.wasm_hash = Some(eval.wasm_hash);
                     }
+                    self.apply_net_writes(&id, eval.net_writes);
                     self.apply_behavior_intent(&id, eval.intent);
                 }
                 Err(error) => {
@@ -472,6 +475,51 @@ impl Simulation {
             output_blocked: self.output_blocked(block_id),
             can_produce: self.can_produce(block_id),
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
+            net_i32: self.network_i32_values(block.network_id),
+            net_writable: block
+                .network_id
+                .and_then(|network_id| self.networks.get(&network_id))
+                .map(|network| !network.read_only_cache)
+                .unwrap_or(false),
+        }
+    }
+
+    fn network_i32_values(&self, network_id: Option<u32>) -> BTreeMap<i32, i32> {
+        let Some(network_id) = network_id else {
+            return BTreeMap::new();
+        };
+        let Some(network) = self.networks.get(&network_id) else {
+            return BTreeMap::new();
+        };
+        network
+            .store
+            .iter()
+            .filter_map(|(key, value)| {
+                Some((
+                    key.parse().ok()?,
+                    value.as_i64().and_then(|v| i32::try_from(v).ok())?,
+                ))
+            })
+            .collect()
+    }
+
+    fn apply_net_writes(&mut self, block_id: &str, writes: Vec<NetStoreWrite>) {
+        if writes.is_empty() {
+            return;
+        }
+        let Some(network_id) = self.blocks.get(block_id).and_then(|block| block.network_id) else {
+            return;
+        };
+        let Some(network) = self.networks.get_mut(&network_id) else {
+            return;
+        };
+        if network.read_only_cache {
+            return;
+        }
+        for write in writes {
+            network
+                .store
+                .insert(write.key.to_string(), serde_json::Value::from(write.value));
         }
     }
 
@@ -881,6 +929,34 @@ mod tests {
         let result = sim.build_behavior(&behavior_id).unwrap();
         assert!(!result.success);
         assert!(result.message.contains("parse behavior source as WAT"));
+    }
+
+    #[test]
+    fn xac_script_writes_network_store_and_recompute_preserves_it() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let router_id = sim.selected_id.clone().unwrap();
+        let source = sim.edit_builtin_copy(&router_id).unwrap();
+        sim.save_behavior(&source.summary.id, "net_set 7 42".to_string())
+            .unwrap();
+        sim.fuel_banks.insert(router_id.clone(), 100.0);
+
+        sim.step_ticks(1);
+
+        let network_id = sim.blocks[&router_id].network_id.unwrap();
+        assert_eq!(
+            sim.networks[&network_id].store.get("7"),
+            Some(&serde_json::Value::from(42))
+        );
+
+        sim.recompute_networks();
+
+        let network_id = sim.blocks[&router_id].network_id.unwrap();
+        assert_eq!(
+            sim.networks[&network_id].store.get("7"),
+            Some(&serde_json::Value::from(42))
+        );
     }
 
     #[test]

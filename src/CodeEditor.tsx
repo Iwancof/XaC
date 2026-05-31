@@ -31,6 +31,8 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "attack_nearest",
         "attack_best",
         "dispatch",
+        "net",
+        "net_set",
         "output_blocked",
         "can_produce",
         "ammo_count",
@@ -62,6 +64,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "i32.const",
         "i32.add",
         "i32.eqz",
+        "i32.eq",
         "i32.ge_s"
       ],
       tokenizer: {

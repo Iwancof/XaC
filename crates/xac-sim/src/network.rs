@@ -1,4 +1,4 @@
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use xac_core::{BlockKind, Direction, Network};
 
@@ -12,7 +12,7 @@ impl Simulation {
             block.effective_cpu_rate = block.kind.local_cpu_rate();
             block.active = block.kind.is_programmable();
         }
-        self.networks.clear();
+        let previous_networks = std::mem::take(&mut self.networks);
 
         let connector_positions: BTreeSet<_> = self
             .blocks
@@ -29,6 +29,7 @@ impl Simulation {
             }
             let component = connected_component(start, &connector_positions, &mut seen);
             let block_ids = self.network_block_ids(&component);
+            let store = inherit_store(&block_ids, &previous_networks);
             let cpu_pool = block_ids
                 .iter()
                 .filter_map(|id| self.blocks.get(id))
@@ -72,7 +73,7 @@ impl Simulation {
                     active_devices,
                     effective_per_device,
                     block_ids,
-                    store: Default::default(),
+                    store,
                     read_only_cache,
                 },
             );
@@ -101,6 +102,29 @@ impl Simulation {
         }
         block_ids.into_iter().collect()
     }
+}
+
+fn inherit_store(
+    block_ids: &[String],
+    previous_networks: &BTreeMap<u32, Network>,
+) -> BTreeMap<String, serde_json::Value> {
+    let mut overlapping: Vec<_> = previous_networks
+        .values()
+        .filter_map(|network| {
+            let overlap = block_ids
+                .iter()
+                .filter(|id| network.block_ids.contains(id))
+                .count();
+            (overlap > 0).then_some((overlap, &network.store))
+        })
+        .collect();
+    overlapping.sort_by_key(|(overlap, _)| *overlap);
+
+    let mut merged = BTreeMap::new();
+    for (_, store) in overlapping {
+        merged.extend(store.clone());
+    }
+    merged
 }
 
 fn connected_component(

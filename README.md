@@ -56,6 +56,13 @@ mine
 The backend lowers that source to WebAssembly Text, compiles it to Wasm with
 Wasmtime, links a small host API surface such as `xac:drill/mine`, and runs
 each `tick()` with fuel derived from the block's effective network CPU rate.
+Script can also touch the shared network store through integer keys:
+
+```text
+net_set 7 42
+if net 7 == 42 attack_best lowest_hp
+```
+
 Raw WebAssembly Text (`.wat`) is still accepted for lower-level tests and power
 users. The older `tick() -> i32` action-code ABI remains as a compatibility
 fallback; new built-ins call host imports so player code can exercise real block

@@ -49,6 +49,8 @@ enum HostImport {
     TurretAttackNearest,
     TurretAttackBest,
     DronePortDispatch,
+    NetStoreGetI32,
+    NetStoreSetI32,
 }
 
 impl HostImport {
@@ -85,6 +87,12 @@ impl HostImport {
             HostImport::DronePortDispatch => {
                 r#"  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))"#
             }
+            HostImport::NetStoreGetI32 => {
+                r#"  (import "xac:net" "store_get_i32" (func $net_get_i32 (param i32) (result i32)))"#
+            }
+            HostImport::NetStoreSetI32 => {
+                r#"  (import "xac:net" "store_set_i32" (func $net_set_i32 (param i32 i32) (result i32)))"#
+            }
         }
     }
 }
@@ -94,6 +102,8 @@ enum Condition {
     OutputBlocked,
     CanProduce,
     AmmoGtZero,
+    NetGt { key: i32, value: i32 },
+    NetEq { key: i32, value: i32 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -108,6 +118,7 @@ enum ScriptAction {
     AttackNearest,
     AttackBest { lowest_hp: bool },
     Dispatch,
+    NetSet { key: i32, value: i32 },
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +164,20 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         ["if", "output_blocked", rest @ ..] => Ok((Condition::OutputBlocked, rest)),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
+        ["if", "net", key, ">", value, rest @ ..] => Ok((
+            Condition::NetGt {
+                key: parse_i32(line_no, "network key", key)?,
+                value: parse_i32(line_no, "network value", value)?,
+            },
+            rest,
+        )),
+        ["if", "net", key, "==", value, rest @ ..] => Ok((
+            Condition::NetEq {
+                key: parse_i32(line_no, "network key", key)?,
+                value: parse_i32(line_no, "network value", value)?,
+            },
+            rest,
+        )),
         _ => Err(anyhow!("line {line_no}: unknown condition")),
     }
 }
@@ -211,6 +236,13 @@ fn parse_script_action(
             imports.insert(HostImport::DronePortDispatch);
             Ok(ScriptAction::Dispatch)
         }
+        ["net_set", key, value] => {
+            imports.insert(HostImport::NetStoreSetI32);
+            Ok(ScriptAction::NetSet {
+                key: parse_i32(line_no, "network key", key)?,
+                value: parse_i32(line_no, "network value", value)?,
+            })
+        }
         [] => Ok(ScriptAction::Noop),
         _ => Err(anyhow!("line {line_no}: unknown statement")),
     }
@@ -234,6 +266,9 @@ fn add_condition_import(
         Condition::AmmoGtZero => {
             ensure_kind(kind, BlockKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
+        }
+        Condition::NetGt { .. } | Condition::NetEq { .. } => {
+            imports.insert(HostImport::NetStoreGetI32);
         }
     }
     Ok(())
@@ -275,6 +310,12 @@ fn parse_attack_policy(line_no: usize, policy: &str) -> Result<bool> {
     }
 }
 
+fn parse_i32(line_no: usize, label: &str, value: &str) -> Result<i32> {
+    value
+        .parse()
+        .map_err(|_| anyhow!("line {line_no}: invalid {label} {value}"))
+}
+
 fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
     match statement {
         ScriptStatement::Action(action) => render_action(*action, "    ", out),
@@ -287,11 +328,17 @@ fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
     }
 }
 
-fn render_condition(condition: Condition) -> &'static str {
+fn render_condition(condition: Condition) -> String {
     match condition {
-        Condition::OutputBlocked => "(call $output_blocked)",
-        Condition::CanProduce => "(call $can_produce)",
-        Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))",
+        Condition::OutputBlocked => "(call $output_blocked)".to_string(),
+        Condition::CanProduce => "(call $can_produce)".to_string(),
+        Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
+        Condition::NetGt { key, value } => {
+            format!("(i32.gt_s (call $net_get_i32 (i32.const {key})) (i32.const {value}))")
+        }
+        Condition::NetEq { key, value } => {
+            format!("(i32.eq (call $net_get_i32 (i32.const {key})) (i32.const {value}))")
+        }
     }
 }
 
@@ -316,6 +363,9 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
             if lowest_hp { 1 } else { 0 }
         )),
         ScriptAction::Dispatch => out.push(format!("{indent}(drop (call $dispatch))")),
+        ScriptAction::NetSet { key, value } => out.push(format!(
+            "{indent}(drop (call $net_set_i32 (i32.const {key}) (i32.const {value})))"
+        )),
     }
 }
 

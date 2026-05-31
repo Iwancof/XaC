@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
 use xac_core::{BlockKind, Direction, EnemyKind};
 
@@ -28,10 +29,17 @@ pub enum TargetRule {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BehaviorEval {
     pub intent: BehaviorIntent,
+    pub net_writes: Vec<NetStoreWrite>,
     pub fuel_spent: u64,
     pub fuel_remaining: u64,
     pub over_budget: bool,
     pub wasm_hash: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NetStoreWrite {
+    pub key: i32,
+    pub value: i32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,6 +47,8 @@ pub struct BehaviorHostInput {
     pub output_blocked: bool,
     pub can_produce: bool,
     pub ammo_count: i32,
+    pub net_i32: BTreeMap<i32, i32>,
+    pub net_writable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -46,6 +56,7 @@ struct BehaviorHostState {
     input: BehaviorHostInput,
     intent: BehaviorIntent,
     assembler_prefer_ammo: bool,
+    net_writes: Vec<NetStoreWrite>,
 }
 
 impl BehaviorHostState {
@@ -54,6 +65,7 @@ impl BehaviorHostState {
             input,
             intent: BehaviorIntent::Noop,
             assembler_prefer_ammo: true,
+            net_writes: Vec::new(),
         }
     }
 }
@@ -158,6 +170,7 @@ impl BehaviorRuntime {
 
         Ok(BehaviorEval {
             intent,
+            net_writes: store.data().net_writes.clone(),
             fuel_spent: fuel.saturating_sub(fuel_remaining),
             fuel_remaining,
             over_budget: false,
@@ -192,6 +205,7 @@ fn over_budget_eval(
     let fuel_remaining = store.get_fuel().unwrap_or(0);
     BehaviorEval {
         intent: BehaviorIntent::Noop,
+        net_writes: Vec::new(),
         fuel_spent: fuel.saturating_sub(fuel_remaining),
         fuel_remaining,
         over_budget: true,
@@ -316,6 +330,26 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "dispatch",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
             caller.data_mut().intent = BehaviorIntent::DronePort;
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:net",
+        "store_get_i32",
+        |caller: Caller<'_, BehaviorHostState>, key: i32| -> i32 {
+            caller.data().input.net_i32.get(&key).copied().unwrap_or(0)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:net",
+        "store_set_i32",
+        |mut caller: Caller<'_, BehaviorHostState>, key: i32, value: i32| -> i32 {
+            let data = caller.data_mut();
+            if !data.input.net_writable {
+                return 0;
+            }
+            data.input.net_i32.insert(key, value);
+            data.net_writes.push(NetStoreWrite { key, value });
             1
         },
     )?;
@@ -543,6 +577,40 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn xac_script_can_read_and_write_network_store() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BlockKind::Turret,
+                r#"
+                  net_set 7 42
+                  if net 7 == 42 attack_best lowest_hp
+                "#,
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                50,
+                BehaviorHostInput {
+                    ammo_count: 3,
+                    net_writable: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(eval.net_writes, vec![NetStoreWrite { key: 7, value: 42 }]);
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Turret { priority } if matches!(
+                priority.as_slice(),
+                [TargetRule::LowestHp, TargetRule::Nearest]
+            )
+        ));
     }
 
     #[test]
