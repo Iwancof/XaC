@@ -10,6 +10,10 @@ declare global {
     __XAC_TEST_STATE__?: {
       calls: IpcCall[];
     };
+    __XAC_EDITOR__?: {
+      getValue: () => string;
+      setValue: (value: string) => void;
+    };
   }
 }
 
@@ -79,6 +83,38 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".behavior-meta")).toContainText("read-only preset");
   await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /if output_blocked return/);
   await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /mine/);
+
+  await page.getByRole("button", { name: "Edit Copy", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Drill Copy");
+  await expect(page.locator(".behavior-meta")).toContainText("project behavior");
+  await page.waitForFunction(() => Boolean(window.__XAC_EDITOR__));
+
+  const editedSource = `if output_blocked return
+# edited in UI E2E
+mine
+`;
+  await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), editedSource);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /edited in UI E2E/);
+
+  const saveButton = page.getByRole("button", { name: "Save", exact: true });
+  const buildButton = page.getByRole("button", { name: "Build", exact: true });
+  await expect(saveButton).toBeEnabled();
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await buildButton.click();
+  await expect(page.locator(".build-ok")).toContainText("mock build succeeded");
+
+  const behaviorCalls = await page.evaluate(() => {
+    return (
+      window.__XAC_TEST_STATE__?.calls.filter((call) =>
+        ["edit_builtin_copy", "save_behavior", "build_behavior"].includes(call.cmd)
+      ) ?? []
+    );
+  });
+  expect(behaviorCalls.map((call) => call.cmd)).toEqual(["edit_builtin_copy", "save_behavior", "build_behavior"]);
+  expect(behaviorCalls[0].args).toEqual({ blockId: "drill_1" });
+  expect(behaviorCalls[1].args).toEqual({ behaviorId: "behavior_1", source: editedSource });
+  expect(behaviorCalls[2].args).toEqual({ behaviorId: "behavior_1" });
 
   const placeCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "place_block") ?? [];

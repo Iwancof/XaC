@@ -96,7 +96,19 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
     const disposable = editor.onDidChangeModelContent(() => {
       changeRef.current(editor.getValue());
     });
+    if (import.meta.env.VITE_XAC_MOCK_IPC === "1") {
+      window.__XAC_EDITOR__ = {
+        getValue: () => editor.getValue(),
+        setValue: (nextValue: string) => {
+          editor.setValue(nextValue);
+          changeRef.current(nextValue);
+        }
+      };
+    }
     return () => {
+      if (import.meta.env.VITE_XAC_MOCK_IPC === "1") {
+        window.__XAC_EDITOR__ = undefined;
+      }
       disposable.dispose();
       editor.dispose();
       editorRef.current = null;
