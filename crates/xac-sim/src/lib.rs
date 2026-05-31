@@ -705,25 +705,17 @@ impl Simulation {
     }
 
     fn transfer_from(&mut self, block_id: &str, dir: Direction, amount: u32) -> bool {
-        let (kind, src_pos, item) = match self.blocks.get(block_id) {
-            Some(block) => (block.kind, block.pos, block.inventory.first_item()),
+        let (kind, src_pos) = match self.blocks.get(block_id) {
+            Some(block) => (block.kind, block.pos),
             None => return false,
-        };
-        let Some((item_kind, available)) = item else {
-            return false;
         };
         let dst_pos = src_pos.step(dir);
         let Some(dst_id) = self.block_id_at(dst_pos) else {
             return false;
         };
-        let can_accept = self
-            .blocks
-            .get(&dst_id)
-            .map(|dst| can_accept_item(dst.kind, &item_kind) && dst.inventory.has_space(amount))
-            .unwrap_or(false);
-        if !can_accept {
+        let Some((item_kind, available)) = self.transferable_item(block_id, &dst_id, amount) else {
             return false;
-        }
+        };
         let moved = {
             let Some(src) = self.blocks.get_mut(block_id) else {
                 return false;
@@ -744,6 +736,24 @@ impl Simulation {
             };
         }
         true
+    }
+
+    fn transferable_item(
+        &self,
+        src_id: &str,
+        dst_id: &str,
+        amount: u32,
+    ) -> Option<(ItemKind, u32)> {
+        let src = self.blocks.get(src_id)?;
+        let dst = self.blocks.get(dst_id)?;
+        if !dst.inventory.has_space(amount) {
+            return None;
+        }
+        src.inventory
+            .items
+            .iter()
+            .find(|(item_kind, available)| **available > 0 && can_accept_item(dst.kind, item_kind))
+            .map(|(kind, amount)| (kind.clone(), *amount))
     }
 
     fn cleanup_destroyed(&mut self) {
@@ -960,6 +970,67 @@ mod tests {
     }
 
     #[test]
+    fn scripted_mining_factory_feeds_turret_and_defends_core() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+
+        for x in 20..=30 {
+            sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+                .unwrap();
+        }
+        sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
+            .unwrap();
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+        let drill_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &drill_id, "if output_blocked return\nmine");
+
+        sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
+            .unwrap();
+        sim.place_block(BlockKind::Router, Pos { x: 22, y: 30 }, Direction::East)
+            .unwrap();
+        let router_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &router_id, "push east");
+
+        sim.place_block(BlockKind::Assembler, Pos { x: 23, y: 30 }, Direction::East)
+            .unwrap();
+        let assembler_id = sim.selected_id.clone().unwrap();
+        assign_script(
+            &mut sim,
+            &assembler_id,
+            "set_recipe ammo\nif can_produce produce",
+        );
+
+        sim.place_block(BlockKind::Turret, Pos { x: 24, y: 30 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &turret_id, "if ammo_count > 0 attack_nearest");
+
+        sim.step_ticks(800);
+
+        assert!(
+            sim.blocks[&turret_id].inventory.count(&ItemKind::Ammo) > 0,
+            "ore should be mined, routed, assembled into ammo, and delivered into the turret"
+        );
+
+        let enemy_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            enemy_id.clone(),
+            combat::enemy_at(
+                enemy_id.clone(),
+                EnemyKind::Grunt,
+                WorldPos { x: 25.5, y: 30.5 },
+            ),
+        );
+
+        sim.step_ticks(80);
+
+        assert!(
+            !sim.enemies.contains_key(&enemy_id),
+            "scripted turret should consume factory-made ammo and destroy the nearby enemy"
+        );
+    }
+
+    #[test]
     fn cpu_node_increases_wasm_driven_drill_throughput() {
         fn setup(with_cpu_node: bool) -> (Simulation, EntityId) {
             let mut sim = Simulation::new("/tmp/xac-test").unwrap();
@@ -1144,5 +1215,19 @@ mod tests {
             sim.blocks[&drill_id].network_id, None,
             "drill should fall back to local CPU when wire is cut"
         );
+    }
+
+    fn assign_script(sim: &mut Simulation, block_id: &str, source: &str) {
+        let behavior = sim.edit_builtin_copy(block_id).unwrap();
+        let result = sim
+            .build_behavior(&behavior.summary.id)
+            .expect("copied builtin should build");
+        assert!(result.success);
+        sim.save_behavior(&behavior.summary.id, source.to_string())
+            .unwrap();
+        let result = sim
+            .build_behavior(&behavior.summary.id)
+            .expect("custom XaC script should build");
+        assert!(result.success);
     }
 }
