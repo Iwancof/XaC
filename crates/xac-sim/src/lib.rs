@@ -1,5 +1,4 @@
 use anyhow::{anyhow, Result};
-use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use xac_core::{
@@ -7,21 +6,21 @@ use xac_core::{
     Direction, Drone, DroneState, Enemy, EnemyKind, EntityId, GameSnapshot, Inventory, ItemKind,
     LogEntry, LogLevel, Network, Pos, TerrainKind, Tile, WorldPos,
 };
-use xac_wasm::{
-    hash_wasm_source, BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior,
-    TargetRule,
+use xac_wasm::{BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior, TargetRule};
+
+mod behavior;
+mod block_defs;
+mod geometry;
+
+use behavior::{builtin_behaviors, BehaviorPackage};
+use block_defs::{
+    build_tiles, can_accept_item, cpu_scaled_threshold, default_behavior_for, kind_name, make_block,
 };
+use geometry::{block_center, footprint_positions, nearest_block_target};
 
 pub const MAP_WIDTH: i32 = 64;
 pub const MAP_HEIGHT: i32 = 64;
 pub const TICKS_PER_SECOND: u32 = 20;
-
-#[derive(Clone, Debug, Deserialize, Serialize)]
-pub struct BehaviorPackage {
-    pub summary: BehaviorSummary,
-    pub source: String,
-    pub wasm_hash: Option<String>,
-}
 
 pub struct Simulation {
     tick: u64,
@@ -1121,232 +1120,6 @@ impl Simulation {
     }
 }
 
-fn build_tiles() -> Vec<Tile> {
-    let mut tiles = Vec::with_capacity((MAP_WIDTH * MAP_HEIGHT) as usize);
-    for y in 0..MAP_HEIGHT {
-        for x in 0..MAP_WIDTH {
-            let ore = ((x - 20).pow(2) + (y - 30).pow(2) < 42)
-                || ((x - 42).pow(2) + (y - 25).pow(2) < 30)
-                || ((x - 30).pow(2) + (y - 44).pow(2) < 28);
-            tiles.push(Tile {
-                pos: Pos { x, y },
-                terrain: if ore {
-                    TerrainKind::OrePatch
-                } else {
-                    TerrainKind::Ground
-                },
-                buildable: true,
-                enemy_passable: true,
-                block_id: None,
-            });
-        }
-    }
-    tiles
-}
-
-fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Block {
-    let capacity = match kind {
-        BlockKind::Core => 1000,
-        BlockKind::Storage => 300,
-        BlockKind::Conveyor | BlockKind::Router => 1,
-        BlockKind::Turret => 80,
-        BlockKind::Assembler => 100,
-        BlockKind::Drill => 10,
-        BlockKind::DronePort => 120,
-        _ => 0,
-    };
-    Block {
-        id,
-        kind,
-        pos,
-        dir,
-        hp: match kind {
-            BlockKind::Wire => 15,
-            BlockKind::Core => 500,
-            _ => 90,
-        },
-        inventory: Inventory::with_capacity(capacity),
-        behavior_ref: None,
-        tags: Vec::new(),
-        active: kind.is_programmable(),
-        network_id: None,
-        effective_cpu_rate: kind.local_cpu_rate(),
-        progress: 0,
-        status: "idle".to_string(),
-    }
-}
-
-fn kind_name(kind: BlockKind) -> &'static str {
-    match kind {
-        BlockKind::Core => "core",
-        BlockKind::Wire => "wire",
-        BlockKind::CpuNode => "cpu_node",
-        BlockKind::Drill => "drill",
-        BlockKind::Conveyor => "conveyor",
-        BlockKind::Router => "router",
-        BlockKind::Storage => "storage",
-        BlockKind::Assembler => "assembler",
-        BlockKind::Turret => "turret",
-        BlockKind::DronePort => "drone_port",
-    }
-}
-
-fn default_behavior_for(kind: BlockKind) -> Option<&'static str> {
-    match kind {
-        BlockKind::Drill => Some("builtin.drill.basic"),
-        BlockKind::Router => Some("builtin.router.basic"),
-        BlockKind::Assembler => Some("builtin.assembler.basic"),
-        BlockKind::Turret => Some("builtin.turret.basic"),
-        BlockKind::DronePort => Some("builtin.drone_port.basic"),
-        _ => None,
-    }
-}
-
-fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
-    let mut packages = BTreeMap::new();
-    for (id, display_name, base_kind, world, source_path, source) in [
-        (
-            "builtin.drill.basic",
-            "Basic Drill",
-            BlockKind::Drill,
-            "drill-behavior",
-            "assets/builtin/drill/basic.wat",
-            include_str!("../../../assets/builtin/drill/basic.wat"),
-        ),
-        (
-            "builtin.router.basic",
-            "Basic Router",
-            BlockKind::Router,
-            "router-behavior",
-            "assets/builtin/router/basic.wat",
-            include_str!("../../../assets/builtin/router/basic.wat"),
-        ),
-        (
-            "builtin.router.ammo_east",
-            "Ammo East Router",
-            BlockKind::Router,
-            "router-behavior",
-            "assets/builtin/router/ammo_east.wat",
-            include_str!("../../../assets/builtin/router/ammo_east.wat"),
-        ),
-        (
-            "builtin.assembler.basic",
-            "Basic Assembler",
-            BlockKind::Assembler,
-            "assembler-behavior",
-            "assets/builtin/assembler/basic.wat",
-            include_str!("../../../assets/builtin/assembler/basic.wat"),
-        ),
-        (
-            "builtin.turret.basic",
-            "Basic Turret",
-            BlockKind::Turret,
-            "turret-behavior",
-            "assets/builtin/turret/basic.wat",
-            include_str!("../../../assets/builtin/turret/basic.wat"),
-        ),
-        (
-            "builtin.turret.priority",
-            "Priority Turret",
-            BlockKind::Turret,
-            "turret-behavior",
-            "assets/builtin/turret/priority.wat",
-            include_str!("../../../assets/builtin/turret/priority.wat"),
-        ),
-        (
-            "builtin.drone_port.basic",
-            "Basic Drone Port",
-            BlockKind::DronePort,
-            "drone-port-behavior",
-            "assets/builtin/drone_port/basic.wat",
-            include_str!("../../../assets/builtin/drone_port/basic.wat"),
-        ),
-    ] {
-        let id = id.to_string();
-        packages.insert(
-            id.clone(),
-            BehaviorPackage {
-                summary: BehaviorSummary {
-                    id: id.clone(),
-                    display_name: display_name.to_string(),
-                    base_kind,
-                    world: world.to_string(),
-                    builtin: true,
-                    used_by: 0,
-                    source_path: source_path.to_string(),
-                    build_status: "builtin".to_string(),
-                },
-                source: source.to_string(),
-                wasm_hash: Some(hash_wasm_source(source).expect("valid builtin WAT")),
-            },
-        );
-    }
-    packages
-}
-
-fn can_accept_item(kind: BlockKind, item: &ItemKind) -> bool {
-    match kind {
-        BlockKind::Wire | BlockKind::CpuNode => false,
-        BlockKind::Turret => item == &ItemKind::Ammo,
-        BlockKind::Conveyor | BlockKind::Router => true,
-        BlockKind::Assembler => matches!(item, ItemKind::Ore | ItemKind::Plate),
-        BlockKind::Core | BlockKind::Storage | BlockKind::DronePort => true,
-        BlockKind::Drill => false,
-    }
-}
-
-fn cpu_scaled_threshold(effective_cpu_rate: f32, base: u32) -> u32 {
-    let speedup = (effective_cpu_rate / 8.0).clamp(0.1, 10.0);
-    ((base as f32 / speedup).ceil() as u32).max(3)
-}
-
-fn footprint_positions(kind: BlockKind, pos: Pos) -> Vec<Pos> {
-    let (width, height) = kind.footprint_size();
-    let mut positions = Vec::with_capacity((width * height) as usize);
-    for y in pos.y..pos.y + height {
-        for x in pos.x..pos.x + width {
-            positions.push(Pos { x, y });
-        }
-    }
-    positions
-}
-
-fn block_center(block: &Block) -> WorldPos {
-    let (width, height) = block.kind.footprint_size();
-    WorldPos {
-        x: block.pos.x as f32 + width as f32 / 2.0,
-        y: block.pos.y as f32 + height as f32 / 2.0,
-    }
-}
-
-fn closest_point_on_block(origin: WorldPos, block: &Block) -> WorldPos {
-    let (width, height) = block.kind.footprint_size();
-    let min_x = block.pos.x as f32;
-    let min_y = block.pos.y as f32;
-    let max_x = min_x + width as f32;
-    let max_y = min_y + height as f32;
-    WorldPos {
-        x: origin.x.clamp(min_x, max_x),
-        y: origin.y.clamp(min_y, max_y),
-    }
-}
-
-fn nearest_block_target(
-    blocks: &BTreeMap<EntityId, Block>,
-    origin: WorldPos,
-    predicate: impl Fn(BlockKind) -> bool,
-) -> Option<(EntityId, WorldPos)> {
-    blocks
-        .values()
-        .filter(|block| predicate(block.kind))
-        .min_by(|a, b| {
-            origin
-                .distance(closest_point_on_block(origin, a))
-                .total_cmp(&origin.distance(closest_point_on_block(origin, b)))
-        })
-        .map(|block| (block.id.clone(), closest_point_on_block(origin, block)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1486,6 +1259,67 @@ mod tests {
         assert!(
             fast_ore > slow_ore,
             "cpu node should increase WAT-driven drill throughput: slow={slow_ore}, fast={fast_ore}"
+        );
+    }
+
+    #[test]
+    fn assembler_builtin_calls_host_api_and_produces_ammo() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let assembler_id = sim.selected_id.clone().unwrap();
+        sim.blocks
+            .get_mut(&assembler_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Plate, 1);
+
+        sim.step_ticks(40);
+
+        let assembler = &sim.blocks[&assembler_id];
+        assert!(
+            assembler.inventory.count(&ItemKind::Ammo) > 0,
+            "assembler builtin should call set_recipe/can_produce/produce through Wasm host imports"
+        );
+    }
+
+    #[test]
+    fn turret_builtin_calls_host_api_and_attacks_enemy() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+        sim.blocks
+            .get_mut(&turret_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ammo, 3);
+        let enemy_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            enemy_id.clone(),
+            Enemy {
+                id: enemy_id.clone(),
+                kind: EnemyKind::Grunt,
+                pos: WorldPos { x: 35.5, y: 32.5 },
+                hp: 30,
+                max_hp: 30,
+                speed_ticks: 8,
+                move_cooldown: 0,
+                move_speed: 0.07,
+                target_id: None,
+            },
+        );
+
+        sim.step_ticks(40);
+
+        let enemy_hp = sim
+            .enemies
+            .get(&enemy_id)
+            .map(|enemy| enemy.hp)
+            .unwrap_or(0);
+        assert!(
+            enemy_hp < 30,
+            "turret builtin should call attack_nearest through Wasm host imports"
         );
     }
 }

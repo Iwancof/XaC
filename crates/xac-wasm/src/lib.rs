@@ -495,4 +495,97 @@ mod tests {
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
     }
+
+    #[test]
+    fn host_imports_map_logistics_production_and_combat_apis() {
+        let runtime = BehaviorRuntime::new().unwrap();
+
+        let router = runtime
+            .compile_wat(
+                BlockKind::Router,
+                r#"(module
+                  (import "xac:router" "push_dir" (func $push_dir (param i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $push_dir (i32.const 1)))))"#,
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&router, 30, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Router { preferred } if preferred == vec![Direction::East]
+        ));
+
+        let assembler = runtime
+            .compile_wat(
+                BlockKind::Assembler,
+                r#"(module
+                  (import "xac:assembler" "set_recipe" (func $set_recipe (param i32) (result i32)))
+                  (import "xac:assembler" "produce" (func $produce (result i32)))
+                  (func (export "tick")
+                    (drop (call $set_recipe (i32.const 1)))
+                    (drop (call $produce))))"#,
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &assembler,
+                30,
+                BehaviorHostInput {
+                    can_produce: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Assembler { prefer_ammo: true }
+        ));
+
+        let turret = runtime
+            .compile_wat(
+                BlockKind::Turret,
+                r#"(module
+                  (import "xac:turret" "attack_best" (func $attack_best (param i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $attack_best (i32.const 1)))))"#,
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&turret, 30, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+        let eval = runtime
+            .evaluate_compiled(
+                &turret,
+                30,
+                BehaviorHostInput {
+                    ammo_count: 5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Turret { priority } if matches!(
+                priority.as_slice(),
+                [TargetRule::LowestHp, TargetRule::Nearest]
+            )
+        ));
+
+        let drone_port = runtime
+            .compile_wat(
+                BlockKind::DronePort,
+                r#"(module
+                  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))
+                  (func (export "tick")
+                    (drop (call $dispatch))))"#,
+            )
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&drone_port, 30, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::DronePort));
+    }
 }
