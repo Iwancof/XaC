@@ -29,6 +29,8 @@ test("places minimum devices from the right block list and opens drill behavior"
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
   await expect(page.locator(".metrics")).toContainText("blocks 1");
+  await expect(page.locator(".metrics")).toContainText("wave 1");
+  await expect(page.locator(".metrics")).toContainText("net CPU 120");
   await expect(page.locator(".inspector")).toContainText("core");
 
   await page.getByRole("button", { name: /CPU Node/ }).click();
@@ -56,6 +58,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.getByText("Placing drill")).toBeVisible();
   await canvas.click({ position: tileCenter(20, 30) });
   await expect(page.locator(".metrics")).toContainText("blocks 23");
+  await expect(page.locator(".metrics")).toContainText("net CPU 200");
   await expect(page.locator(".inspector")).toContainText("drill");
   await expect(page.locator(".inspector")).toContainText("network CPU 200");
   await expect(page.locator(".log-panel")).toContainText("placed Drill at 20,30");

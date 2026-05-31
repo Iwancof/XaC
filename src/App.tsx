@@ -202,9 +202,13 @@ export function App() {
         </div>
         <div className="metrics">
           <span>tick {snapshot?.tick ?? 0}</span>
+          <span>wave {snapshot?.status.wave ?? 1}</span>
+          <span>next {snapshot?.status.next_wave_in ?? 0}</span>
           <span>blocks {snapshot?.blocks.length ?? 0}</span>
           <span>enemies {snapshot?.enemies.length ?? 0}</span>
-          <span>jobs {snapshot?.pending_jobs.length ?? 0}</span>
+          <span>wire {snapshot?.status.wire_threats ?? 0}</span>
+          <span>damage {snapshot?.status.damaged_wires ?? 0}</span>
+          <span>net CPU {snapshot?.status.network_cpu.toFixed(0) ?? "0"}</span>
           <span>core ammo {core?.inventory.items.ammo ?? 0}</span>
         </div>
       </header>

@@ -101,6 +101,8 @@ button:disabled {
 
 .metrics {
   justify-content: end;
+  flex-wrap: wrap;
+  gap: 5px;
   color: #9fb0b9;
   font-size: 12px;
 }
@@ -110,8 +112,9 @@ button:disabled {
 .inventory span {
   border: 1px solid #2a363d;
   border-radius: 5px;
-  padding: 3px 7px;
+  padding: 2px 6px;
   background: #151d21;
+  white-space: nowrap;
 }
 
 .workspace {

@@ -387,6 +387,15 @@ pub struct LogEntry {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct GameStatus {
+    pub wave: u32,
+    pub next_wave_in: u32,
+    pub wire_threats: u32,
+    pub damaged_wires: u32,
+    pub network_cpu: f32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct GameSnapshot {
     pub tick: u64,
     pub running: bool,
@@ -401,4 +410,5 @@ pub struct GameSnapshot {
     pub selected_id: Option<EntityId>,
     pub behaviors: Vec<BehaviorSummary>,
     pub pending_jobs: Vec<DeliveryJob>,
+    pub status: GameStatus,
 }

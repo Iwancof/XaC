@@ -122,6 +122,14 @@ export interface LogEntry {
   message: string;
 }
 
+export interface GameStatus {
+  wave: number;
+  next_wave_in: number;
+  wire_threats: number;
+  damaged_wires: number;
+  network_cpu: number;
+}
+
 export interface GameSnapshot {
   tick: number;
   running: boolean;
@@ -136,6 +144,7 @@ export interface GameSnapshot {
   selected_id: string | null;
   behaviors: BehaviorSummary[];
   pending_jobs: DeliveryJob[];
+  status: GameStatus;
 }
 
 export interface BuildPaletteItem {

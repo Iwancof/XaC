@@ -144,6 +144,9 @@ function snapshot(): GameSnapshot {
   const blocks = state.blocks.map((block) => ({ ...block, inventory: clone(block.inventory) }));
   const networks = recomputeNetworks(blocks);
   const tiles = buildTiles(blocks);
+  const enemies: Enemy[] = [];
+  const drones: Drone[] = [];
+  const pendingJobs: DeliveryJob[] = [];
 
   return clone({
     tick: state.tick,
@@ -152,14 +155,26 @@ function snapshot(): GameSnapshot {
     height: MAP_HEIGHT,
     tiles,
     blocks,
-    enemies: [],
-    drones: [],
+    enemies,
+    drones,
     networks,
     logs: state.logs.slice(-160),
     selected_id: state.selectedId,
     behaviors: behaviorSummaries(),
-    pending_jobs: []
+    pending_jobs: pendingJobs,
+    status: gameStatus(blocks, networks, enemies)
   });
+}
+
+function gameStatus(blocks: Block[], networks: Network[], enemies: Enemy[]) {
+  const wavePhase = state.tick % 80;
+  return {
+    wave: Math.floor(state.tick / 80) + 1,
+    next_wave_in: wavePhase < 20 ? 20 - wavePhase : 100 - wavePhase,
+    wire_threats: enemies.filter((enemy) => enemy.kind === "wire_cutter" && enemy.hp > 0).length,
+    damaged_wires: blocks.filter((block) => block.kind === "wire" && block.hp < 15).length,
+    network_cpu: networks.reduce((total, network) => total + network.cpu_pool, 0)
+  };
 }
 
 function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number; dir: Direction }) {
