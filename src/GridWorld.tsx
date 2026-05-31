@@ -48,6 +48,15 @@ export function GridWorld({
   const appRef = useRef<Application | null>(null);
   const stageRef = useRef<Container | null>(null);
   const snapshotRef = useRef<GameSnapshot | null>(null);
+  const buildKindRef = useRef<BlockKind | null>(buildKind);
+  const onTileClickRef = useRef(onTileClick);
+  const onEntityClickRef = useRef(onEntityClick);
+
+  useEffect(() => {
+    buildKindRef.current = buildKind;
+    onTileClickRef.current = onTileClick;
+    onEntityClickRef.current = onEntityClick;
+  }, [buildKind, onTileClick, onEntityClick]);
 
   useEffect(() => {
     let disposed = false;
@@ -83,19 +92,19 @@ export function GridWorld({
           };
           const current = snapshotRef.current;
           if (!current || pos.x < 0 || pos.y < 0 || pos.x >= current.width || pos.y >= current.height) {
-            onEntityClick(null);
+            onEntityClickRef.current(null);
             return;
           }
           const block = current.blocks.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
           const enemy = current.enemies.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
-          if (buildKind) {
-            onTileClick(pos);
+          if (buildKindRef.current) {
+            onTileClickRef.current(pos);
           } else if (block) {
-            onEntityClick(block.id);
+            onEntityClickRef.current(block.id);
           } else if (enemy) {
-            onEntityClick(enemy.id);
+            onEntityClickRef.current(enemy.id);
           } else {
-            onEntityClick(null);
+            onEntityClickRef.current(null);
           }
         });
         renderWorld(stage, snapshotRef.current, selectedId, buildKind, direction, overlay);
