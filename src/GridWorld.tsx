@@ -51,6 +51,7 @@ export function GridWorld({
 
   useEffect(() => {
     let disposed = false;
+    let initialized = false;
     const app = new Application();
     appRef.current = app;
 
@@ -63,7 +64,11 @@ export function GridWorld({
         resizeTo: hostRef.current ?? undefined
       })
       .then(() => {
-        if (disposed || !hostRef.current) return;
+        initialized = true;
+        if (disposed || !hostRef.current) {
+          app.destroy(true, { children: true, texture: true });
+          return;
+        }
         hostRef.current.appendChild(app.canvas);
         const stage = new Container();
         stageRef.current = stage;
@@ -98,7 +103,10 @@ export function GridWorld({
 
     return () => {
       disposed = true;
-      app.destroy(true, { children: true, texture: true });
+      stageRef.current = null;
+      if (initialized) {
+        app.destroy(true, { children: true, texture: true });
+      }
     };
   }, []);
 
