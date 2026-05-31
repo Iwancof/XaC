@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel};
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, CompiledBehavior, NetStoreWrite};
 
+use crate::block_defs::can_accept_item;
 use crate::{Simulation, TICKS_PER_SECOND};
 
 const MIN_BEHAVIOR_INVOCATION_FUEL: u64 = 40;
@@ -87,6 +88,8 @@ impl Simulation {
             .iter()
             .map(|(item, amount)| (item.clone(), i32::try_from(*amount).unwrap_or(i32::MAX)))
             .collect();
+        let (network_stock_counts, network_stock_capacity, network_stock_space) =
+            self.network_stock_profile(block_id);
         BehaviorHostInput {
             output_blocked: self.output_blocked(block_id),
             can_produce: self.can_produce(block_id),
@@ -107,7 +110,10 @@ impl Simulation {
                     (item, by_dir)
                 })
                 .collect(),
-            drone_port_stock_counts: self.network_stock_counts(block_id),
+            network_stock_counts: network_stock_counts.clone(),
+            network_stock_capacity,
+            network_stock_space,
+            drone_port_stock_counts: network_stock_counts,
             net_i32: self.network_i32_values(block.network_id),
             net_writable: block
                 .network_id
@@ -248,10 +254,19 @@ impl Simulation {
         }
     }
 
-    fn network_stock_counts(&self, block_id: &str) -> BTreeMap<ItemKind, i32> {
+    fn network_stock_profile(
+        &self,
+        block_id: &str,
+    ) -> (
+        BTreeMap<ItemKind, i32>,
+        BTreeMap<ItemKind, i32>,
+        BTreeMap<ItemKind, i32>,
+    ) {
         let mut counts = BTreeMap::new();
+        let mut capacity = BTreeMap::new();
+        let mut space = BTreeMap::new();
         let Some(block) = self.blocks.get(block_id) else {
-            return counts;
+            return (counts, capacity, space);
         };
         let ids: Vec<&str> = block
             .network_id
@@ -266,7 +281,21 @@ impl Simulation {
                 let total = counts.entry(item.clone()).or_insert(0_i32);
                 *total = total.saturating_add(i32::try_from(*amount).unwrap_or(i32::MAX));
             }
+            for item in ItemKind::all() {
+                if !can_accept_item(block.kind, &item) {
+                    continue;
+                }
+                let total_capacity = capacity.entry(item.clone()).or_insert(0_i32);
+                *total_capacity = total_capacity
+                    .saturating_add(i32::try_from(block.inventory.capacity).unwrap_or(i32::MAX));
+                let total_space = space.entry(item).or_insert(0_i32);
+                let free = block
+                    .inventory
+                    .capacity
+                    .saturating_sub(block.inventory.total());
+                *total_space = total_space.saturating_add(i32::try_from(free).unwrap_or(i32::MAX));
+            }
         }
-        counts
+        (counts, capacity, space)
     }
 }

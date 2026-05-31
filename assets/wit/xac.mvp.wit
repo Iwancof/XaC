@@ -51,6 +51,9 @@ interface common-api {
   log: func(message: string);
   net-store-get: func(key: string) -> value;
   net-store-set: func(key: string, value: value);
+  stock-count: func(item-kind: string) -> s32;
+  stock-capacity: func(item-kind: string) -> s32;
+  has-space: func(item-kind: string, amount: s32) -> bool;
   fuel-remaining: func() -> u64;
 }
 

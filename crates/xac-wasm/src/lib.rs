@@ -87,6 +87,9 @@ pub struct BehaviorHostInput {
     pub ammo_count: i32,
     pub router_output_available: [bool; 4],
     pub router_item_output_available: BTreeMap<ItemKind, [bool; 4]>,
+    pub network_stock_counts: BTreeMap<ItemKind, i32>,
+    pub network_stock_capacity: BTreeMap<ItemKind, i32>,
+    pub network_stock_space: BTreeMap<ItemKind, i32>,
     pub drone_port_stock_counts: BTreeMap<ItemKind, i32>,
     pub drone_battery_percent: i32,
     pub drone_logic_fuel: u64,
@@ -140,6 +143,9 @@ mod host_cost {
     pub const DRONE_SENSOR: u64 = 1;
     pub const DRONE_JOB: u64 = 5;
     pub const DRONE_ACTION: u64 = 2;
+    pub const STOCK_COUNT: u64 = 2;
+    pub const STOCK_CAPACITY: u64 = 2;
+    pub const HAS_SPACE: u64 = 2;
     pub const NET_GET_I32: u64 = 2;
     pub const NET_SET_I32: u64 = 4;
 }
@@ -297,6 +303,75 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         |mut caller: Caller<'_, BehaviorHostState>| -> i64 {
             charge_host(&mut caller, host_cost::FUEL_REMAINING);
             caller.get_fuel().unwrap_or(0) as i64
+        },
+    )?;
+    linker.func_wrap(
+        "xac:common",
+        "stock_count",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::STOCK_COUNT) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .network_stock_counts
+                .get(&item)
+                .or_else(|| caller.data().input.drone_port_stock_counts.get(&item))
+                .copied()
+                .unwrap_or(0)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:common",
+        "stock_capacity",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::STOCK_CAPACITY) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .network_stock_capacity
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:common",
+        "has_space",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32, amount: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::HAS_SPACE) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            let Ok(amount) = u32::try_from(amount) else {
+                return 0;
+            };
+            if amount == 0 {
+                return 1;
+            }
+            let space = caller
+                .data()
+                .input
+                .network_stock_space
+                .get(&item)
+                .copied()
+                .unwrap_or(0);
+            if space >= i32::try_from(amount).unwrap_or(i32::MAX) {
+                1
+            } else {
+                0
+            }
         },
     )?;
     linker.func_wrap(
@@ -572,8 +647,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             caller
                 .data()
                 .input
-                .drone_port_stock_counts
+                .network_stock_counts
                 .get(&item)
+                .or_else(|| caller.data().input.drone_port_stock_counts.get(&item))
                 .copied()
                 .unwrap_or(0)
         },
@@ -615,8 +691,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if caller
                 .data()
                 .input
-                .drone_port_stock_counts
+                .network_stock_counts
                 .get(&item)
+                .or_else(|| caller.data().input.drone_port_stock_counts.get(&item))
                 .copied()
                 .unwrap_or(0)
                 < i32::try_from(amount).unwrap_or(i32::MAX)
@@ -1264,6 +1341,62 @@ mod tests {
             BehaviorIntent::Router { item, preferred }
                 if item == Some(ItemKind::Ammo) && preferred == vec![Direction::East]
         ));
+    }
+
+    #[test]
+    fn xac_script_can_read_common_network_stock() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let stock_script = "if stock_count ammo > 5 push ammo east";
+        let wat = compile_source_to_wat(BehaviorKind::Router, stock_script).unwrap();
+        assert!(wat.contains(r#""xac:common" "stock_count""#));
+        let compiled = runtime
+            .compile_wat(BehaviorKind::Router, stock_script)
+            .unwrap();
+        let mut counts = BTreeMap::new();
+        counts.insert(ItemKind::Ammo, 8);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    network_stock_counts: counts,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Router { item, preferred }
+                if item == Some(ItemKind::Ammo) && preferred == vec![Direction::East]
+        ));
+
+        let space_script = "if has_space ore 2 push ore east";
+        let wat = compile_source_to_wat(BehaviorKind::Router, space_script).unwrap();
+        assert!(wat.contains(r#""xac:common" "has_space""#));
+        let compiled = runtime
+            .compile_wat(BehaviorKind::Router, space_script)
+            .unwrap();
+        let mut space = BTreeMap::new();
+        space.insert(ItemKind::Ore, 3);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    network_stock_space: space,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Router { item, preferred }
+                if item == Some(ItemKind::Ore) && preferred == vec![Direction::East]
+        ));
+
+        let capacity_script = "if stock_capacity ore >= 100 push ore east";
+        let wat = compile_source_to_wat(BehaviorKind::Router, capacity_script).unwrap();
+        assert!(wat.contains(r#""xac:common" "stock_capacity""#));
     }
 
     #[test]

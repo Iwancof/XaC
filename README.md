@@ -85,6 +85,14 @@ net_set 7 42
 if net 7 == 42 attack_best lowest_hp
 ```
 
+Programmable blocks can read same-network inventory supplied by core, storage,
+and other stock-holding blocks:
+
+```text
+if stock_count ammo > 50 push ammo east
+if has_space ore 10 push ore east
+```
+
 Turret scripts can prioritize enemy kinds directly:
 
 ```text

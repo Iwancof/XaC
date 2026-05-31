@@ -588,6 +588,37 @@ mod tests {
     }
 
     #[test]
+    fn router_script_can_read_core_network_stock() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let router_id = sim.selected_id.clone().unwrap();
+        assign_script(
+            &mut sim,
+            &router_id,
+            "if stock_count ammo > 50 push ammo east",
+        );
+        sim.place_block(BlockKind::Conveyor, Pos { x: 35, y: 30 }, Direction::East)
+            .unwrap();
+        let conveyor_id = sim.selected_id.clone().unwrap();
+        sim.blocks
+            .get_mut(&router_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ammo, 1);
+        sim.fuel_banks.insert(router_id.clone(), 100.0);
+
+        sim.step_ticks(1);
+
+        assert_eq!(sim.blocks[&router_id].inventory.count(&ItemKind::Ammo), 0);
+        assert_eq!(
+            sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ammo),
+            1,
+            "router code should read same-network core stock and route ammo"
+        );
+    }
+
+    #[test]
     fn scripted_mining_factory_feeds_turret_and_defends_core() {
         let mut sim = test_sim("sim");
 

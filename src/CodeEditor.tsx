@@ -32,6 +32,8 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "attack_best",
         "dispatch",
         "stock_count",
+        "stock_capacity",
+        "has_space",
         "charge_docked_drones",
         "create_delivery_job",
         "dispatch_idle_drones",

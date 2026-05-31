@@ -61,7 +61,6 @@ enum HostImport {
     TurretAttackNearest,
     TurretAttackBest,
     DronePortDispatch,
-    DronePortStockCount,
     DronePortChargeDockedDrones,
     DronePortCreateDeliveryJob,
     DronePortDispatchIdleDrones,
@@ -74,6 +73,9 @@ enum HostImport {
     DroneDeliver,
     DroneIdle,
     CommonFuelRemaining,
+    CommonStockCount,
+    CommonStockCapacity,
+    CommonHasSpace,
     NetStoreGetI32,
     NetStoreSetI32,
 }
@@ -127,9 +129,6 @@ impl HostImport {
             HostImport::DronePortDispatch => {
                 r#"  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))"#
             }
-            HostImport::DronePortStockCount => {
-                r#"  (import "xac:drone_port" "stock_count" (func $stock_count (param i32) (result i32)))"#
-            }
             HostImport::DronePortChargeDockedDrones => {
                 r#"  (import "xac:drone_port" "charge_docked_drones" (func $charge_docked_drones (result i32)))"#
             }
@@ -164,6 +163,15 @@ impl HostImport {
             HostImport::CommonFuelRemaining => {
                 r#"  (import "xac:common" "fuel_remaining" (func $fuel_remaining (result i64)))"#
             }
+            HostImport::CommonStockCount => {
+                r#"  (import "xac:common" "stock_count" (func $stock_count (param i32) (result i32)))"#
+            }
+            HostImport::CommonStockCapacity => {
+                r#"  (import "xac:common" "stock_capacity" (func $stock_capacity (param i32) (result i32)))"#
+            }
+            HostImport::CommonHasSpace => {
+                r#"  (import "xac:common" "has_space" (func $has_space (param i32 i32) (result i32)))"#
+            }
             HostImport::NetStoreGetI32 => {
                 r#"  (import "xac:net" "store_get_i32" (func $net_get_i32 (param i32) (result i32)))"#
             }
@@ -194,9 +202,19 @@ enum Condition {
         value: i32,
     },
     AmmoGtZero,
-    StockCountGt {
+    StockCount {
         item: ItemKind,
+        comparison: CountComparison,
         value: i32,
+    },
+    StockCapacity {
+        item: ItemKind,
+        comparison: CountComparison,
+        value: i32,
+    },
+    HasSpace {
+        item: ItemKind,
+        amount: i32,
     },
     BatteryPercentLt {
         value: i32,
@@ -335,10 +353,26 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
             rest,
         )),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
-        ["if", "stock_count", item, ">", value, rest @ ..] => Ok((
-            Condition::StockCountGt {
+        ["if", "stock_count", item, comparison, value, rest @ ..] => Ok((
+            Condition::StockCount {
                 item: parse_item_or_err(line_no, item)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
                 value: parse_i32(line_no, "stock count threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "stock_capacity", item, comparison, value, rest @ ..] => Ok((
+            Condition::StockCapacity {
+                item: parse_item_or_err(line_no, item)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "stock capacity threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "has_space", item, amount, rest @ ..] => Ok((
+            Condition::HasSpace {
+                item: parse_item_or_err(line_no, item)?,
+                amount: parse_i32(line_no, "space amount", amount)?,
             },
             rest,
         )),
@@ -547,9 +581,14 @@ fn add_condition_import(
             ensure_kind(kind, BehaviorKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
         }
-        Condition::StockCountGt { .. } => {
-            ensure_kind(kind, BehaviorKind::DronePort, line_no, "stock_count")?;
-            imports.insert(HostImport::DronePortStockCount);
+        Condition::StockCount { .. } => {
+            imports.insert(HostImport::CommonStockCount);
+        }
+        Condition::StockCapacity { .. } => {
+            imports.insert(HostImport::CommonStockCapacity);
+        }
+        Condition::HasSpace { .. } => {
+            imports.insert(HostImport::CommonHasSpace);
         }
         Condition::BatteryPercentLt { .. } => {
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "battery_percent")?;
@@ -739,9 +778,19 @@ fn render_condition(condition: Condition) -> String {
             value,
         } => render_count_condition("output_count", &item, comparison, value),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
-        Condition::StockCountGt { item, value } => {
+        Condition::StockCount {
+            item,
+            comparison,
+            value,
+        } => render_count_condition("stock_count", &item, comparison, value),
+        Condition::StockCapacity {
+            item,
+            comparison,
+            value,
+        } => render_count_condition("stock_capacity", &item, comparison, value),
+        Condition::HasSpace { item, amount } => {
             format!(
-                "(i32.gt_s (call $stock_count (i32.const {})) (i32.const {value}))",
+                "(call $has_space (i32.const {}) (i32.const {amount}))",
                 item_code(&item)
             )
         }
