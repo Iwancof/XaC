@@ -2,13 +2,13 @@ use anyhow::{anyhow, Result};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use xac_core::{
-    BehaviorId, BehaviorSource, BehaviorSummary, Block, BlockKind, BuildResult, DeliveryJob,
-    Direction, Drone, Enemy, EnemyKind, EntityId, GameSnapshot, GameStatus, ItemKind, LogEntry,
-    LogLevel, Network, Pos, Tile,
+    BehaviorId, Block, BlockKind, DeliveryJob, Direction, Drone, Enemy, EnemyKind, EntityId,
+    GameSnapshot, GameStatus, ItemKind, LogEntry, LogLevel, Network, Pos, Tile,
 };
 use xac_wasm::{BehaviorRuntime, CompiledBehavior};
 
 mod behavior;
+mod behavior_api;
 mod behavior_runner;
 mod block_defs;
 mod combat;
@@ -19,7 +19,7 @@ mod network;
 mod production;
 mod recipes;
 
-use behavior::{builtin_behaviors, BehaviorPackage};
+use behavior::{load_behaviors, BehaviorPackage};
 use block_defs::{build_tiles, default_behavior_for, kind_name, make_block};
 use geometry::footprint_positions;
 
@@ -60,7 +60,7 @@ impl Simulation {
             enemies: BTreeMap::new(),
             drones: BTreeMap::new(),
             networks: BTreeMap::new(),
-            behaviors: builtin_behaviors(),
+            behaviors: load_behaviors(config_root.as_ref())?,
             compiled_behaviors: BTreeMap::new(),
             fuel_banks: BTreeMap::new(),
             pending_jobs: Vec::new(),
@@ -71,6 +71,7 @@ impl Simulation {
             config_root: config_root.as_ref().to_path_buf(),
         };
         sim.seed_world();
+        sim.reserve_next_id_from_existing();
         sim.recompute_networks();
         Ok(sim)
     }
@@ -136,185 +137,6 @@ impl Simulation {
     pub fn select_entity(&mut self, id: Option<EntityId>) -> GameSnapshot {
         self.selected_id = id;
         self.snapshot()
-    }
-
-    pub fn open_behavior(&self, id: &str) -> Result<BehaviorSource> {
-        let package = self
-            .behaviors
-            .get(id)
-            .ok_or_else(|| anyhow!("unknown behavior: {id}"))?;
-        Ok(BehaviorSource {
-            summary: self.behavior_summary_with_usage(package),
-            source: package.source.clone(),
-        })
-    }
-
-    pub fn edit_builtin_copy(&mut self, block_id: &str) -> Result<BehaviorSource> {
-        let behavior_id = self
-            .blocks
-            .get(block_id)
-            .and_then(|b| b.behavior_ref.clone())
-            .ok_or_else(|| anyhow!("selected block has no behavior"))?;
-        let original = self
-            .behaviors
-            .get(&behavior_id)
-            .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?
-            .clone();
-
-        if !original.summary.builtin {
-            return self.open_behavior(&behavior_id);
-        }
-
-        let new_id = self.make_id("behavior");
-        let display_name = format!("{} Copy", original.summary.display_name);
-        let source_path = self
-            .config_root
-            .join("projects/default_project/blocks")
-            .join(&new_id)
-            .join("src/behavior.xac")
-            .to_string_lossy()
-            .to_string();
-        let summary = BehaviorSummary {
-            id: new_id.clone(),
-            display_name,
-            base_kind: original.summary.base_kind,
-            world: original.summary.world,
-            builtin: false,
-            used_by: 0,
-            source_path,
-            build_status: "copied".to_string(),
-        };
-        self.behaviors.insert(
-            new_id.clone(),
-            BehaviorPackage {
-                summary,
-                source: original.source,
-                wasm_hash: original.wasm_hash,
-            },
-        );
-        if let Some(block) = self.blocks.get_mut(block_id) {
-            block.behavior_ref = Some(new_id.clone());
-        }
-        self.log(
-            LogLevel::Info,
-            block_id.to_string(),
-            format!("created editable copy {new_id}"),
-        );
-        self.open_behavior(&new_id)
-    }
-
-    pub fn fork_behavior(&mut self, block_id: &str) -> Result<BehaviorSource> {
-        let behavior_id = self
-            .blocks
-            .get(block_id)
-            .and_then(|b| b.behavior_ref.clone())
-            .ok_or_else(|| anyhow!("selected block has no behavior"))?;
-        let original = self
-            .behaviors
-            .get(&behavior_id)
-            .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?
-            .clone();
-        let new_id = self.make_id("behavior");
-        let source_path = self
-            .config_root
-            .join("projects/default_project/blocks")
-            .join(&new_id)
-            .join("src/behavior.xac")
-            .to_string_lossy()
-            .to_string();
-        let summary = BehaviorSummary {
-            id: new_id.clone(),
-            display_name: format!("{} Fork", original.summary.display_name),
-            base_kind: original.summary.base_kind,
-            world: original.summary.world,
-            builtin: false,
-            used_by: 0,
-            source_path,
-            build_status: "forked".to_string(),
-        };
-        self.behaviors.insert(
-            new_id.clone(),
-            BehaviorPackage {
-                summary,
-                source: original.source,
-                wasm_hash: original.wasm_hash,
-            },
-        );
-        if let Some(block) = self.blocks.get_mut(block_id) {
-            block.behavior_ref = Some(new_id.clone());
-        }
-        self.log(
-            LogLevel::Info,
-            block_id.to_string(),
-            format!("forked behavior into {new_id}"),
-        );
-        self.open_behavior(&new_id)
-    }
-
-    pub fn save_behavior(&mut self, behavior_id: &str, source: String) -> Result<BehaviorSource> {
-        let package = self
-            .behaviors
-            .get_mut(behavior_id)
-            .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
-        if package.summary.builtin {
-            return Err(anyhow!(
-                "builtin presets are read-only; create a copy first"
-            ));
-        }
-        package.source = source;
-        package.wasm_hash = None;
-        package.summary.build_status = "saved".to_string();
-        self.compiled_behaviors.remove(behavior_id);
-        self.log(
-            LogLevel::Info,
-            behavior_id.to_string(),
-            "source saved".to_string(),
-        );
-        self.open_behavior(behavior_id)
-    }
-
-    pub fn build_behavior(&mut self, behavior_id: &str) -> Result<BuildResult> {
-        let (kind, source) = {
-            let package = self
-                .behaviors
-                .get(behavior_id)
-                .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
-            (package.summary.base_kind, package.source.clone())
-        };
-        match self.runtime.compile_wat(kind, &source) {
-            Ok(compiled) => {
-                let wasm_hash = Some(compiled.wasm_hash().to_string());
-                self.compiled_behaviors
-                    .insert(behavior_id.to_string(), compiled);
-                if let Some(package) = self.behaviors.get_mut(behavior_id) {
-                    package.wasm_hash = wasm_hash.clone();
-                    package.summary.build_status = "built".to_string();
-                }
-                self.log(
-                    LogLevel::Info,
-                    behavior_id.to_string(),
-                    "build ok; WAT compiled to wasm".to_string(),
-                );
-                Ok(BuildResult {
-                    behavior_id: behavior_id.to_string(),
-                    success: true,
-                    message: "behavior built and hot-reloaded".to_string(),
-                    wasm_hash,
-                })
-            }
-            Err(error) => {
-                if let Some(package) = self.behaviors.get_mut(behavior_id) {
-                    package.summary.build_status = "build failed".to_string();
-                }
-                self.log(LogLevel::Error, behavior_id.to_string(), error.to_string());
-                Ok(BuildResult {
-                    behavior_id: behavior_id.to_string(),
-                    success: false,
-                    message: error.to_string(),
-                    wasm_hash: None,
-                })
-            }
-        }
     }
 
     pub fn snapshot(&self) -> GameSnapshot {
@@ -427,20 +249,24 @@ impl Simulation {
         self.recompute_networks();
     }
 
-    fn behavior_summary_with_usage(&self, package: &BehaviorPackage) -> BehaviorSummary {
-        let mut summary = package.summary.clone();
-        summary.used_by = self
-            .blocks
-            .values()
-            .filter(|b| b.behavior_ref.as_ref() == Some(&summary.id))
-            .count() as u32;
-        summary
-    }
-
     fn make_id(&mut self, prefix: &str) -> String {
         let id = format!("{prefix}_{}", self.next_id);
         self.next_id += 1;
         id
+    }
+
+    fn reserve_next_id_from_existing(&mut self) {
+        let max_existing = self
+            .blocks
+            .keys()
+            .chain(self.enemies.keys())
+            .chain(self.drones.keys())
+            .chain(self.behaviors.keys())
+            .filter_map(|id| id.rsplit_once('_'))
+            .filter_map(|(_, suffix)| suffix.parse::<u64>().ok())
+            .max()
+            .unwrap_or(0);
+        self.next_id = self.next_id.max(max_existing + 1);
     }
 
     fn in_bounds(&self, pos: Pos) -> bool {
@@ -487,11 +313,17 @@ impl Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::time::{SystemTime, UNIX_EPOCH};
     use xac_core::{DroneState, WorldPos};
+
+    static TEST_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
     #[test]
     fn placing_wire_and_cpu_node_forms_network() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Wire, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         sim.place_block(BlockKind::CpuNode, Pos { x: 35, y: 32 }, Direction::East)
@@ -502,7 +334,7 @@ mod tests {
 
     #[test]
     fn core_occupies_four_by_four_tiles() {
-        let sim = Simulation::new("/tmp/xac-test").unwrap();
+        let sim = test_sim("sim");
         let core = sim
             .blocks
             .values()
@@ -516,7 +348,7 @@ mod tests {
 
     #[test]
     fn builtin_copy_is_editable_and_reassigned() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let block_id = sim.selected_id.clone().unwrap();
@@ -526,8 +358,56 @@ mod tests {
     }
 
     #[test]
+    fn project_behavior_source_persists_under_config_root() {
+        let config_root = test_config_root("behavior-persistence");
+        let mut sim = Simulation::new(&config_root).unwrap();
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+        let block_id = sim.selected_id.clone().unwrap();
+
+        let copied = sim.edit_builtin_copy(&block_id).unwrap();
+        let behavior_id = copied.summary.id.clone();
+        let source_path = PathBuf::from(&copied.summary.source_path);
+        assert!(source_path.starts_with(&config_root));
+        assert!(
+            fs::read_to_string(&source_path).unwrap().contains("mine"),
+            "copy-on-write should create a real source file"
+        );
+
+        let edited_source = "if output_blocked return\nmine\nnet_set 9 3";
+        sim.save_behavior(&behavior_id, edited_source.to_string())
+            .unwrap();
+        assert_eq!(fs::read_to_string(&source_path).unwrap(), edited_source);
+
+        let result = sim.build_behavior(&behavior_id).unwrap();
+        assert!(result.success);
+
+        let index_source =
+            fs::read_to_string(config_root.join("projects/default_project/behaviors.toml"))
+                .unwrap();
+        assert!(index_source.contains(&behavior_id));
+        assert!(index_source.contains("wasm_hash"));
+
+        let mut reloaded = Simulation::new(&config_root).unwrap();
+        let loaded = reloaded.open_behavior(&behavior_id).unwrap();
+        assert!(!loaded.summary.builtin);
+        assert_eq!(loaded.summary.build_status, "built");
+        assert_eq!(loaded.source, edited_source);
+
+        reloaded
+            .place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let turret_id = reloaded.selected_id.clone().unwrap();
+        let second_copy = reloaded.edit_builtin_copy(&turret_id).unwrap();
+        assert_ne!(
+            second_copy.summary.id, behavior_id,
+            "loaded project behavior ids should reserve the next generated behavior id"
+        );
+    }
+
+    #[test]
     fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
 
         for x in 20..=30 {
             sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
@@ -561,7 +441,7 @@ mod tests {
 
     #[test]
     fn behavior_build_compiles_wat_and_save_invalidates_cache() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let block_id = sim.selected_id.clone().unwrap();
@@ -587,7 +467,7 @@ mod tests {
 
     #[test]
     fn xac_script_writes_network_store_and_recompute_preserves_it() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
             .unwrap();
         let router_id = sim.selected_id.clone().unwrap();
@@ -615,7 +495,7 @@ mod tests {
 
     #[test]
     fn router_output_available_script_waits_for_free_destination() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
             .unwrap();
         let router_id = sim.selected_id.clone().unwrap();
@@ -661,7 +541,7 @@ mod tests {
 
     #[test]
     fn scripted_mining_factory_feeds_turret_and_defends_core() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
 
         for x in 20..=30 {
             sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
@@ -723,7 +603,7 @@ mod tests {
     #[test]
     fn cpu_node_increases_wasm_driven_drill_throughput() {
         fn setup(with_cpu_node: bool) -> (Simulation, EntityId) {
-            let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+            let mut sim = test_sim("sim");
             if with_cpu_node {
                 for x in 20..=30 {
                     sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
@@ -762,7 +642,7 @@ mod tests {
 
     #[test]
     fn assembler_builtin_calls_host_api_and_produces_ammo() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let assembler_id = sim.selected_id.clone().unwrap();
@@ -784,7 +664,7 @@ mod tests {
 
     #[test]
     fn assembler_recipe_goal_builds_missing_intermediate_from_assets() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let assembler_id = sim.selected_id.clone().unwrap();
@@ -806,7 +686,7 @@ mod tests {
 
     #[test]
     fn turret_builtin_calls_host_api_and_attacks_enemy() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let turret_id = sim.selected_id.clone().unwrap();
@@ -846,7 +726,7 @@ mod tests {
 
     #[test]
     fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
         let starting_core_ammo = sim.blocks[&core_id].inventory.count(&ItemKind::Ammo);
 
@@ -884,7 +764,7 @@ mod tests {
 
     #[test]
     fn wire_cutter_breaks_wire_and_splits_cpu_network() {
-        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let mut sim = test_sim("sim");
         for x in 20..=30 {
             sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
                 .unwrap();
@@ -942,5 +822,20 @@ mod tests {
             .build_behavior(&behavior.summary.id)
             .expect("custom XaC script should build");
         assert!(result.success);
+    }
+
+    fn test_sim(name: &str) -> Simulation {
+        Simulation::new(test_config_root(name)).unwrap()
+    }
+
+    fn test_config_root(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let serial = TEST_CONFIG_COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("xac-{name}-{nanos}-{serial}"));
+        fs::create_dir_all(&path).unwrap();
+        path
     }
 }

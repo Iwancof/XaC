@@ -21,6 +21,9 @@ npm run dev
 ```
 
 The app creates runtime state under `$XDG_CONFIG_HOME/xac` or `~/.config/xac`.
+Editable behavior copies are persisted as source files and an index under
+`projects/default_project` inside that config root, so the path shown in the
+editor points to a real project file.
 
 On Arch Linux, Tauri needs WebKitGTK 4.1:
 
