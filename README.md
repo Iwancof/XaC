@@ -99,6 +99,15 @@ Turret scripts can prioritize enemy kinds directly:
 if ammo_count > 0 attack_best wire_cutter runner armored nearest
 ```
 
+The MVP core-Wasm ABI also exposes turret scanning as stable scan indices, so
+short scripts can inspect whether visible targets exist and attack a specific
+entry from nearest-first scan order:
+
+```text
+if scan_enemies > 1 attack 1
+if can_attack 0 attack 0
+```
+
 Carrier drones also run a built-in XaC Script behavior through the same Wasm
 backend. The default drone checks battery and logic fuel, claims a pending ammo
 delivery job, delivers it, and returns to its port:

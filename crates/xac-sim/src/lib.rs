@@ -1070,6 +1070,63 @@ mod tests {
     }
 
     #[test]
+    fn turret_scan_script_attacks_requested_visible_enemy_index() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &turret_id, "if can_attack 1 attack 1");
+        sim.blocks
+            .get_mut(&turret_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ammo, 2);
+        sim.fuel_banks.insert(turret_id.clone(), 100.0);
+
+        let nearest_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            nearest_id.clone(),
+            Enemy {
+                id: nearest_id.clone(),
+                kind: EnemyKind::Grunt,
+                pos: WorldPos { x: 35.5, y: 32.5 },
+                hp: 30,
+                max_hp: 30,
+                speed_ticks: 8,
+                move_cooldown: 0,
+                move_speed: 0.0,
+                target_id: None,
+            },
+        );
+        let second_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            second_id.clone(),
+            Enemy {
+                id: second_id.clone(),
+                kind: EnemyKind::Runner,
+                pos: WorldPos { x: 36.5, y: 32.5 },
+                hp: 20,
+                max_hp: 20,
+                speed_ticks: 3,
+                move_cooldown: 0,
+                move_speed: 0.0,
+                target_id: None,
+            },
+        );
+
+        sim.step_ticks(1);
+
+        assert_eq!(
+            sim.enemies[&nearest_id].hp, 30,
+            "scan index 0 should remain untouched"
+        );
+        assert_eq!(
+            sim.enemies[&second_id].hp, 8,
+            "scan index 1 should be attacked by custom turret code"
+        );
+    }
+
+    #[test]
     fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
         let mut sim = test_sim("sim");
         let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();

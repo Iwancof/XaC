@@ -100,6 +100,7 @@ impl Simulation {
             assembler_input_counts: block_inventory_counts.clone(),
             assembler_output_counts: block_inventory_counts,
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
+            turret_visible_enemy_count: self.turret_visible_enemy_count(block_id),
             router_output_available: Direction::all()
                 .map(|dir| self.output_available(block_id, dir)),
             router_item_output_available: ItemKind::all()
@@ -247,6 +248,9 @@ impl Simulation {
                 self.run_assembler(block_id);
             }
             BehaviorIntent::Turret { priority } => self.run_turret_once(block_id, &priority),
+            BehaviorIntent::TurretScanIndex { index } => {
+                self.run_turret_scan_index(block_id, index);
+            }
             BehaviorIntent::DronePort { commands } => {
                 self.apply_drone_port_commands(block_id, commands);
             }

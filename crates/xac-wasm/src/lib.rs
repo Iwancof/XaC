@@ -26,6 +26,9 @@ pub enum BehaviorIntent {
     Turret {
         priority: Vec<TargetRule>,
     },
+    TurretScanIndex {
+        index: u32,
+    },
     DronePort {
         commands: Vec<DronePortCommand>,
     },
@@ -85,6 +88,7 @@ pub struct BehaviorHostInput {
     pub assembler_input_counts: BTreeMap<ItemKind, i32>,
     pub assembler_output_counts: BTreeMap<ItemKind, i32>,
     pub ammo_count: i32,
+    pub turret_visible_enemy_count: i32,
     pub router_output_available: [bool; 4],
     pub router_item_output_available: BTreeMap<ItemKind, [bool; 4]>,
     pub network_stock_counts: BTreeMap<ItemKind, i32>,
@@ -133,6 +137,9 @@ mod host_cost {
     pub const PRODUCE: u64 = 2;
     pub const ASSEMBLER_COUNT: u64 = 1;
     pub const AMMO_COUNT: u64 = 1;
+    pub const SCAN_ENEMIES_BASE: u64 = 5;
+    pub const CAN_ATTACK: u64 = 1;
+    pub const ATTACK: u64 = 2;
     pub const ATTACK_NEAREST: u64 = 4;
     pub const ATTACK_BEST: u64 = 8;
     pub const DISPATCH: u64 = 5;
@@ -333,7 +340,15 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
         }
         BehaviorKind::Turret => {
             module == "xac:turret"
-                && matches!(name, "ammo_count" | "attack_nearest" | "attack_best")
+                && matches!(
+                    name,
+                    "scan_enemies"
+                        | "can_attack"
+                        | "attack"
+                        | "ammo_count"
+                        | "attack_nearest"
+                        | "attack_best"
+                )
         }
         BehaviorKind::DronePort => {
             module == "xac:drone_port"
@@ -676,6 +691,49 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     )?;
     linker.func_wrap(
         "xac:turret",
+        "scan_enemies",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            let count = caller.data().input.turret_visible_enemy_count.max(0);
+            let cost = host_cost::SCAN_ENEMIES_BASE.saturating_add(count as u64);
+            if !charge_host(&mut caller, cost) {
+                return 0;
+            }
+            count
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "can_attack",
+        |mut caller: Caller<'_, BehaviorHostState>, index: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::CAN_ATTACK) {
+                return 0;
+            }
+            if turret_can_attack_scan_index(caller.data(), index) {
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "attack",
+        |mut caller: Caller<'_, BehaviorHostState>, index: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::ATTACK) {
+                return 0;
+            }
+            if !turret_can_attack_scan_index(caller.data(), index) {
+                return 0;
+            }
+            let Ok(index) = u32::try_from(index) else {
+                return 0;
+            };
+            caller.data_mut().intent = BehaviorIntent::TurretScanIndex { index };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
         "ammo_count",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
             if !charge_host(&mut caller, host_cost::AMMO_COUNT) {
@@ -949,6 +1007,10 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         },
     )?;
     Ok(())
+}
+
+fn turret_can_attack_scan_index(state: &BehaviorHostState, index: i32) -> bool {
+    state.input.ammo_count > 0 && index >= 0 && index < state.input.turret_visible_enemy_count
 }
 
 fn push_drone_port_command(state: &mut BehaviorHostState, command: DronePortCommand) {
@@ -1411,6 +1473,81 @@ mod tests {
                     TargetRule::Nearest
                 ]
             )
+        ));
+    }
+
+    #[test]
+    fn turret_wat_can_scan_and_attack_by_index() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::Turret,
+                r#"(module
+                  (import "xac:turret" "scan_enemies" (func $scan_enemies (result i32)))
+                  (import "xac:turret" "can_attack" (func $can_attack (param i32) (result i32)))
+                  (import "xac:turret" "attack" (func $attack (param i32) (result i32)))
+                  (func (export "tick")
+                    (if (i32.gt_s (call $scan_enemies) (i32.const 1))
+                      (then
+                        (if (call $can_attack (i32.const 1))
+                          (then
+                            (drop (call $attack (i32.const 1)))))))))"#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    ammo_count: 3,
+                    turret_visible_enemy_count: 2,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::TurretScanIndex { index } if index == 1
+        ));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    ammo_count: 3,
+                    turret_visible_enemy_count: 1,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn xac_script_can_scan_and_attack_by_index() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "if scan_enemies > 1 attack 1";
+        let wat = compile_source_to_wat(BehaviorKind::Turret, source).unwrap();
+        assert!(wat.contains(r#""scan_enemies""#));
+        assert!(wat.contains(r#""attack""#));
+
+        let compiled = runtime.compile_wat(BehaviorKind::Turret, source).unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    ammo_count: 3,
+                    turret_visible_enemy_count: 2,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::TurretScanIndex { index } if index == 1
         ));
     }
 

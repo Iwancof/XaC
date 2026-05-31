@@ -24,6 +24,39 @@ impl Simulation {
         }
     }
 
+    pub(crate) fn run_turret_scan_index(&mut self, turret_id: &str, index: u32) {
+        let Some(turret) = self.blocks.get(turret_id).cloned() else {
+            return;
+        };
+        if turret.kind != BlockKind::Turret || turret.inventory.count(&ItemKind::Ammo) == 0 {
+            return;
+        }
+        let Some(enemy_id) = self
+            .visible_turret_target_ids(turret.pos)
+            .get(index as usize)
+            .cloned()
+        else {
+            return;
+        };
+        if let Some(enemy) = self.enemies.get_mut(&enemy_id) {
+            enemy.hp -= 12;
+        }
+        if let Some(block) = self.blocks.get_mut(turret_id) {
+            block.inventory.remove(&ItemKind::Ammo, 1);
+            block.status = format!("attacking scanned {index}: {enemy_id}");
+        }
+    }
+
+    pub(crate) fn turret_visible_enemy_count(&self, turret_id: &str) -> i32 {
+        let Some(turret) = self.blocks.get(turret_id) else {
+            return 0;
+        };
+        if turret.kind != BlockKind::Turret {
+            return 0;
+        }
+        i32::try_from(self.visible_turret_target_ids(turret.pos).len()).unwrap_or(i32::MAX)
+    }
+
     pub(crate) fn run_enemies(&mut self) {
         let enemy_ids: Vec<_> = self.enemies.keys().cloned().collect();
         let blocks_snapshot = self.blocks.clone();
@@ -125,6 +158,17 @@ impl Simulation {
             }
         }
         None
+    }
+
+    fn visible_turret_target_ids(&self, origin: Pos) -> Vec<String> {
+        let origin = WorldPos::from_tile_center(origin);
+        let mut in_range: Vec<_> = self
+            .enemies
+            .values()
+            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= 8.0)
+            .collect();
+        in_range.sort_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)));
+        in_range.into_iter().map(|enemy| enemy.id.clone()).collect()
     }
 }
 

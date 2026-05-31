@@ -57,6 +57,9 @@ enum HostImport {
     AssemblerInputCount,
     AssemblerOutputCount,
     AssemblerProduce,
+    TurretScanEnemies,
+    TurretCanAttack,
+    TurretAttack,
     TurretAmmoCount,
     TurretAttackNearest,
     TurretAttackBest,
@@ -116,6 +119,15 @@ impl HostImport {
             }
             HostImport::AssemblerProduce => {
                 r#"  (import "xac:assembler" "produce" (func $produce (result i32)))"#
+            }
+            HostImport::TurretScanEnemies => {
+                r#"  (import "xac:turret" "scan_enemies" (func $scan_enemies (result i32)))"#
+            }
+            HostImport::TurretCanAttack => {
+                r#"  (import "xac:turret" "can_attack" (func $can_attack (param i32) (result i32)))"#
+            }
+            HostImport::TurretAttack => {
+                r#"  (import "xac:turret" "attack" (func $attack (param i32) (result i32)))"#
             }
             HostImport::TurretAmmoCount => {
                 r#"  (import "xac:turret" "ammo_count" (func $ammo_count (result i32)))"#
@@ -202,6 +214,13 @@ enum Condition {
         value: i32,
     },
     AmmoGtZero,
+    ScanEnemies {
+        comparison: CountComparison,
+        value: i32,
+    },
+    CanAttack {
+        index: i32,
+    },
     StockCount {
         item: ItemKind,
         comparison: CountComparison,
@@ -264,6 +283,9 @@ enum ScriptAction {
     AttackNearest,
     AttackBest {
         policy: i32,
+    },
+    Attack {
+        index: i32,
     },
     Dispatch,
     ChargeDockedDrones,
@@ -353,6 +375,19 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
             rest,
         )),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
+        ["if", "scan_enemies", comparison, value, rest @ ..] => Ok((
+            Condition::ScanEnemies {
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "scan enemy count threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "can_attack", index, rest @ ..] => Ok((
+            Condition::CanAttack {
+                index: parse_i32(line_no, "scan enemy index", index)?,
+            },
+            rest,
+        )),
         ["if", "stock_count", item, comparison, value, rest @ ..] => Ok((
             Condition::StockCount {
                 item: parse_item_or_err(line_no, item)?,
@@ -462,6 +497,13 @@ fn parse_script_action(
             ensure_kind(kind, BehaviorKind::Turret, line_no, "attack_nearest")?;
             imports.insert(HostImport::TurretAttackNearest);
             Ok(ScriptAction::AttackNearest)
+        }
+        ["attack", index] => {
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "attack")?;
+            imports.insert(HostImport::TurretAttack);
+            Ok(ScriptAction::Attack {
+                index: parse_i32(line_no, "scan enemy index", index)?,
+            })
         }
         ["attack_best", policies @ ..] if !policies.is_empty() => {
             ensure_kind(kind, BehaviorKind::Turret, line_no, "attack_best")?;
@@ -580,6 +622,14 @@ fn add_condition_import(
         Condition::AmmoGtZero => {
             ensure_kind(kind, BehaviorKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
+        }
+        Condition::ScanEnemies { .. } => {
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "scan_enemies")?;
+            imports.insert(HostImport::TurretScanEnemies);
+        }
+        Condition::CanAttack { .. } => {
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "can_attack")?;
+            imports.insert(HostImport::TurretCanAttack);
         }
         Condition::StockCount { .. } => {
             imports.insert(HostImport::CommonStockCount);
@@ -778,6 +828,12 @@ fn render_condition(condition: Condition) -> String {
             value,
         } => render_count_condition("output_count", &item, comparison, value),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
+        Condition::ScanEnemies { comparison, value } => {
+            render_scalar_count_condition("scan_enemies", comparison, value)
+        }
+        Condition::CanAttack { index } => {
+            format!("(call $can_attack (i32.const {index}))")
+        }
         Condition::StockCount {
             item,
             comparison,
@@ -812,6 +868,21 @@ fn render_condition(condition: Condition) -> String {
             format!("(i32.eq (call $net_get_i32 (i32.const {key})) (i32.const {value}))")
         }
     }
+}
+
+fn render_scalar_count_condition(
+    function_name: &str,
+    comparison: CountComparison,
+    value: i32,
+) -> String {
+    let op = match comparison {
+        CountComparison::Lt => "i32.lt_s",
+        CountComparison::Le => "i32.le_s",
+        CountComparison::Eq => "i32.eq",
+        CountComparison::Ge => "i32.ge_s",
+        CountComparison::Gt => "i32.gt_s",
+    };
+    format!("({op} (call ${function_name}) (i32.const {value}))")
 }
 
 fn render_count_condition(
@@ -857,6 +928,9 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
         ScriptAction::AttackBest { policy } => out.push(format!(
             "{indent}(drop (call $attack_best (i32.const {})))",
             policy
+        )),
+        ScriptAction::Attack { index } => out.push(format!(
+            "{indent}(drop (call $attack (i32.const {index})))"
         )),
         ScriptAction::Dispatch => out.push(format!("{indent}(drop (call $dispatch))")),
         ScriptAction::ChargeDockedDrones => {
