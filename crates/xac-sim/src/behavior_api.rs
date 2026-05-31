@@ -191,7 +191,12 @@ impl Simulation {
             .blocks
             .values()
             .filter(|b| b.behavior_ref.as_ref() == Some(&summary.id))
-            .count() as u32;
+            .count() as u32
+            + self
+                .drones
+                .values()
+                .filter(|d| d.behavior_ref.as_ref() == Some(&summary.id))
+                .count() as u32;
         summary
     }
 }

@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
-use xac_core::{BlockKind, Direction, ItemKind};
+use xac_core::{BehaviorKind, Direction, ItemKind};
 
 pub(crate) const ATTACK_POLICY_NEAREST: i32 = 2;
 pub(crate) const ATTACK_POLICY_LOWEST_HP: i32 = 3;
@@ -17,7 +17,7 @@ pub(crate) fn is_wat_source(source: &str) -> bool {
         .is_some_and(|line| line.starts_with("(module"))
 }
 
-pub(crate) fn compile_xac_script(kind: BlockKind, source: &str) -> Result<String> {
+pub(crate) fn compile_xac_script(kind: BehaviorKind, source: &str) -> Result<String> {
     let mut imports = BTreeSet::new();
     let mut statements = Vec::new();
 
@@ -59,6 +59,14 @@ enum HostImport {
     TurretAttackNearest,
     TurretAttackBest,
     DronePortDispatch,
+    DroneBatteryPercent,
+    DroneLogicFuelRemaining,
+    DroneHasJob,
+    DroneHasPendingJob,
+    DroneReturnToPort,
+    DroneClaimDeliveryJob,
+    DroneDeliver,
+    DroneIdle,
     CommonFuelRemaining,
     NetStoreGetI32,
     NetStoreSetI32,
@@ -107,6 +115,28 @@ impl HostImport {
             HostImport::DronePortDispatch => {
                 r#"  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))"#
             }
+            HostImport::DroneBatteryPercent => {
+                r#"  (import "xac:drone" "battery_percent" (func $battery_percent (result i32)))"#
+            }
+            HostImport::DroneLogicFuelRemaining => {
+                r#"  (import "xac:drone" "logic_fuel_remaining" (func $logic_fuel_remaining (result i64)))"#
+            }
+            HostImport::DroneHasJob => {
+                r#"  (import "xac:drone" "has_job" (func $has_job (result i32)))"#
+            }
+            HostImport::DroneHasPendingJob => {
+                r#"  (import "xac:drone" "has_pending_job" (func $has_pending_job (result i32)))"#
+            }
+            HostImport::DroneReturnToPort => {
+                r#"  (import "xac:drone" "return_to_port" (func $return_to_port (result i32)))"#
+            }
+            HostImport::DroneClaimDeliveryJob => {
+                r#"  (import "xac:drone" "claim_delivery_job" (func $claim_delivery_job (result i32)))"#
+            }
+            HostImport::DroneDeliver => {
+                r#"  (import "xac:drone" "deliver" (func $deliver (result i32)))"#
+            }
+            HostImport::DroneIdle => r#"  (import "xac:drone" "idle" (func $idle (result i32)))"#,
             HostImport::CommonFuelRemaining => {
                 r#"  (import "xac:common" "fuel_remaining" (func $fuel_remaining (result i64)))"#
             }
@@ -127,6 +157,10 @@ enum Condition {
     OutputItemAvailable { item: ItemKind, dir: Direction },
     CanProduce,
     AmmoGtZero,
+    BatteryPercentLt { value: i32 },
+    LogicFuelLt { value: u64 },
+    HasJob,
+    HasPendingJob,
     FuelGt { value: u64 },
     NetGt { key: i32, value: i32 },
     NetEq { key: i32, value: i32 },
@@ -145,6 +179,10 @@ enum ScriptAction {
     AttackNearest,
     AttackBest { policy: i32 },
     Dispatch,
+    ReturnToPort,
+    ClaimDeliveryJob,
+    Deliver,
+    Idle,
     NetSet { key: i32, value: i32 },
 }
 
@@ -168,7 +206,7 @@ fn strip_script_comment(line: &str) -> &str {
 }
 
 fn parse_script_statement(
-    kind: BlockKind,
+    kind: BehaviorKind,
     line_no: usize,
     line: &str,
     imports: &mut BTreeSet<HostImport>,
@@ -202,6 +240,20 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         )),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
+        ["if", "battery_percent", "<", value, rest @ ..] => Ok((
+            Condition::BatteryPercentLt {
+                value: parse_i32(line_no, "battery percent threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "logic_fuel_remaining", "<", value, rest @ ..] => Ok((
+            Condition::LogicFuelLt {
+                value: parse_u64(line_no, "logic fuel threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "has_job", rest @ ..] => Ok((Condition::HasJob, rest)),
+        ["if", "has_pending_job", rest @ ..] => Ok((Condition::HasPendingJob, rest)),
         ["if", "fuel_remaining", ">", value, rest @ ..] => Ok((
             Condition::FuelGt {
                 value: parse_u64(line_no, "fuel remaining threshold", value)?,
@@ -227,7 +279,7 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
 }
 
 fn parse_script_action(
-    kind: BlockKind,
+    kind: BehaviorKind,
     line_no: usize,
     tokens: &[&str],
     imports: &mut BTreeSet<HostImport>,
@@ -236,56 +288,81 @@ fn parse_script_action(
         ["return"] | ["stop"] => Ok(ScriptAction::Return),
         ["noop"] => Ok(ScriptAction::Noop),
         ["mine"] => {
-            ensure_kind(kind, BlockKind::Drill, line_no, "mine")?;
+            ensure_kind(kind, BehaviorKind::Drill, line_no, "mine")?;
             imports.insert(HostImport::DrillMine);
             Ok(ScriptAction::Mine)
         }
         ["push_any"] | ["push", "any"] => {
-            ensure_kind(kind, BlockKind::Router, line_no, "push")?;
+            ensure_kind(kind, BehaviorKind::Router, line_no, "push")?;
             imports.insert(HostImport::RouterPushAny);
             Ok(ScriptAction::PushAny)
         }
         ["push", dir] => {
-            ensure_kind(kind, BlockKind::Router, line_no, "push")?;
+            ensure_kind(kind, BehaviorKind::Router, line_no, "push")?;
             let dir = parse_direction(line_no, dir)?;
             imports.insert(HostImport::RouterPushDir);
             Ok(ScriptAction::PushDir(dir))
         }
         ["push", item, dir] if parse_item(item).is_some() => {
-            ensure_kind(kind, BlockKind::Router, line_no, "push")?;
+            ensure_kind(kind, BehaviorKind::Router, line_no, "push")?;
             let item = parse_item(item).expect("guarded by parse_item");
             let dir = parse_direction(line_no, dir)?;
             imports.insert(HostImport::RouterPushItemDir);
             Ok(ScriptAction::PushItemDir { item, dir })
         }
         ["set_recipe", recipe] => {
-            ensure_kind(kind, BlockKind::Assembler, line_no, "set_recipe")?;
+            ensure_kind(kind, BehaviorKind::Assembler, line_no, "set_recipe")?;
             imports.insert(HostImport::AssemblerSetRecipe);
             Ok(ScriptAction::SetRecipe {
                 recipe: parse_recipe(line_no, recipe)?,
             })
         }
         ["produce"] => {
-            ensure_kind(kind, BlockKind::Assembler, line_no, "produce")?;
+            ensure_kind(kind, BehaviorKind::Assembler, line_no, "produce")?;
             imports.insert(HostImport::AssemblerProduce);
             Ok(ScriptAction::Produce)
         }
         ["attack_nearest"] => {
-            ensure_kind(kind, BlockKind::Turret, line_no, "attack_nearest")?;
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "attack_nearest")?;
             imports.insert(HostImport::TurretAttackNearest);
             Ok(ScriptAction::AttackNearest)
         }
         ["attack_best", policies @ ..] if !policies.is_empty() => {
-            ensure_kind(kind, BlockKind::Turret, line_no, "attack_best")?;
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "attack_best")?;
             imports.insert(HostImport::TurretAttackBest);
             Ok(ScriptAction::AttackBest {
                 policy: parse_attack_policy(line_no, policies)?,
             })
         }
         ["dispatch"] => {
-            ensure_kind(kind, BlockKind::DronePort, line_no, "dispatch")?;
+            ensure_kind(kind, BehaviorKind::DronePort, line_no, "dispatch")?;
             imports.insert(HostImport::DronePortDispatch);
             Ok(ScriptAction::Dispatch)
+        }
+        ["return_to_port"] => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "return_to_port")?;
+            imports.insert(HostImport::DroneReturnToPort);
+            Ok(ScriptAction::ReturnToPort)
+        }
+        ["claim_delivery_job"] => {
+            ensure_kind(
+                kind,
+                BehaviorKind::CarrierDrone,
+                line_no,
+                "claim_delivery_job",
+            )?;
+            imports.insert(HostImport::DroneClaimDeliveryJob);
+            Ok(ScriptAction::ClaimDeliveryJob)
+        }
+        ["deliver"] => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "deliver")?;
+            imports.insert(HostImport::DroneDeliver);
+            Ok(ScriptAction::Deliver)
+        }
+        ["idle"] => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "idle")?;
+            imports.insert(HostImport::DroneIdle);
+            Ok(ScriptAction::Idle)
         }
         ["net_set", key, value] => {
             imports.insert(HostImport::NetStoreSetI32);
@@ -300,31 +377,52 @@ fn parse_script_action(
 }
 
 fn add_condition_import(
-    kind: BlockKind,
+    kind: BehaviorKind,
     line_no: usize,
     condition: &Condition,
     imports: &mut BTreeSet<HostImport>,
 ) -> Result<()> {
     match condition {
         Condition::OutputBlocked => {
-            ensure_kind(kind, BlockKind::Drill, line_no, "output_blocked")?;
+            ensure_kind(kind, BehaviorKind::Drill, line_no, "output_blocked")?;
             imports.insert(HostImport::DrillOutputBlocked);
         }
         Condition::OutputAvailable(_) => {
-            ensure_kind(kind, BlockKind::Router, line_no, "output_available")?;
+            ensure_kind(kind, BehaviorKind::Router, line_no, "output_available")?;
             imports.insert(HostImport::RouterOutputAvailable);
         }
         Condition::OutputItemAvailable { .. } => {
-            ensure_kind(kind, BlockKind::Router, line_no, "output_available")?;
+            ensure_kind(kind, BehaviorKind::Router, line_no, "output_available")?;
             imports.insert(HostImport::RouterOutputItemAvailable);
         }
         Condition::CanProduce => {
-            ensure_kind(kind, BlockKind::Assembler, line_no, "can_produce")?;
+            ensure_kind(kind, BehaviorKind::Assembler, line_no, "can_produce")?;
             imports.insert(HostImport::AssemblerCanProduce);
         }
         Condition::AmmoGtZero => {
-            ensure_kind(kind, BlockKind::Turret, line_no, "ammo_count")?;
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
+        }
+        Condition::BatteryPercentLt { .. } => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "battery_percent")?;
+            imports.insert(HostImport::DroneBatteryPercent);
+        }
+        Condition::LogicFuelLt { .. } => {
+            ensure_kind(
+                kind,
+                BehaviorKind::CarrierDrone,
+                line_no,
+                "logic_fuel_remaining",
+            )?;
+            imports.insert(HostImport::DroneLogicFuelRemaining);
+        }
+        Condition::HasJob => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "has_job")?;
+            imports.insert(HostImport::DroneHasJob);
+        }
+        Condition::HasPendingJob => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "has_pending_job")?;
+            imports.insert(HostImport::DroneHasPendingJob);
         }
         Condition::FuelGt { .. } => {
             imports.insert(HostImport::CommonFuelRemaining);
@@ -336,7 +434,12 @@ fn add_condition_import(
     Ok(())
 }
 
-fn ensure_kind(kind: BlockKind, expected: BlockKind, line_no: usize, api: &str) -> Result<()> {
+fn ensure_kind(
+    kind: BehaviorKind,
+    expected: BehaviorKind,
+    line_no: usize,
+    api: &str,
+) -> Result<()> {
     if kind == expected {
         Ok(())
     } else {
@@ -454,6 +557,14 @@ fn render_condition(condition: Condition) -> String {
         }
         Condition::CanProduce => "(call $can_produce)".to_string(),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
+        Condition::BatteryPercentLt { value } => {
+            format!("(i32.lt_s (call $battery_percent) (i32.const {value}))")
+        }
+        Condition::LogicFuelLt { value } => {
+            format!("(i64.lt_u (call $logic_fuel_remaining) (i64.const {value}))")
+        }
+        Condition::HasJob => "(call $has_job)".to_string(),
+        Condition::HasPendingJob => "(call $has_pending_job)".to_string(),
         Condition::FuelGt { value } => {
             format!("(i64.gt_u (call $fuel_remaining) (i64.const {value}))")
         }
@@ -492,6 +603,12 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
             policy
         )),
         ScriptAction::Dispatch => out.push(format!("{indent}(drop (call $dispatch))")),
+        ScriptAction::ReturnToPort => out.push(format!("{indent}(drop (call $return_to_port))")),
+        ScriptAction::ClaimDeliveryJob => {
+            out.push(format!("{indent}(drop (call $claim_delivery_job))"))
+        }
+        ScriptAction::Deliver => out.push(format!("{indent}(drop (call $deliver))")),
+        ScriptAction::Idle => out.push(format!("{indent}(drop (call $idle))")),
         ScriptAction::NetSet { key, value } => out.push(format!(
             "{indent}(drop (call $net_set_i32 (i32.const {key}) (i32.const {value})))"
         )),

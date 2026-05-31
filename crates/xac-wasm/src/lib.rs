@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
-use xac_core::{BlockKind, Direction, EnemyKind, ItemKind};
+use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
 
 mod script;
 use script::{
@@ -27,7 +27,17 @@ pub enum BehaviorIntent {
         priority: Vec<TargetRule>,
     },
     DronePort,
-    CarrierDrone,
+    CarrierDrone {
+        command: DroneCommand,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DroneCommand {
+    ReturnToPort,
+    ClaimDeliveryJob,
+    Deliver,
+    Idle,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -61,6 +71,10 @@ pub struct BehaviorHostInput {
     pub ammo_count: i32,
     pub router_output_available: [bool; 4],
     pub router_item_output_available: BTreeMap<ItemKind, [bool; 4]>,
+    pub drone_battery_percent: i32,
+    pub drone_logic_fuel: u64,
+    pub drone_has_job: bool,
+    pub drone_has_pending_job: bool,
     pub net_i32: BTreeMap<i32, i32>,
     pub net_writable: bool,
 }
@@ -101,6 +115,9 @@ mod host_cost {
     pub const ATTACK_NEAREST: u64 = 4;
     pub const ATTACK_BEST: u64 = 8;
     pub const DISPATCH: u64 = 5;
+    pub const DRONE_SENSOR: u64 = 1;
+    pub const DRONE_JOB: u64 = 5;
+    pub const DRONE_ACTION: u64 = 2;
     pub const NET_GET_I32: u64 = 2;
     pub const NET_SET_I32: u64 = 4;
 }
@@ -113,14 +130,14 @@ enum TickAbi {
 
 #[derive(Clone)]
 pub struct CompiledBehavior {
-    kind: BlockKind,
+    kind: BehaviorKind,
     module: Module,
     wasm_hash: String,
     tick_abi: TickAbi,
 }
 
 impl CompiledBehavior {
-    pub fn kind(&self) -> BlockKind {
+    pub fn kind(&self) -> BehaviorKind {
         self.kind
     }
 
@@ -144,7 +161,7 @@ impl BehaviorRuntime {
         })
     }
 
-    pub fn compile_wat(&self, kind: BlockKind, source: &str) -> Result<CompiledBehavior> {
+    pub fn compile_wat(&self, kind: BehaviorKind, source: &str) -> Result<CompiledBehavior> {
         let wat_source = compile_source_to_wat(kind, source)?;
         let wasm = wat::parse_str(&wat_source).context("parse behavior source as WAT")?;
         let wasm_hash = hash_bytes(&wasm);
@@ -483,6 +500,112 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         },
     )?;
     linker.func_wrap(
+        "xac:drone",
+        "battery_percent",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_SENSOR) {
+                return 0;
+            }
+            caller.data().input.drone_battery_percent
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "logic_fuel_remaining",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i64 {
+            if !charge_host(&mut caller, host_cost::DRONE_SENSOR) {
+                return 0;
+            }
+            caller.data().input.drone_logic_fuel as i64
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "has_job",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_SENSOR) {
+                return 0;
+            }
+            if caller.data().input.drone_has_job {
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "has_pending_job",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_JOB) {
+                return 0;
+            }
+            if caller.data().input.drone_has_pending_job {
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "return_to_port",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::ReturnToPort,
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "claim_delivery_job",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_JOB) {
+                return 0;
+            }
+            if !caller.data().input.drone_has_pending_job {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::ClaimDeliveryJob,
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "deliver",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
+                return 0;
+            }
+            if !caller.data().input.drone_has_job {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Deliver,
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "idle",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Idle,
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
         "xac:net",
         "store_get_i32",
         |mut caller: Caller<'_, BehaviorHostState>, key: i32| -> i32 {
@@ -527,7 +650,7 @@ fn charge_host(caller: &mut Caller<'_, BehaviorHostState>, cost: u64) -> bool {
     true
 }
 
-pub fn compile_source_to_wat(kind: BlockKind, source: &str) -> Result<String> {
+pub fn compile_source_to_wat(kind: BehaviorKind, source: &str) -> Result<String> {
     if is_wat_source(source) {
         Ok(source.to_string())
     } else {
@@ -540,7 +663,7 @@ pub fn hash_wasm_source(source: &str) -> Result<String> {
     Ok(hash_bytes(&wasm))
 }
 
-pub fn hash_behavior_source(kind: BlockKind, source: &str) -> Result<String> {
+pub fn hash_behavior_source(kind: BehaviorKind, source: &str) -> Result<String> {
     let wat_source = compile_source_to_wat(kind, source)?;
     let wasm = wat::parse_str(&wat_source).context("parse behavior source as WAT")?;
     Ok(hash_bytes(&wasm))
@@ -552,31 +675,43 @@ fn hash_bytes(bytes: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-fn action_code_to_intent(kind: BlockKind, action_code: i32) -> Result<BehaviorIntent> {
+fn action_code_to_intent(kind: BehaviorKind, action_code: i32) -> Result<BehaviorIntent> {
     match action_code {
         0 => Ok(BehaviorIntent::Noop),
-        1 if kind == BlockKind::Drill => Ok(BehaviorIntent::DrillDefault),
-        10 if kind == BlockKind::Router => Ok(BehaviorIntent::Router {
+        1 if kind == BehaviorKind::Drill => Ok(BehaviorIntent::DrillDefault),
+        10 if kind == BehaviorKind::Router => Ok(BehaviorIntent::Router {
             item: None,
             preferred: Direction::all().to_vec(),
         }),
-        11 if kind == BlockKind::Router => router_dir(Direction::North),
-        12 if kind == BlockKind::Router => router_dir(Direction::East),
-        13 if kind == BlockKind::Router => router_dir(Direction::South),
-        14 if kind == BlockKind::Router => router_dir(Direction::West),
-        20 if kind == BlockKind::Assembler => Ok(BehaviorIntent::Assembler {
+        11 if kind == BehaviorKind::Router => router_dir(Direction::North),
+        12 if kind == BehaviorKind::Router => router_dir(Direction::East),
+        13 if kind == BehaviorKind::Router => router_dir(Direction::South),
+        14 if kind == BehaviorKind::Router => router_dir(Direction::West),
+        20 if kind == BehaviorKind::Assembler => Ok(BehaviorIntent::Assembler {
             recipe: ItemKind::Plate,
         }),
-        21 if kind == BlockKind::Assembler => Ok(BehaviorIntent::Assembler {
+        21 if kind == BehaviorKind::Assembler => Ok(BehaviorIntent::Assembler {
             recipe: ItemKind::Ammo,
         }),
-        30 if kind == BlockKind::Turret => Ok(BehaviorIntent::Turret {
+        30 if kind == BehaviorKind::Turret => Ok(BehaviorIntent::Turret {
             priority: vec![TargetRule::Nearest],
         }),
-        31 if kind == BlockKind::Turret => Ok(BehaviorIntent::Turret {
+        31 if kind == BehaviorKind::Turret => Ok(BehaviorIntent::Turret {
             priority: vec![TargetRule::LowestHp, TargetRule::Nearest],
         }),
-        40 if kind == BlockKind::DronePort => Ok(BehaviorIntent::DronePort),
+        40 if kind == BehaviorKind::DronePort => Ok(BehaviorIntent::DronePort),
+        50 if kind == BehaviorKind::CarrierDrone => Ok(BehaviorIntent::CarrierDrone {
+            command: DroneCommand::ReturnToPort,
+        }),
+        51 if kind == BehaviorKind::CarrierDrone => Ok(BehaviorIntent::CarrierDrone {
+            command: DroneCommand::ClaimDeliveryJob,
+        }),
+        52 if kind == BehaviorKind::CarrierDrone => Ok(BehaviorIntent::CarrierDrone {
+            command: DroneCommand::Deliver,
+        }),
+        53 if kind == BehaviorKind::CarrierDrone => Ok(BehaviorIntent::CarrierDrone {
+            command: DroneCommand::Idle,
+        }),
         code => Err(anyhow!(
             "behavior returned invalid action code {code} for {kind:?}"
         )),
@@ -711,7 +846,7 @@ mod tests {
     fn compiles_wat_and_evaluates_action_code() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
-            .compile_wat(BlockKind::Drill, &wat_const_action(1))
+            .compile_wat(BehaviorKind::Drill, &wat_const_action(1))
             .unwrap();
         let eval = runtime
             .evaluate_compiled(&compiled, 20, BehaviorHostInput::default())
@@ -727,11 +862,13 @@ mod tests {
     fn rejects_invalid_wat_and_missing_tick() {
         let runtime = BehaviorRuntime::new().unwrap();
 
-        assert!(runtime.compile_wat(BlockKind::Drill, "not wat").is_err());
-        assert!(runtime.compile_wat(BlockKind::Drill, "(module)").is_err());
+        assert!(runtime.compile_wat(BehaviorKind::Drill, "not wat").is_err());
+        assert!(runtime
+            .compile_wat(BehaviorKind::Drill, "(module)")
+            .is_err());
         assert!(runtime
             .compile_wat(
-                BlockKind::Drill,
+                BehaviorKind::Drill,
                 r#"(module (func (export "tick") (result i64) (i64.const 1)))"#
             )
             .is_err());
@@ -741,7 +878,7 @@ mod tests {
     fn reports_over_budget_when_fuel_is_exhausted() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
-            .compile_wat(BlockKind::Drill, &wat_spin_action(10_000, 1))
+            .compile_wat(BehaviorKind::Drill, &wat_spin_action(10_000, 1))
             .unwrap();
         let eval = runtime
             .evaluate_compiled(&compiled, 1, BehaviorHostInput::default())
@@ -755,7 +892,7 @@ mod tests {
     fn validates_action_code_against_block_kind() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
-            .compile_wat(BlockKind::Drill, &wat_const_action(30))
+            .compile_wat(BehaviorKind::Drill, &wat_const_action(30))
             .unwrap();
 
         let err = runtime
@@ -767,12 +904,12 @@ mod tests {
     #[test]
     fn maps_router_and_assembler_actions() {
         assert!(matches!(
-            action_code_to_intent(BlockKind::Router, 12).unwrap(),
+            action_code_to_intent(BehaviorKind::Router, 12).unwrap(),
             BehaviorIntent::Router { item, preferred }
                 if item.is_none() && preferred == vec![Direction::East]
         ));
         assert!(matches!(
-            action_code_to_intent(BlockKind::Assembler, 21).unwrap(),
+            action_code_to_intent(BehaviorKind::Assembler, 21).unwrap(),
             BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
         ));
     }
@@ -781,7 +918,7 @@ mod tests {
     fn host_imports_allow_drill_code_to_call_game_api() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
-            .compile_wat(BlockKind::Drill, &wat_drill_mine())
+            .compile_wat(BehaviorKind::Drill, &wat_drill_mine())
             .unwrap();
         let eval = runtime
             .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
@@ -811,11 +948,11 @@ mod tests {
             if output_blocked return
             mine
         "#;
-        let wat = compile_source_to_wat(BlockKind::Drill, source).unwrap();
+        let wat = compile_source_to_wat(BehaviorKind::Drill, source).unwrap();
         assert!(wat.contains(r#"(import "xac:drill" "mine""#));
         assert!(wat.contains("(call $output_blocked)"));
 
-        let compiled = runtime.compile_wat(BlockKind::Drill, source).unwrap();
+        let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
         let eval = runtime
             .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
             .unwrap();
@@ -839,7 +976,7 @@ mod tests {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
             .compile_wat(
-                BlockKind::Turret,
+                BehaviorKind::Turret,
                 r#"
                   net_set 7 42
                   if net 7 == 42 attack_best lowest_hp
@@ -873,7 +1010,7 @@ mod tests {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
             .compile_wat(
-                BlockKind::Turret,
+                BehaviorKind::Turret,
                 "if ammo_count > 0 attack_best runner wire_cutter armored nearest",
             )
             .unwrap();
@@ -906,7 +1043,7 @@ mod tests {
     fn xac_script_can_gate_router_push_on_output_availability() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
-            .compile_wat(BlockKind::Router, "if output_available east push east")
+            .compile_wat(BehaviorKind::Router, "if output_available east push east")
             .unwrap();
         let eval = runtime
             .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
@@ -934,11 +1071,11 @@ mod tests {
     fn xac_script_can_push_specific_router_item() {
         let runtime = BehaviorRuntime::new().unwrap();
         let source = "if output_available ammo east push ammo east";
-        let wat = compile_source_to_wat(BlockKind::Router, source).unwrap();
+        let wat = compile_source_to_wat(BehaviorKind::Router, source).unwrap();
         assert!(wat.contains(r#""output_item_available""#));
         assert!(wat.contains(r#""push_item_dir""#));
 
-        let compiled = runtime.compile_wat(BlockKind::Router, source).unwrap();
+        let compiled = runtime.compile_wat(BehaviorKind::Router, source).unwrap();
         let eval = runtime
             .evaluate_compiled(&compiled, 80, BehaviorHostInput::default())
             .unwrap();
@@ -964,10 +1101,80 @@ mod tests {
     }
 
     #[test]
+    fn xac_script_can_drive_carrier_drone_commands() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = include_str!("../../../assets/builtin/carrier_drone/basic.xac");
+        let wat = compile_source_to_wat(BehaviorKind::CarrierDrone, source).unwrap();
+        assert!(wat.contains(r#""battery_percent""#));
+        assert!(wat.contains(r#""claim_delivery_job""#));
+        assert!(wat.contains(r#""deliver""#));
+
+        let compiled = runtime
+            .compile_wat(BehaviorKind::CarrierDrone, source)
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    drone_battery_percent: 10,
+                    drone_logic_fuel: 1000,
+                    drone_has_pending_job: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::ReturnToPort
+            }
+        ));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    drone_battery_percent: 100,
+                    drone_logic_fuel: 1000,
+                    drone_has_job: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Deliver
+            }
+        ));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    drone_battery_percent: 100,
+                    drone_logic_fuel: 1000,
+                    drone_has_pending_job: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::ClaimDeliveryJob
+            }
+        ));
+    }
+
+    #[test]
     fn xac_script_can_branch_on_remaining_fuel() {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
-            .compile_wat(BlockKind::Drill, "if fuel_remaining > 12 mine")
+            .compile_wat(BehaviorKind::Drill, "if fuel_remaining > 12 mine")
             .unwrap();
 
         let eval = runtime
@@ -991,7 +1198,7 @@ mod tests {
         let runtime = BehaviorRuntime::new().unwrap();
         let compiled = runtime
             .compile_wat(
-                BlockKind::Turret,
+                BehaviorKind::Turret,
                 r#"(module
                   (import "xac:turret" "attack_best" (func $attack_best (param i32) (result i32)))
                   (func (export "tick")
@@ -1038,7 +1245,7 @@ mod tests {
 
     #[test]
     fn xac_script_rejects_wrong_block_capability() {
-        let err = compile_source_to_wat(BlockKind::Turret, "mine").unwrap_err();
+        let err = compile_source_to_wat(BehaviorKind::Turret, "mine").unwrap_err();
         assert!(err.to_string().contains("only available to Drill"));
     }
 
@@ -1048,7 +1255,7 @@ mod tests {
 
         let router = runtime
             .compile_wat(
-                BlockKind::Router,
+                BehaviorKind::Router,
                 r#"(module
                   (import "xac:router" "push_dir" (func $push_dir (param i32) (result i32)))
                   (func (export "tick")
@@ -1066,7 +1273,7 @@ mod tests {
 
         let assembler = runtime
             .compile_wat(
-                BlockKind::Assembler,
+                BehaviorKind::Assembler,
                 r#"(module
                   (import "xac:assembler" "set_recipe" (func $set_recipe (param i32) (result i32)))
                   (import "xac:assembler" "produce" (func $produce (result i32)))
@@ -1092,7 +1299,7 @@ mod tests {
 
         let turret = runtime
             .compile_wat(
-                BlockKind::Turret,
+                BehaviorKind::Turret,
                 r#"(module
                   (import "xac:turret" "attack_best" (func $attack_best (param i32) (result i32)))
                   (func (export "tick")
@@ -1123,7 +1330,7 @@ mod tests {
 
         let drone_port = runtime
             .compile_wat(
-                BlockKind::DronePort,
+                BehaviorKind::DronePort,
                 r#"(module
                   (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))
                   (func (export "tick")

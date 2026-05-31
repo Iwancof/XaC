@@ -10,6 +10,13 @@ export type BlockKind =
   | "assembler"
   | "turret"
   | "drone_port";
+export type BehaviorKind =
+  | "drill"
+  | "router"
+  | "assembler"
+  | "turret"
+  | "drone_port"
+  | "carrier_drone";
 
 export type EnemyKind = "grunt" | "runner" | "armored" | "wire_cutter";
 export type ItemKind = "ore" | "plate" | "ammo" | "cpu_part" | "drone_part";
@@ -75,6 +82,7 @@ export interface DeliveryJob {
 export interface Drone {
   id: string;
   home_port: string;
+  behavior_ref: string | null;
   pos: Pos;
   battery: number;
   logic_fuel: number;
@@ -96,7 +104,7 @@ export interface Network {
 export interface BehaviorSummary {
   id: string;
   display_name: string;
-  base_kind: BlockKind;
+  base_kind: BehaviorKind;
   world: string;
   builtin: boolean;
   used_by: number;

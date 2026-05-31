@@ -904,6 +904,10 @@ mod tests {
         );
         let drone = sim.drones.values().next().unwrap();
         assert_eq!(drone.home_port, port_id);
+        assert_eq!(
+            drone.behavior_ref.as_deref(),
+            Some("builtin.carrier_drone.basic")
+        );
         assert_eq!(drone.state, DroneState::Docked);
         assert!(drone.job.is_none());
         assert!(

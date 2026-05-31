@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use xac_core::{BehaviorId, BehaviorSummary, BlockKind};
+use xac_core::{BehaviorId, BehaviorKind, BehaviorSummary};
 use xac_wasm::hash_behavior_source;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -23,7 +23,7 @@ struct ProjectBehaviorIndex {
 struct ProjectBehaviorRecord {
     id: BehaviorId,
     display_name: String,
-    base_kind: BlockKind,
+    base_kind: BehaviorKind,
     world: String,
     source_path: String,
     build_status: String,
@@ -133,7 +133,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.drill.basic",
             "Basic Drill",
-            BlockKind::Drill,
+            BehaviorKind::Drill,
             "drill-behavior",
             "assets/builtin/drill/basic.xac",
             include_str!("../../../assets/builtin/drill/basic.xac"),
@@ -141,7 +141,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.router.basic",
             "Basic Router",
-            BlockKind::Router,
+            BehaviorKind::Router,
             "router-behavior",
             "assets/builtin/router/basic.xac",
             include_str!("../../../assets/builtin/router/basic.xac"),
@@ -149,7 +149,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.router.ammo_east",
             "Ammo East Router",
-            BlockKind::Router,
+            BehaviorKind::Router,
             "router-behavior",
             "assets/builtin/router/ammo_east.xac",
             include_str!("../../../assets/builtin/router/ammo_east.xac"),
@@ -157,7 +157,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.assembler.basic",
             "Basic Assembler",
-            BlockKind::Assembler,
+            BehaviorKind::Assembler,
             "assembler-behavior",
             "assets/builtin/assembler/basic.xac",
             include_str!("../../../assets/builtin/assembler/basic.xac"),
@@ -165,7 +165,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.turret.basic",
             "Basic Turret",
-            BlockKind::Turret,
+            BehaviorKind::Turret,
             "turret-behavior",
             "assets/builtin/turret/basic.xac",
             include_str!("../../../assets/builtin/turret/basic.xac"),
@@ -173,7 +173,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.turret.priority",
             "Priority Turret",
-            BlockKind::Turret,
+            BehaviorKind::Turret,
             "turret-behavior",
             "assets/builtin/turret/priority.xac",
             include_str!("../../../assets/builtin/turret/priority.xac"),
@@ -181,10 +181,18 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         (
             "builtin.drone_port.basic",
             "Basic Drone Port",
-            BlockKind::DronePort,
+            BehaviorKind::DronePort,
             "drone-port-behavior",
             "assets/builtin/drone_port/basic.xac",
             include_str!("../../../assets/builtin/drone_port/basic.xac"),
+        ),
+        (
+            "builtin.carrier_drone.basic",
+            "Basic Carrier Drone",
+            BehaviorKind::CarrierDrone,
+            "carrier-drone-behavior",
+            "assets/builtin/carrier_drone/basic.xac",
+            include_str!("../../../assets/builtin/carrier_drone/basic.xac"),
         ),
     ] {
         let id = id.to_string();

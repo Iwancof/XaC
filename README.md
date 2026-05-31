@@ -83,6 +83,22 @@ Turret scripts can prioritize enemy kinds directly:
 if ammo_count > 0 attack_best wire_cutter runner armored nearest
 ```
 
+Carrier drones also run a built-in XaC Script behavior through the same Wasm
+backend. The default drone checks battery and logic fuel, claims a pending ammo
+delivery job, delivers it, and returns to its port:
+
+```text
+if battery_percent < 25 return_to_port
+if battery_percent < 25 return
+if logic_fuel_remaining < 100 return_to_port
+if logic_fuel_remaining < 100 return
+if has_job deliver
+if has_job return
+if has_pending_job claim_delivery_job
+if has_pending_job return
+idle
+```
+
 Routers can make availability checks before moving items:
 
 ```text

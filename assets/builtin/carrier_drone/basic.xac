@@ -1,0 +1,9 @@
+if battery_percent < 25 return_to_port
+if battery_percent < 25 return
+if logic_fuel_remaining < 100 return_to_port
+if logic_fuel_remaining < 100 return
+if has_job deliver
+if has_job return
+if has_pending_job claim_delivery_job
+if has_pending_job return
+idle

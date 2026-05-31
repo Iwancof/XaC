@@ -165,6 +165,30 @@ pub enum BlockKind {
     DronePort,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum BehaviorKind {
+    Drill,
+    Router,
+    Assembler,
+    Turret,
+    DronePort,
+    CarrierDrone,
+}
+
+impl BehaviorKind {
+    pub fn from_block_kind(kind: BlockKind) -> Option<Self> {
+        match kind {
+            BlockKind::Drill => Some(BehaviorKind::Drill),
+            BlockKind::Router => Some(BehaviorKind::Router),
+            BlockKind::Assembler => Some(BehaviorKind::Assembler),
+            BlockKind::Turret => Some(BehaviorKind::Turret),
+            BlockKind::DronePort => Some(BehaviorKind::DronePort),
+            _ => None,
+        }
+    }
+}
+
 impl BlockKind {
     pub fn is_programmable(self) -> bool {
         matches!(
@@ -355,6 +379,7 @@ pub struct DeliveryJob {
 pub struct Drone {
     pub id: EntityId,
     pub home_port: EntityId,
+    pub behavior_ref: Option<BehaviorId>,
     pub pos: WorldPos,
     pub battery: f32,
     pub logic_fuel: u64,
@@ -378,7 +403,7 @@ pub struct Network {
 pub struct BehaviorSummary {
     pub id: BehaviorId,
     pub display_name: String,
-    pub base_kind: BlockKind,
+    pub base_kind: BehaviorKind,
     pub world: String,
     pub builtin: bool,
     pub used_by: u32,

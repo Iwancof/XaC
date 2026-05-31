@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
-use xac_core::{BlockKind, Direction, ItemKind, LogLevel};
+use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel};
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, CompiledBehavior, NetStoreWrite};
 
 use crate::{Simulation, TICKS_PER_SECOND};
@@ -20,7 +20,8 @@ impl Simulation {
         for id in ids {
             let (kind, behavior_ref, cpu_rate) = match self.blocks.get(&id) {
                 Some(block) => (
-                    block.kind,
+                    BehaviorKind::from_block_kind(block.kind)
+                        .expect("programmable blocks have behavior kinds"),
                     block.behavior_ref.clone(),
                     block.effective_cpu_rate,
                 ),
@@ -104,6 +105,7 @@ impl Simulation {
                 .and_then(|network_id| self.networks.get(&network_id))
                 .map(|network| !network.read_only_cache)
                 .unwrap_or(false),
+            ..Default::default()
         }
     }
 
@@ -165,10 +167,10 @@ impl Simulation {
         }
     }
 
-    fn compiled_behavior(
+    pub(crate) fn compiled_behavior(
         &mut self,
         behavior_id: &str,
-        expected_kind: BlockKind,
+        expected_kind: BehaviorKind,
     ) -> Result<CompiledBehavior> {
         if let Some(compiled) = self.compiled_behaviors.get(behavior_id) {
             return Ok(compiled.clone());
@@ -231,7 +233,7 @@ impl Simulation {
             }
             BehaviorIntent::Turret { priority } => self.run_turret_once(block_id, &priority),
             BehaviorIntent::DronePort => self.ensure_drone_and_job(block_id),
-            BehaviorIntent::CarrierDrone => {}
+            BehaviorIntent::CarrierDrone { .. } => {}
         }
     }
 }
