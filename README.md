@@ -56,6 +56,13 @@ if output_blocked return
 mine
 ```
 
+Drill scripts can also inspect the resource under the drill and explicitly
+push stored ore into the block they face:
+
+```text
+if ore_kind == ore output ore
+```
+
 The backend lowers that source to WebAssembly Text, compiles it to Wasm with
 Wasmtime, links a small host API surface such as `xac:drill/mine`, and runs
 each `tick()` with fuel derived from the block's effective network CPU rate.

@@ -21,6 +21,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
     monaco.languages.setMonarchTokensProvider("xac-script", {
       keywords: [
         "mine",
+        "output",
         "return",
         "stop",
         "noop",
@@ -48,6 +49,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "net",
         "net_set",
         "output_blocked",
+        "ore_kind",
         "output_available",
         "can_produce",
         "input_count",

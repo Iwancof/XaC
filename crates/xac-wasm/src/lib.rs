@@ -15,7 +15,9 @@ use script::{
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BehaviorIntent {
     Noop,
-    DrillDefault,
+    Drill {
+        commands: Vec<DrillCommand>,
+    },
     Router {
         item: Option<ItemKind>,
         preferred: Vec<Direction>,
@@ -35,6 +37,12 @@ pub enum BehaviorIntent {
     CarrierDrone {
         command: DroneCommand,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum DrillCommand {
+    Mine,
+    Output { item: ItemKind },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -86,6 +94,7 @@ pub struct NetStoreWrite {
 #[derive(Clone, Debug, Default)]
 pub struct BehaviorHostInput {
     pub output_blocked: bool,
+    pub drill_ore_kind: Option<ItemKind>,
     pub can_produce: bool,
     pub assembler_can_produce: [bool; 2],
     pub assembler_input_counts: BTreeMap<ItemKind, i32>,
@@ -132,6 +141,8 @@ mod host_cost {
     pub const FUEL_REMAINING: u64 = 0;
     pub const OUTPUT_BLOCKED: u64 = 1;
     pub const MINE: u64 = 2;
+    pub const DRILL_OUTPUT: u64 = 1;
+    pub const ORE_KIND: u64 = 1;
     pub const PUSH: u64 = 1;
     pub const PUSH_ITEM: u64 = 2;
     pub const OUTPUT_AVAILABLE: u64 = 1;
@@ -325,7 +336,10 @@ fn allowed_common_import(module: &str, name: &str) -> bool {
 
 fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
     match kind {
-        BehaviorKind::Drill => module == "xac:drill" && matches!(name, "output_blocked" | "mine"),
+        BehaviorKind::Drill => {
+            module == "xac:drill"
+                && matches!(name, "output_blocked" | "mine" | "output" | "ore_kind")
+        }
         BehaviorKind::Router => {
             module == "xac:router"
                 && matches!(
@@ -390,7 +404,9 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
 
 fn allowed_worlds(kind: BehaviorKind) -> &'static str {
     match kind {
-        BehaviorKind::Drill => "xac:common, xac:net, xac:drill",
+        BehaviorKind::Drill => {
+            "xac:common, xac:net, xac:drill(output_blocked, mine, output, ore_kind)"
+        }
         BehaviorKind::Router => "xac:common, xac:net, xac:router",
         BehaviorKind::Assembler => "xac:common, xac:net, xac:assembler",
         BehaviorKind::Turret => "xac:common, xac:net, xac:turret",
@@ -514,8 +530,38 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !charge_host(&mut caller, host_cost::MINE) {
                 return 0;
             }
-            caller.data_mut().intent = BehaviorIntent::DrillDefault;
+            push_drill_command(caller.data_mut(), DrillCommand::Mine);
             1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drill",
+        "output",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRILL_OUTPUT) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            push_drill_command(caller.data_mut(), DrillCommand::Output { item });
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drill",
+        "ore_kind",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::ORE_KIND) {
+                return -1;
+            }
+            caller
+                .data()
+                .input
+                .drill_ore_kind
+                .as_ref()
+                .map(item_code)
+                .unwrap_or(-1)
         },
     )?;
     linker.func_wrap(
@@ -1099,6 +1145,17 @@ fn turret_can_attack_scan_index(state: &BehaviorHostState, index: i32) -> bool {
     state.input.ammo_count > 0 && index >= 0 && index < state.input.turret_visible_enemy_count
 }
 
+fn push_drill_command(state: &mut BehaviorHostState, command: DrillCommand) {
+    match &mut state.intent {
+        BehaviorIntent::Drill { commands } => commands.push(command),
+        _ => {
+            state.intent = BehaviorIntent::Drill {
+                commands: vec![command],
+            };
+        }
+    }
+}
+
 fn push_drone_port_command(state: &mut BehaviorHostState, command: DronePortCommand) {
     match &mut state.intent {
         BehaviorIntent::DronePort { commands } => commands.push(command),
@@ -1154,7 +1211,9 @@ fn hash_bytes(bytes: &[u8]) -> String {
 fn action_code_to_intent(kind: BehaviorKind, action_code: i32) -> Result<BehaviorIntent> {
     match action_code {
         0 => Ok(BehaviorIntent::Noop),
-        1 if kind == BehaviorKind::Drill => Ok(BehaviorIntent::DrillDefault),
+        1 if kind == BehaviorKind::Drill => Ok(BehaviorIntent::Drill {
+            commands: vec![DrillCommand::Mine],
+        }),
         10 if kind == BehaviorKind::Router => Ok(BehaviorIntent::Router {
             item: None,
             preferred: Direction::all().to_vec(),
@@ -1280,6 +1339,16 @@ fn item_from_code(code: i32) -> Option<ItemKind> {
     }
 }
 
+fn item_code(item: &ItemKind) -> i32 {
+    match item {
+        ItemKind::Ore => 0,
+        ItemKind::Plate => 1,
+        ItemKind::Ammo => 2,
+        ItemKind::CpuPart => 3,
+        ItemKind::DronePart => 4,
+    }
+}
+
 fn dropoff_tag_from_code(code: i32) -> Option<&'static str> {
     match code {
         0 => Some("frontline"),
@@ -1337,7 +1406,11 @@ mod tests {
             .evaluate_compiled(&compiled, 20, BehaviorHostInput::default())
             .unwrap();
 
-        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
         assert!(!eval.over_budget);
         assert!(eval.fuel_spent > 0);
         assert_eq!(compiled.wasm_hash(), eval.wasm_hash);
@@ -1409,7 +1482,11 @@ mod tests {
             .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
             .unwrap();
 
-        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
         assert!(!eval.over_budget);
 
         let eval = runtime
@@ -1423,6 +1500,51 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn drill_wat_can_query_ore_kind_and_output_item() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::Drill,
+                r#"(module
+                  (import "xac:drill" "ore_kind" (func $ore_kind (result i32)))
+                  (import "xac:drill" "output" (func $output (param i32) (result i32)))
+                  (import "xac:drill" "mine" (func $mine (result i32)))
+                  (func (export "tick")
+                    (if (i32.eq (call $ore_kind) (i32.const 0))
+                      (then
+                        (drop (call $output (i32.const 0))))
+                      (else
+                        (drop (call $mine))))))"#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    drill_ore_kind: Some(ItemKind::Ore),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Output { item: ItemKind::Ore }]
+        ));
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
     }
 
     #[test]
@@ -1479,7 +1601,11 @@ mod tests {
         let eval = runtime
             .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
             .unwrap();
-        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
 
         let eval = runtime
             .evaluate_compiled(
@@ -1492,6 +1618,32 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn xac_script_can_use_drill_output_and_ore_kind() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "if ore_kind == ore output ore";
+        let wat = compile_source_to_wat(BehaviorKind::Drill, source).unwrap();
+        assert!(wat.contains(r#"(import "xac:drill" "ore_kind""#));
+        assert!(wat.contains(r#"(import "xac:drill" "output""#));
+
+        let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    drill_ore_kind: Some(ItemKind::Ore),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Output { item: ItemKind::Ore }]
+        ));
     }
 
     #[test]
@@ -2042,7 +2194,11 @@ mod tests {
         let eval = runtime
             .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
             .unwrap();
-        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
         assert!(
             eval.fuel_spent >= host_cost::MINE,
             "host API mine should charge explicit fuel"

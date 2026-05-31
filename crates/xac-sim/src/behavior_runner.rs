@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
-use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel};
-use xac_wasm::{BehaviorHostInput, BehaviorIntent, CompiledBehavior, NetStoreWrite};
+use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel, TerrainKind};
+use xac_wasm::{BehaviorHostInput, BehaviorIntent, CompiledBehavior, DrillCommand, NetStoreWrite};
 
 use crate::block_defs::can_accept_item;
 use crate::{Simulation, TICKS_PER_SECOND};
@@ -92,6 +92,7 @@ impl Simulation {
             self.network_stock_profile(block_id);
         BehaviorHostInput {
             output_blocked: self.output_blocked(block_id),
+            drill_ore_kind: self.drill_ore_kind(block_id),
             can_produce: self.can_produce(block_id),
             assembler_can_produce: [
                 self.can_progress_recipe(block_id, ItemKind::Plate.as_str()),
@@ -221,7 +222,19 @@ impl Simulation {
     fn apply_behavior_intent(&mut self, block_id: &str, intent: BehaviorIntent) {
         match intent {
             BehaviorIntent::Noop => {}
-            BehaviorIntent::DrillDefault => self.run_drill(block_id),
+            BehaviorIntent::Drill { commands } => {
+                for command in commands {
+                    match command {
+                        DrillCommand::Mine => self.run_drill(block_id),
+                        DrillCommand::Output { item } => {
+                            let Some(dir) = self.blocks.get(block_id).map(|block| block.dir) else {
+                                continue;
+                            };
+                            self.transfer_item_from(block_id, dir, &item, 1);
+                        }
+                    }
+                }
+            }
             BehaviorIntent::Router { item, preferred } => {
                 let dirs = if preferred.is_empty() {
                     Direction::all().to_vec()
@@ -301,5 +314,12 @@ impl Simulation {
             }
         }
         (counts, capacity, space)
+    }
+
+    fn drill_ore_kind(&self, block_id: &str) -> Option<ItemKind> {
+        let block = self.blocks.get(block_id)?;
+        self.tile_at(block.pos)
+            .is_some_and(|tile| tile.terrain == TerrainKind::OrePatch)
+            .then_some(ItemKind::Ore)
     }
 }

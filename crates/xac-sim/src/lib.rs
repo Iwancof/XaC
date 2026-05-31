@@ -670,6 +670,33 @@ mod tests {
     }
 
     #[test]
+    fn drill_script_outputs_selected_ore_kind_to_conveyor() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+        let drill_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &drill_id, "if ore_kind == ore output ore");
+        sim.blocks
+            .get_mut(&drill_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ore, 1);
+        sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
+            .unwrap();
+        let conveyor_id = sim.selected_id.clone().unwrap();
+        sim.fuel_banks.insert(drill_id.clone(), 100.0);
+
+        sim.step_ticks(1);
+
+        assert_eq!(sim.blocks[&drill_id].inventory.count(&ItemKind::Ore), 0);
+        assert_eq!(
+            sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore),
+            1,
+            "drill script should use ore_kind and output to move stored ore into the belt"
+        );
+    }
+
+    #[test]
     fn router_item_script_only_pushes_requested_item() {
         let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)

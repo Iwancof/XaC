@@ -57,6 +57,13 @@ interface common-api {
   fuel-remaining: func() -> u64;
 }
 
+interface drill-api {
+  output-blocked: func() -> bool;
+  mine: func() -> bool;
+  output: func(item-kind: string) -> bool;
+  ore-kind: func() -> string;
+}
+
 interface router-api {
   use types.{item};
 
@@ -106,6 +113,14 @@ interface drone-port-api {
   create-delivery-job: func(item-kind: string, amount: s32, dropoff-tag: string) -> bool;
   dispatch-idle-drones: func() -> bool;
   dispatch: func() -> bool;
+}
+
+world drill-behavior {
+  import common-api;
+  import drill-api;
+
+  export init: func();
+  export tick: func();
 }
 
 world router-behavior {

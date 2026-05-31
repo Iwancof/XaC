@@ -47,6 +47,8 @@ pub(crate) fn compile_xac_script(kind: BehaviorKind, source: &str) -> Result<Str
 enum HostImport {
     DrillOutputBlocked,
     DrillMine,
+    DrillOutput,
+    DrillOreKind,
     RouterPushAny,
     RouterPushDir,
     RouterPushItemDir,
@@ -94,6 +96,12 @@ impl HostImport {
                 r#"  (import "xac:drill" "output_blocked" (func $output_blocked (result i32)))"#
             }
             HostImport::DrillMine => r#"  (import "xac:drill" "mine" (func $mine (result i32)))"#,
+            HostImport::DrillOutput => {
+                r#"  (import "xac:drill" "output" (func $output (param i32) (result i32)))"#
+            }
+            HostImport::DrillOreKind => {
+                r#"  (import "xac:drill" "ore_kind" (func $ore_kind (result i32)))"#
+            }
             HostImport::RouterPushAny => {
                 r#"  (import "xac:router" "push_any" (func $push_any (result i32)))"#
             }
@@ -213,6 +221,9 @@ impl HostImport {
 #[derive(Clone, Debug)]
 enum Condition {
     OutputBlocked,
+    OreKindEq {
+        item: ItemKind,
+    },
     OutputAvailable(Direction),
     OutputItemAvailable {
         item: ItemKind,
@@ -291,6 +302,9 @@ enum ScriptAction {
     Return,
     Noop,
     Mine,
+    Output {
+        item: ItemKind,
+    },
     PushAny,
     PushDir(Direction),
     PushItemDir {
@@ -379,6 +393,12 @@ fn parse_script_statement(
 fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition, &'a [&'a str])> {
     match tokens {
         ["if", "output_blocked", rest @ ..] => Ok((Condition::OutputBlocked, rest)),
+        ["if", "ore_kind", "==", item, rest @ ..] => Ok((
+            Condition::OreKindEq {
+                item: parse_item_or_err(line_no, item)?,
+            },
+            rest,
+        )),
         ["if", "output_available", item, dir, rest @ ..] if parse_item(item).is_some() => Ok((
             Condition::OutputItemAvailable {
                 item: parse_item(item).expect("guarded by parse_item"),
@@ -503,6 +523,13 @@ fn parse_script_action(
             ensure_kind(kind, BehaviorKind::Drill, line_no, "mine")?;
             imports.insert(HostImport::DrillMine);
             Ok(ScriptAction::Mine)
+        }
+        ["output", item] => {
+            ensure_kind(kind, BehaviorKind::Drill, line_no, "output")?;
+            imports.insert(HostImport::DrillOutput);
+            Ok(ScriptAction::Output {
+                item: parse_item_or_err(line_no, item)?,
+            })
         }
         ["push_any"] | ["push", "any"] => {
             ensure_kind(kind, BehaviorKind::Router, line_no, "push")?;
@@ -663,6 +690,10 @@ fn add_condition_import(
         Condition::OutputBlocked => {
             ensure_kind(kind, BehaviorKind::Drill, line_no, "output_blocked")?;
             imports.insert(HostImport::DrillOutputBlocked);
+        }
+        Condition::OreKindEq { .. } => {
+            ensure_kind(kind, BehaviorKind::Drill, line_no, "ore_kind")?;
+            imports.insert(HostImport::DrillOreKind);
         }
         Condition::OutputAvailable(_) => {
             ensure_kind(kind, BehaviorKind::Router, line_no, "output_available")?;
@@ -872,6 +903,9 @@ fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
 fn render_condition(condition: Condition) -> String {
     match condition {
         Condition::OutputBlocked => "(call $output_blocked)".to_string(),
+        Condition::OreKindEq { item } => {
+            format!("(i32.eq (call $ore_kind) (i32.const {}))", item_code(&item))
+        }
         Condition::OutputAvailable(dir) => {
             format!(
                 "(call $output_available (i32.const {}))",
@@ -983,6 +1017,10 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
         ScriptAction::Return => out.push(format!("{indent}(return)")),
         ScriptAction::Noop => {}
         ScriptAction::Mine => out.push(format!("{indent}(drop (call $mine))")),
+        ScriptAction::Output { item } => out.push(format!(
+            "{indent}(drop (call $output (i32.const {})))",
+            item_code(&item)
+        )),
         ScriptAction::PushAny => out.push(format!("{indent}(drop (call $push_any))")),
         ScriptAction::PushDir(dir) => out.push(format!(
             "{indent}(drop (call $push_dir (i32.const {})))",
