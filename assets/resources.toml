@@ -1,0 +1,24 @@
+[[item]]
+id = "ore"
+display_name = "Ore"
+stack_size = 100
+
+[[item]]
+id = "plate"
+display_name = "Plate"
+stack_size = 100
+
+[[item]]
+id = "ammo"
+display_name = "Ammo"
+stack_size = 100
+
+[[item]]
+id = "cpu_part"
+display_name = "CPU Part"
+stack_size = 50
+
+[[item]]
+id = "drone_part"
+display_name = "Drone Part"
+stack_size = 50

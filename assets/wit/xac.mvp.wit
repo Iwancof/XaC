@@ -1,0 +1,98 @@
+package xac:mvp;
+
+interface types {
+  record vec2 {
+    x: s32,
+    y: s32,
+  }
+
+  type entity-id = string;
+  type item-kind = string;
+  type enemy-kind = string;
+
+  record item {
+    id: entity-id,
+    kind: item-kind,
+    amount: s32,
+  }
+
+  record enemy-info {
+    id: entity-id,
+    kind: enemy-kind,
+    pos: vec2,
+    hp: s32,
+    distance: f32,
+  }
+
+  variant value {
+    none,
+    bool(bool),
+    s32(s32),
+    s64(s64),
+    f32(float32),
+    f64(float64),
+    string(string),
+    id(entity-id),
+    pos(vec2),
+  }
+}
+
+interface common-api {
+  use types.{value};
+
+  log: func(message: string);
+  net-store-get: func(key: string) -> value;
+  net-store-set: func(key: string, value: value);
+  fuel-remaining: func() -> u64;
+}
+
+interface router-api {
+  use types.{item};
+
+  push: func(dir: string, item: item) -> bool;
+  push-any: func(item: item) -> bool;
+  output-available: func(dir: string) -> bool;
+}
+
+interface turret-api {
+  use types.{enemy-info};
+
+  scan-enemies: func() -> list<enemy-info>;
+  attack: func(enemy-id: string) -> bool;
+  attack-nearest: func() -> bool;
+  attack-best: func(policy: string) -> bool;
+  ammo-count: func() -> s32;
+}
+
+interface assembler-api {
+  set-recipe: func(recipe-id: string) -> bool;
+  can-produce: func() -> bool;
+  produce: func() -> bool;
+  input-count: func(item-kind: string) -> s32;
+  output-count: func(item-kind: string) -> s32;
+}
+
+world router-behavior {
+  import common-api;
+  import router-api;
+  use types.{item};
+
+  export init: func();
+  export on-item: func(item: item);
+}
+
+world turret-behavior {
+  import common-api;
+  import turret-api;
+
+  export init: func();
+  export tick: func();
+}
+
+world assembler-behavior {
+  import common-api;
+  import assembler-api;
+
+  export init: func();
+  export tick: func();
+}

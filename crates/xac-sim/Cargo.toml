@@ -1,0 +1,13 @@
+[package]
+name = "xac-sim"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+xac-core = { path = "../xac-core" }
+xac-wasm = { path = "../xac-wasm" }

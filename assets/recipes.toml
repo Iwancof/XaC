@@ -1,0 +1,11 @@
+[[recipe]]
+id = "plate"
+inputs = { ore = 2 }
+outputs = { plate = 1 }
+time_ticks = 20
+
+[[recipe]]
+id = "ammo"
+inputs = { plate = 1 }
+outputs = { ammo = 2 }
+time_ticks = 20
