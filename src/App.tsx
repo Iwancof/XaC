@@ -8,7 +8,8 @@ import {
   Radar,
   RotateCw,
   Route,
-  StepForward
+  StepForward,
+  X
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -80,6 +81,20 @@ export function App() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const cancelPlacement = useCallback(() => {
+    setBuildKind(null);
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        cancelPlacement();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [cancelPlacement]);
 
   useEffect(() => {
     const handle = window.setInterval(async () => {
@@ -301,6 +316,15 @@ export function App() {
               >
                 <RotateCw size={16} />
                 Rotate
+              </button>
+              <button
+                onClick={cancelPlacement}
+                disabled={!buildKind}
+                title="Cancel placement mode"
+                aria-label="Cancel placement"
+              >
+                <X size={16} />
+                Cancel
               </button>
             </div>
           </section>

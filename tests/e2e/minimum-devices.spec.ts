@@ -37,6 +37,17 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("net CPU 120");
   await expect(page.locator(".inspector")).toContainText("core");
 
+  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await expect(page.getByText("Placing drill")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(page.getByText("Select to place")).toBeVisible();
+  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await expect(page.getByText("Placing drill")).toBeVisible();
+  await page.getByRole("button", { name: "Cancel placement", exact: true }).click();
+  await expect(page.getByText("Select to place")).toBeVisible();
+  await canvas.click({ position: tileCenter(18, 30) });
+  await expect(page.locator(".metrics")).toContainText("blocks 1");
+
   await page.getByRole("button", { name: /CPU Node/ }).click();
   await expect(page.getByText("Placing cpu node")).toBeVisible();
   await canvas.click({ position: tileCenter(19, 29) });

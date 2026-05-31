@@ -277,7 +277,7 @@ button.danger:hover:not(:disabled) {
 
 .placement-controls {
   display: grid;
-  grid-template-columns: auto minmax(96px, 1fr) auto;
+  grid-template-columns: auto minmax(84px, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   margin-top: 10px;
