@@ -1259,4 +1259,31 @@ mod tests {
         assert!(!source.summary.builtin);
         assert_eq!(source.summary.used_by, 1);
     }
+
+    #[test]
+    fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+
+        sim.place_block(BlockKind::Core, Pos { x: 31, y: 32 }, Direction::East)
+            .unwrap();
+        sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
+            .unwrap();
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+
+        let drill_id = sim.selected_id.clone().unwrap();
+        let drill = sim.blocks.get(&drill_id).unwrap();
+        assert_eq!(drill.kind, BlockKind::Drill);
+        assert_eq!(drill.behavior_ref.as_deref(), Some("builtin.drill.basic"));
+
+        let source = sim.open_behavior("builtin.drill.basic").unwrap();
+        assert!(source.source.contains("loop:"));
+        assert!(source.source.contains("self.mine()"));
+
+        sim.step_ticks(260);
+        let conveyor_id = sim.block_id_at(Pos { x: 21, y: 30 }).unwrap();
+        let mined = sim.blocks[&drill_id].inventory.count(&ItemKind::Ore)
+            + sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore);
+        assert!(mined > 0, "drill should mine ore from its tile");
+    }
 }

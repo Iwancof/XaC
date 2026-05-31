@@ -54,7 +54,7 @@ button:disabled {
 .app-shell {
   height: 100vh;
   display: grid;
-  grid-template-rows: 52px 1fr 168px;
+  grid-template-rows: 52px 1fr 126px;
   background: #0e1214;
 }
 
@@ -92,7 +92,7 @@ button:disabled {
 
 .topbar-controls,
 .metrics,
-.palette,
+.block-list,
 .overlay-controls {
   display: flex;
   align-items: center;
@@ -117,7 +117,7 @@ button:disabled {
 .workspace {
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 42vw);
+  grid-template-columns: minmax(0, 1fr) clamp(280px, 38vw, 560px);
 }
 
 .world-pane {
@@ -135,19 +135,27 @@ button:disabled {
 .right-pane {
   min-height: 0;
   display: grid;
-  grid-template-rows: 310px 1fr;
+  grid-template-rows: 260px 248px 1fr;
   background: #11171a;
 }
 
 .inspector,
-.editor-panel {
+.editor-panel,
+.block-list-panel {
   min-height: 0;
   border-bottom: 1px solid #253038;
 }
 
-.inspector {
+.inspector,
+.block-list-panel {
   padding: 10px;
   overflow: auto;
+}
+
+.panel-heading strong {
+  color: #8da0aa;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .panel-heading {
@@ -221,6 +229,48 @@ button:disabled {
   color: #8da0aa;
 }
 
+.block-list {
+  margin-top: 8px;
+  align-items: stretch;
+  align-content: start;
+  flex-wrap: wrap;
+}
+
+.block-item {
+  width: calc(50% - 4px);
+  min-height: 38px;
+  justify-content: space-between;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.block-item span,
+.block-item small {
+  display: block;
+  min-width: 0;
+}
+
+.block-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.block-item small {
+  color: #8da0aa;
+  font-size: 11px;
+}
+
+.placement-controls {
+  display: grid;
+  grid-template-columns: auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #8da0aa;
+  font-size: 12px;
+}
+
 .build-ok,
 .build-fail {
   border-radius: 5px;
@@ -260,13 +310,12 @@ button:disabled {
 .bottom-bar {
   min-height: 0;
   display: grid;
-  grid-template-columns: 430px 430px 1fr;
+  grid-template-columns: 420px 1fr;
   gap: 12px;
   padding: 10px 12px;
   border-top: 1px solid #253038;
 }
 
-.palette,
 .overlay-controls {
   align-content: start;
   align-items: start;
@@ -318,14 +367,18 @@ button:disabled {
 
 @media (max-width: 1180px) {
   .workspace {
-    grid-template-columns: minmax(0, 1fr) 360px;
+    grid-template-columns: minmax(0, 1fr) 280px;
   }
 
   .bottom-bar {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
+  }
+
+  .block-item {
+    width: 100%;
   }
 
   .log-panel {
-    grid-column: 1 / -1;
+    min-height: 54px;
   }
 }

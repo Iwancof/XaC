@@ -223,6 +223,38 @@ export function App() {
         </div>
 
         <aside className="right-pane">
+          <section className="block-list-panel">
+            <div className="panel-heading">
+              <span>Blocks</span>
+              <strong>{buildKind ? `Placing ${buildKind.replaceAll("_", " ")}` : "Select to place"}</strong>
+            </div>
+            <div className="block-list">
+              {PALETTE.map((item) => (
+                <button
+                  key={item.kind}
+                  className={buildKind === item.kind ? "block-item selected" : "block-item"}
+                  onClick={() => {
+                    setBuildKind(buildKind === item.kind ? null : item.kind);
+                    if (item.dir) setDirection(item.dir);
+                  }}
+                  title={`${item.category}: ${item.label}`}
+                >
+                  <span>{item.label}</span>
+                  <small>{item.category}</small>
+                </button>
+              ))}
+            </div>
+            <div className="placement-controls">
+              <span>Direction</span>
+              <select value={direction} onChange={(event) => setDirection(event.target.value as Direction)}>
+                <option value="north">North</option>
+                <option value="east">East</option>
+                <option value="south">South</option>
+                <option value="west">West</option>
+              </select>
+            </div>
+          </section>
+
           <Inspector
             snapshot={snapshot}
             selectedBlock={selectedBlock}
@@ -252,28 +284,6 @@ export function App() {
       </section>
 
       <footer className="bottom-bar">
-        <section className="palette">
-          {PALETTE.map((item) => (
-            <button
-              key={item.kind}
-              className={buildKind === item.kind ? "selected" : ""}
-              onClick={() => {
-                setBuildKind(buildKind === item.kind ? null : item.kind);
-                if (item.dir) setDirection(item.dir);
-              }}
-              title={`${item.category}: ${item.label}`}
-            >
-              {item.label}
-            </button>
-          ))}
-          <select value={direction} onChange={(event) => setDirection(event.target.value as Direction)}>
-            <option value="north">North</option>
-            <option value="east">East</option>
-            <option value="south">South</option>
-            <option value="west">West</option>
-          </select>
-        </section>
-
         <section className="overlay-controls">
           {OVERLAYS.map(({ id, label, icon: Icon }) => (
             <button key={id} className={overlay === id ? "selected" : ""} onClick={() => setOverlay(id)}>
