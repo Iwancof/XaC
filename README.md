@@ -134,9 +134,11 @@ if output_available ammo east push ammo east
 
 Raw WebAssembly Text (`.wat`) is still accepted for lower-level tests and power
 users. The older `tick() -> i32` action-code ABI remains as a compatibility
-fallback; new built-ins call host imports so player code can exercise real block
-capabilities. The current map model supports a 4x4 Core footprint, wire-backed
-CPU networks, and non-grid-bound enemy/drone positions.
+fallback, but raw WAT imports are still checked against the selected block
+world: drill code cannot import turret APIs, and WASI or other external host
+imports are rejected. New built-ins call host imports so player code can
+exercise real block capabilities. The current map model supports a 4x4 Core
+footprint, wire-backed CPU networks, and non-grid-bound enemy/drone positions.
 
 ## UI Direction
 

@@ -194,6 +194,7 @@ impl BehaviorRuntime {
         let wasm = wat::parse_str(&wat_source).context("parse behavior source as WAT")?;
         let wasm_hash = hash_bytes(&wasm);
         let module = Module::new(&self.engine, &wasm).context("compile behavior wasm")?;
+        validate_import_capabilities(kind, &module)?;
 
         let mut store = Store::new(&self.engine, BehaviorHostState::new(Default::default()));
         let mut linker = Linker::new(&self.engine);
@@ -278,6 +279,99 @@ fn validate_tick_abi(instance: &Instance, store: &mut Store<BehaviorHostState>) 
     Err(anyhow!(
         "behavior must export tick() -> () or tick() -> i32"
     ))
+}
+
+fn validate_import_capabilities(kind: BehaviorKind, module: &Module) -> Result<()> {
+    for import in module.imports() {
+        let import_module = import.module();
+        let import_name = import.name();
+        if !allowed_host_import(kind, import_module, import_name) {
+            return Err(anyhow!(
+                "{kind:?} behavior cannot import {import_module}/{import_name}; allowed worlds: {}",
+                allowed_worlds(kind)
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn allowed_host_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
+    allowed_common_import(module, name) || allowed_kind_import(kind, module, name)
+}
+
+fn allowed_common_import(module: &str, name: &str) -> bool {
+    match module {
+        "xac:common" => matches!(
+            name,
+            "fuel_remaining" | "stock_count" | "stock_capacity" | "has_space"
+        ),
+        "xac:net" => matches!(name, "store_get_i32" | "store_set_i32"),
+        _ => false,
+    }
+}
+
+fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
+    match kind {
+        BehaviorKind::Drill => module == "xac:drill" && matches!(name, "output_blocked" | "mine"),
+        BehaviorKind::Router => {
+            module == "xac:router"
+                && matches!(
+                    name,
+                    "push_any"
+                        | "push_dir"
+                        | "push_item_dir"
+                        | "output_available"
+                        | "output_item_available"
+                )
+        }
+        BehaviorKind::Assembler => {
+            module == "xac:assembler"
+                && matches!(
+                    name,
+                    "set_recipe" | "can_produce" | "input_count" | "output_count" | "produce"
+                )
+        }
+        BehaviorKind::Turret => {
+            module == "xac:turret"
+                && matches!(name, "ammo_count" | "attack_nearest" | "attack_best")
+        }
+        BehaviorKind::DronePort => {
+            module == "xac:drone_port"
+                && matches!(
+                    name,
+                    "dispatch"
+                        | "stock_count"
+                        | "charge_docked_drones"
+                        | "create_delivery_job"
+                        | "dispatch_idle_drones"
+                )
+        }
+        BehaviorKind::CarrierDrone => {
+            module == "xac:drone"
+                && matches!(
+                    name,
+                    "battery_percent"
+                        | "logic_fuel_remaining"
+                        | "has_job"
+                        | "has_pending_job"
+                        | "return_to_port"
+                        | "claim_delivery_job"
+                        | "deliver"
+                        | "idle"
+                )
+        }
+    }
+}
+
+fn allowed_worlds(kind: BehaviorKind) -> &'static str {
+    match kind {
+        BehaviorKind::Drill => "xac:common, xac:net, xac:drill",
+        BehaviorKind::Router => "xac:common, xac:net, xac:router",
+        BehaviorKind::Assembler => "xac:common, xac:net, xac:assembler",
+        BehaviorKind::Turret => "xac:common, xac:net, xac:turret",
+        BehaviorKind::DronePort => "xac:common, xac:net, xac:drone_port",
+        BehaviorKind::CarrierDrone => "xac:common, xac:net, xac:drone",
+    }
 }
 
 fn over_budget_eval(
@@ -1181,6 +1275,44 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn raw_wat_cannot_import_another_block_capability() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let err = match runtime.compile_wat(
+            BehaviorKind::Drill,
+            r#"(module
+                  (import "xac:turret" "attack_nearest" (func $attack_nearest (result i32)))
+                  (func (export "tick")
+                    (drop (call $attack_nearest))))"#,
+        ) {
+            Ok(_) => panic!("drill WAT should not import turret host APIs"),
+            Err(error) => error,
+        };
+
+        assert!(err
+            .to_string()
+            .contains("Drill behavior cannot import xac:turret/attack_nearest"));
+    }
+
+    #[test]
+    fn raw_wat_cannot_import_wasi_or_other_external_hosts() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let err = match runtime.compile_wat(
+            BehaviorKind::Router,
+            r#"(module
+                  (import "wasi_snapshot_preview1" "fd_write" (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                  (func (export "tick")
+                    nop))"#,
+        ) {
+            Ok(_) => panic!("router WAT should not import WASI"),
+            Err(error) => error,
+        };
+
+        assert!(err
+            .to_string()
+            .contains("Router behavior cannot import wasi_snapshot_preview1/fd_write"));
     }
 
     #[test]
