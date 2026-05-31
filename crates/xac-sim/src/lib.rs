@@ -4,12 +4,13 @@ use std::path::{Path, PathBuf};
 use xac_core::{
     BehaviorId, BehaviorSource, BehaviorSummary, Block, BlockKind, BuildResult, DeliveryJob,
     Direction, Drone, Enemy, EnemyKind, EntityId, GameSnapshot, ItemKind, LogEntry, LogLevel,
-    Network, Pos, TerrainKind, Tile, WorldPos,
+    Network, Pos, TerrainKind, Tile,
 };
-use xac_wasm::{BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior, TargetRule};
+use xac_wasm::{BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior};
 
 mod behavior;
 mod block_defs;
+mod combat;
 mod drone;
 mod geometry;
 
@@ -17,7 +18,7 @@ use behavior::{builtin_behaviors, BehaviorPackage};
 use block_defs::{
     build_tiles, can_accept_item, cpu_scaled_threshold, default_behavior_for, kind_name, make_block,
 };
-use geometry::{footprint_positions, nearest_block_target};
+use geometry::footprint_positions;
 
 pub const MAP_WIDTH: i32 = 64;
 pub const MAP_HEIGHT: i32 = 64;
@@ -598,67 +599,6 @@ impl Simulation {
         }
     }
 
-    fn run_turret_once(&mut self, turret_id: &str, priority: &[TargetRule]) {
-        let Some(turret) = self.blocks.get(turret_id).cloned() else {
-            return;
-        };
-        if turret.kind != BlockKind::Turret || turret.inventory.count(&ItemKind::Ammo) == 0 {
-            return;
-        }
-        let target = self.choose_target(turret.pos, priority);
-        if let Some(enemy_id) = target {
-            if let Some(enemy) = self.enemies.get_mut(&enemy_id) {
-                enemy.hp -= 12;
-            }
-            if let Some(block) = self.blocks.get_mut(turret_id) {
-                block.inventory.remove(&ItemKind::Ammo, 1);
-                block.status = format!("attacking {enemy_id}");
-            }
-        }
-    }
-
-    fn run_enemies(&mut self) {
-        let enemy_ids: Vec<_> = self.enemies.keys().cloned().collect();
-        let blocks_snapshot = self.blocks.clone();
-
-        for enemy_id in enemy_ids {
-            let Some(enemy) = self.enemies.get_mut(&enemy_id) else {
-                continue;
-            };
-            let target = if enemy.kind == EnemyKind::WireCutter {
-                nearest_block_target(&blocks_snapshot, enemy.pos, |kind| {
-                    matches!(
-                        kind,
-                        BlockKind::Wire | BlockKind::CpuNode | BlockKind::DronePort
-                    )
-                })
-                .or_else(|| {
-                    nearest_block_target(&blocks_snapshot, enemy.pos, |kind| {
-                        kind == BlockKind::Core
-                    })
-                })
-            } else {
-                nearest_block_target(&blocks_snapshot, enemy.pos, |kind| kind == BlockKind::Core)
-            };
-            let Some((target_id, target_pos)) = target else {
-                continue;
-            };
-
-            enemy.target_id = Some(target_id.clone());
-            if enemy.pos.distance(target_pos) <= 0.2 {
-                if let Some(block) = self.blocks.get_mut(&target_id) {
-                    block.hp -= if enemy.kind == EnemyKind::Armored {
-                        8
-                    } else {
-                        5
-                    };
-                }
-            } else {
-                enemy.pos = enemy.pos.move_toward(target_pos, enemy.move_speed);
-            }
-        }
-    }
-
     fn output_blocked(&self, block_id: &str) -> bool {
         let Some(block) = self.blocks.get(block_id) else {
             return true;
@@ -730,45 +670,6 @@ impl Simulation {
             };
         }
         true
-    }
-
-    fn choose_target(&self, origin: Pos, priority: &[TargetRule]) -> Option<EntityId> {
-        let origin = WorldPos::from_tile_center(origin);
-        let in_range: Vec<_> = self
-            .enemies
-            .values()
-            .filter(|e| e.hp > 0 && origin.distance(e.pos) <= 8.0)
-            .collect();
-        if in_range.is_empty() {
-            return None;
-        }
-        for rule in priority {
-            match rule {
-                TargetRule::Kind(kind) => {
-                    if let Some(enemy) = in_range
-                        .iter()
-                        .filter(|e| e.kind == *kind)
-                        .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
-                    {
-                        return Some(enemy.id.clone());
-                    }
-                }
-                TargetRule::LowestHp => {
-                    if let Some(enemy) = in_range.iter().min_by_key(|e| e.hp) {
-                        return Some(enemy.id.clone());
-                    }
-                }
-                TargetRule::Nearest => {
-                    if let Some(enemy) = in_range
-                        .iter()
-                        .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
-                    {
-                        return Some(enemy.id.clone());
-                    }
-                }
-            }
-        }
-        None
     }
 
     fn recompute_networks(&mut self) {
@@ -875,46 +776,6 @@ impl Simulation {
         }
     }
 
-    fn spawn_wave_enemy(&mut self) {
-        let kind = match (self.tick / 80) % 4 {
-            0 => EnemyKind::Grunt,
-            1 => EnemyKind::Runner,
-            2 => EnemyKind::Armored,
-            _ => EnemyKind::Grunt,
-        };
-        self.spawn_enemy(kind);
-    }
-
-    fn spawn_enemy(&mut self, kind: EnemyKind) {
-        let id = self.make_id("enemy");
-        let lane = (self.tick as i32 / 40) % 20;
-        let pos = WorldPos {
-            x: 4.5 + lane as f32,
-            y: 4.5,
-        };
-        let (hp, speed_ticks, move_speed) = match kind {
-            EnemyKind::Grunt => (30, 8, 0.07),
-            EnemyKind::Runner => (20, 3, 0.14),
-            EnemyKind::Armored => (90, 12, 0.045),
-            EnemyKind::WireCutter => (38, 5, 0.10),
-        };
-        self.enemies.insert(
-            id.clone(),
-            Enemy {
-                id: id.clone(),
-                kind,
-                pos,
-                hp,
-                max_hp: hp,
-                speed_ticks,
-                move_cooldown: 0,
-                move_speed,
-                target_id: None,
-            },
-        );
-        self.log(LogLevel::Warn, id, format!("{kind:?} wave contact"));
-    }
-
     fn cleanup_destroyed(&mut self) {
         let dead_enemies: Vec<_> = self
             .enemies
@@ -1002,6 +863,7 @@ impl Simulation {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use xac_core::{DroneState, WorldPos};
 
     #[test]
     fn placing_wire_and_cpu_node_forms_network() {
@@ -1224,7 +1086,7 @@ mod tests {
         );
         let drone = sim.drones.values().next().unwrap();
         assert_eq!(drone.home_port, port_id);
-        assert_eq!(drone.state, xac_core::DroneState::Docked);
+        assert_eq!(drone.state, DroneState::Docked);
         assert!(drone.job.is_none());
         assert!(
             sim.pending_jobs.is_empty(),
@@ -1237,6 +1099,51 @@ mod tests {
         assert!(
             sim.blocks[&core_id].inventory.count(&ItemKind::Ammo) < starting_core_ammo,
             "delivery should remove ammo from core storage"
+        );
+    }
+
+    #[test]
+    fn wire_cutter_breaks_wire_and_splits_cpu_network() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        for x in 20..=30 {
+            sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+                .unwrap();
+        }
+        sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
+            .unwrap();
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+        let drill_id = sim.selected_id.clone().unwrap();
+        let wire_id = sim.block_id_at(Pos { x: 20, y: 29 }).unwrap();
+
+        sim.step_ticks(1);
+        let connected_rate = sim.blocks[&drill_id].effective_cpu_rate;
+        assert!(connected_rate > 100.0);
+
+        let enemy_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            enemy_id.clone(),
+            combat::enemy_at(
+                enemy_id,
+                EnemyKind::WireCutter,
+                WorldPos { x: 20.5, y: 29.5 },
+            ),
+        );
+
+        sim.step_ticks(4);
+
+        assert!(
+            !sim.blocks.contains_key(&wire_id),
+            "wire cutter should destroy the targeted wire"
+        );
+        let disconnected_rate = sim.blocks[&drill_id].effective_cpu_rate;
+        assert!(
+            disconnected_rate < connected_rate,
+            "destroying a wire should lower drill CPU by splitting the network: before={connected_rate}, after={disconnected_rate}"
+        );
+        assert_eq!(
+            sim.blocks[&drill_id].network_id, None,
+            "drill should fall back to local CPU when wire is cut"
         );
     }
 }
