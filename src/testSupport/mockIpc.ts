@@ -24,16 +24,12 @@ const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 
 const DRILL_SOURCE = `(module
-  (func $spin (param $n i32)
-    (local $i i32)
-    (local.set $i (i32.const 0))
-    (block $exit
-      (loop $loop
-        (br_if $exit (i32.ge_s (local.get $i) (local.get $n)))
-        (local.set $i (i32.add (local.get $i) (i32.const 1)))
-        (br $loop))))
-  (func (export "tick") (result i32)
-    (i32.const 1)))
+  (import "xac:drill" "output_blocked" (func $output_blocked (result i32)))
+  (import "xac:drill" "mine" (func $mine (result i32)))
+  (func (export "tick")
+    (if (i32.eqz (call $output_blocked))
+      (then
+        (drop (call $mine))))))
 `;
 
 type CommandCall = {
@@ -114,7 +110,7 @@ window.__XAC_TEST_STATE__ = {
 };
 
 function createInitialState(): MockState {
-  const core = makeBlock("core", { x: 31, y: 32 }, "east", "core_1");
+  const core = makeBlock("core", { x: 30, y: 30 }, "east", "core_1");
   core.inventory.items = {
     ore: 40,
     plate: 20,
@@ -168,10 +164,11 @@ function snapshot(): GameSnapshot {
 
 function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number; dir: Direction }) {
   const pos = { x, y };
-  if (!inBounds(pos)) {
+  const footprint = footprintPositions(kind, pos);
+  if (footprint.some((tile) => !inBounds(tile))) {
     throw new Error("position is outside the map");
   }
-  if (state.blocks.some((block) => block.pos.x === x && block.pos.y === y)) {
+  if (footprint.some((tile) => blockAt(state.blocks, tile))) {
     throw new Error("tile is not buildable or is already occupied");
   }
 
@@ -194,6 +191,11 @@ function runTicks(count: number) {
         addItem(block.inventory, "ore", 1);
         block.status = "mined ore";
         log("info", block.id, "mined ore");
+      }
+    }
+    for (const block of state.blocks) {
+      if (block.kind === "drill" || block.kind === "conveyor" || block.kind === "assembler") {
+        transferFrom(block);
       }
     }
   }
@@ -348,7 +350,7 @@ function buildTiles(blocks: Block[]): Tile[] {
         terrain: terrainAt(pos),
         buildable: true,
         enemy_passable: true,
-        block_id: blocks.find((block) => block.pos.x === x && block.pos.y === y)?.id ?? null
+        block_id: blockAt(blocks, pos)?.id ?? null
       });
     }
   }
@@ -365,6 +367,60 @@ function terrainAt(pos: Pos): TerrainKind {
 
 function inBounds(pos: Pos) {
   return pos.x >= 0 && pos.y >= 0 && pos.x < MAP_WIDTH && pos.y < MAP_HEIGHT;
+}
+
+function transferFrom(block: Block) {
+  const item = Object.entries(block.inventory.items).find(([, amount]) => (amount ?? 0) > 0);
+  if (!item) return false;
+  const [kind, amount] = item as [ItemKind, number];
+  const dst = blockAt(state.blocks, step(block.pos, block.dir));
+  if (!dst || !canAccept(dst.kind, kind) || inventoryTotal(dst.inventory) >= dst.inventory.capacity) return false;
+  block.inventory.items[kind] = Math.max(0, amount - 1);
+  if (block.inventory.items[kind] === 0) delete block.inventory.items[kind];
+  addItem(dst.inventory, kind, 1);
+  block.status = `sent ${kind}`;
+  dst.status = `received ${kind}`;
+  return true;
+}
+
+function canAccept(kind: BlockKind, item: ItemKind) {
+  if (kind === "wire" || kind === "cpu_node" || kind === "drill") return false;
+  if (kind === "turret") return item === "ammo";
+  if (kind === "assembler") return item === "ore" || item === "plate";
+  return true;
+}
+
+function inventoryTotal(inventory: Inventory) {
+  return Object.values(inventory.items).reduce((sum, amount) => sum + (amount ?? 0), 0);
+}
+
+function blockAt(blocks: Block[], pos: Pos) {
+  return blocks.find((block) => footprintPositions(block.kind, block.pos).some((tile) => tile.x === pos.x && tile.y === pos.y));
+}
+
+function footprintPositions(kind: BlockKind, pos: Pos) {
+  const [width, height] = footprintSize(kind);
+  const positions: Pos[] = [];
+  for (let y = pos.y; y < pos.y + height; y += 1) {
+    for (let x = pos.x; x < pos.x + width; x += 1) {
+      positions.push({ x, y });
+    }
+  }
+  return positions;
+}
+
+function footprintSize(kind: BlockKind): [number, number] {
+  return kind === "core" ? [4, 4] : [1, 1];
+}
+
+function step(pos: Pos, dir: Direction): Pos {
+  const delta: Record<Direction, Pos> = {
+    north: { x: 0, y: -1 },
+    east: { x: 1, y: 0 },
+    south: { x: 0, y: 1 },
+    west: { x: -1, y: 0 }
+  };
+  return { x: pos.x + delta[dir].x, y: pos.y + delta[dir].y };
 }
 
 function defaultBehaviorFor(kind: BlockKind) {

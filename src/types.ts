@@ -58,6 +58,7 @@ export interface Enemy {
   max_hp: number;
   speed_ticks: number;
   move_cooldown: number;
+  move_speed: number;
   target_id: string | null;
 }
 

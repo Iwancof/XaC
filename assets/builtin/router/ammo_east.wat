@@ -1,3 +1,4 @@
 (module
-  (func (export "tick") (result i32)
-    (i32.const 12)))
+  (import "xac:router" "push_dir" (func $push_dir (param i32) (result i32)))
+  (func (export "tick")
+    (drop (call $push_dir (i32.const 1)))))

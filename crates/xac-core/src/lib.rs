@@ -26,6 +26,49 @@ impl Pos {
     }
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize)]
+pub struct WorldPos {
+    pub x: f32,
+    pub y: f32,
+}
+
+impl WorldPos {
+    pub fn from_tile_center(pos: Pos) -> Self {
+        Self {
+            x: pos.x as f32 + 0.5,
+            y: pos.y as f32 + 0.5,
+        }
+    }
+
+    pub fn tile(self) -> Pos {
+        Pos {
+            x: self.x.floor() as i32,
+            y: self.y.floor() as i32,
+        }
+    }
+
+    pub fn distance(self, other: Self) -> f32 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    pub fn move_toward(self, target: Self, max_distance: f32) -> Self {
+        let dx = target.x - self.x;
+        let dy = target.y - self.y;
+        let distance = (dx * dx + dy * dy).sqrt();
+        if distance <= max_distance || distance == 0.0 {
+            target
+        } else {
+            let scale = max_distance / distance;
+            Self {
+                x: self.x + dx * scale,
+                y: self.y + dy * scale,
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Direction {
@@ -135,6 +178,20 @@ impl BlockKind {
             BlockKind::Turret | BlockKind::DronePort => 3.0,
             _ => 0.0,
         }
+    }
+
+    pub fn footprint_size(self) -> (i32, i32) {
+        match self {
+            BlockKind::Core => (4, 4),
+            _ => (1, 1),
+        }
+    }
+
+    pub fn is_network_connector(self) -> bool {
+        matches!(
+            self,
+            BlockKind::Core | BlockKind::Wire | BlockKind::CpuNode | BlockKind::DronePort
+        )
     }
 }
 
@@ -253,11 +310,12 @@ pub struct Block {
 pub struct Enemy {
     pub id: EntityId,
     pub kind: EnemyKind,
-    pub pos: Pos,
+    pub pos: WorldPos,
     pub hp: i32,
     pub max_hp: i32,
     pub speed_ticks: u32,
     pub move_cooldown: u32,
+    pub move_speed: f32,
     pub target_id: Option<EntityId>,
 }
 
@@ -274,7 +332,7 @@ pub struct DeliveryJob {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Drone {
     pub id: EntityId,
-    pub pos: Pos,
+    pub pos: WorldPos,
     pub battery: f32,
     pub logic_fuel: u64,
     pub cargo: Inventory,

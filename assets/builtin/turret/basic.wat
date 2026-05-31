@@ -1,3 +1,4 @@
 (module
-  (func (export "tick") (result i32)
-    (i32.const 30)))
+  (import "xac:turret" "attack_nearest" (func $attack_nearest (result i32)))
+  (func (export "tick")
+    (drop (call $attack_nearest))))

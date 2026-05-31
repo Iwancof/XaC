@@ -1,3 +1,4 @@
 (module
-  (func (export "tick") (result i32)
-    (i32.const 40)))
+  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))
+  (func (export "tick")
+    (drop (call $dispatch))))

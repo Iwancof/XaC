@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use wasmtime::{Config, Instance, Module, Store};
+use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
 use xac_core::{BlockKind, Direction, EnemyKind};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -31,11 +31,42 @@ pub struct BehaviorEval {
     pub wasm_hash: String,
 }
 
+#[derive(Clone, Debug, Default)]
+pub struct BehaviorHostInput {
+    pub output_blocked: bool,
+    pub can_produce: bool,
+    pub ammo_count: i32,
+}
+
+#[derive(Clone, Debug)]
+struct BehaviorHostState {
+    input: BehaviorHostInput,
+    intent: BehaviorIntent,
+    assembler_prefer_ammo: bool,
+}
+
+impl BehaviorHostState {
+    fn new(input: BehaviorHostInput) -> Self {
+        Self {
+            input,
+            intent: BehaviorIntent::Noop,
+            assembler_prefer_ammo: true,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum TickAbi {
+    Void,
+    ActionCode,
+}
+
 #[derive(Clone)]
 pub struct CompiledBehavior {
     kind: BlockKind,
     module: Module,
     wasm_hash: String,
+    tick_abi: TickAbi,
 }
 
 impl CompiledBehavior {
@@ -68,17 +99,19 @@ impl BehaviorRuntime {
         let wasm_hash = hash_bytes(&wasm);
         let module = Module::new(&self.engine, &wasm).context("compile behavior wasm")?;
 
-        let mut store = Store::new(&self.engine, ());
-        let instance = Instance::new(&mut store, &module, &[])
+        let mut store = Store::new(&self.engine, BehaviorHostState::new(Default::default()));
+        let mut linker = Linker::new(&self.engine);
+        define_host_imports(&mut linker)?;
+        let instance = linker
+            .instantiate(&mut store, &module)
             .context("instantiate behavior wasm for ABI validation")?;
-        instance
-            .get_typed_func::<(), i32>(&mut store, "tick")
-            .context("behavior must export tick() -> i32")?;
+        let tick_abi = validate_tick_abi(&instance, &mut store)?;
 
         Ok(CompiledBehavior {
             kind,
             module,
             wasm_hash,
+            tick_abi,
         })
     }
 
@@ -86,30 +119,38 @@ impl BehaviorRuntime {
         &self,
         compiled: &CompiledBehavior,
         fuel: u64,
+        input: BehaviorHostInput,
     ) -> Result<BehaviorEval> {
-        let mut store = Store::new(&self.engine, ());
+        let mut store = Store::new(&self.engine, BehaviorHostState::new(input));
         store.set_fuel(fuel).context("set behavior fuel")?;
-        let instance = Instance::new(&mut store, &compiled.module, &[])
+        let mut linker = Linker::new(&self.engine);
+        define_host_imports(&mut linker)?;
+        let instance = linker
+            .instantiate(&mut store, &compiled.module)
             .context("instantiate behavior wasm")?;
-        let tick = instance
-            .get_typed_func::<(), i32>(&mut store, "tick")
-            .context("load tick export")?;
 
-        let action_code = match tick.call(&mut store, ()) {
-            Ok(code) => code,
-            Err(_) => {
-                let fuel_remaining = store.get_fuel().unwrap_or(0);
-                return Ok(BehaviorEval {
-                    intent: BehaviorIntent::Noop,
-                    fuel_spent: fuel.saturating_sub(fuel_remaining),
-                    fuel_remaining,
-                    over_budget: true,
-                    wasm_hash: compiled.wasm_hash.clone(),
-                });
+        let intent = match compiled.tick_abi {
+            TickAbi::Void => {
+                let tick = instance
+                    .get_typed_func::<(), ()>(&mut store, "tick")
+                    .context("load tick export")?;
+                if tick.call(&mut store, ()).is_err() {
+                    return Ok(over_budget_eval(&mut store, fuel, compiled));
+                }
+                store.data().intent.clone()
+            }
+            TickAbi::ActionCode => {
+                let tick = instance
+                    .get_typed_func::<(), i32>(&mut store, "tick")
+                    .context("load tick export")?;
+                let action_code = match tick.call(&mut store, ()) {
+                    Ok(code) => code,
+                    Err(_) => return Ok(over_budget_eval(&mut store, fuel, compiled)),
+                };
+                action_code_to_intent(compiled.kind, action_code)?
             }
         };
         let fuel_remaining = store.get_fuel().unwrap_or(0);
-        let intent = action_code_to_intent(compiled.kind, action_code)?;
 
         Ok(BehaviorEval {
             intent,
@@ -119,6 +160,162 @@ impl BehaviorRuntime {
             wasm_hash: compiled.wasm_hash.clone(),
         })
     }
+}
+
+fn validate_tick_abi(instance: &Instance, store: &mut Store<BehaviorHostState>) -> Result<TickAbi> {
+    if instance
+        .get_typed_func::<(), ()>(&mut *store, "tick")
+        .is_ok()
+    {
+        return Ok(TickAbi::Void);
+    }
+    if instance
+        .get_typed_func::<(), i32>(&mut *store, "tick")
+        .is_ok()
+    {
+        return Ok(TickAbi::ActionCode);
+    }
+    Err(anyhow!(
+        "behavior must export tick() -> () or tick() -> i32"
+    ))
+}
+
+fn over_budget_eval(
+    store: &mut Store<BehaviorHostState>,
+    fuel: u64,
+    compiled: &CompiledBehavior,
+) -> BehaviorEval {
+    let fuel_remaining = store.get_fuel().unwrap_or(0);
+    BehaviorEval {
+        intent: BehaviorIntent::Noop,
+        fuel_spent: fuel.saturating_sub(fuel_remaining),
+        fuel_remaining,
+        over_budget: true,
+        wasm_hash: compiled.wasm_hash.clone(),
+    }
+}
+
+fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
+    linker.func_wrap(
+        "xac:drill",
+        "output_blocked",
+        |caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if caller.data().input.output_blocked {
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drill",
+        "mine",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            caller.data_mut().intent = BehaviorIntent::DrillDefault;
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:router",
+        "push_any",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            caller.data_mut().intent = BehaviorIntent::Router {
+                preferred: Direction::all().to_vec(),
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:router",
+        "push_dir",
+        |mut caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
+            let dir = match dir {
+                0 => Direction::North,
+                1 => Direction::East,
+                2 => Direction::South,
+                3 => Direction::West,
+                _ => return 0,
+            };
+            caller.data_mut().intent = BehaviorIntent::Router {
+                preferred: vec![dir],
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:assembler",
+        "set_recipe",
+        |mut caller: Caller<'_, BehaviorHostState>, recipe: i32| -> i32 {
+            caller.data_mut().assembler_prefer_ammo = recipe == 1;
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:assembler",
+        "can_produce",
+        |caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if caller.data().input.can_produce {
+                1
+            } else {
+                0
+            }
+        },
+    )?;
+    linker.func_wrap(
+        "xac:assembler",
+        "produce",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !caller.data().input.can_produce {
+                return 0;
+            }
+            let prefer_ammo = caller.data().assembler_prefer_ammo;
+            caller.data_mut().intent = BehaviorIntent::Assembler { prefer_ammo };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "ammo_count",
+        |caller: Caller<'_, BehaviorHostState>| -> i32 { caller.data().input.ammo_count },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "attack_nearest",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if caller.data().input.ammo_count <= 0 {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::Turret {
+                priority: vec![TargetRule::Nearest],
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "attack_best",
+        |mut caller: Caller<'_, BehaviorHostState>, policy: i32| -> i32 {
+            if caller.data().input.ammo_count <= 0 {
+                return 0;
+            }
+            let priority = if policy == 1 {
+                vec![TargetRule::LowestHp, TargetRule::Nearest]
+            } else {
+                vec![TargetRule::Nearest]
+            };
+            caller.data_mut().intent = BehaviorIntent::Turret { priority };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "dispatch",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            caller.data_mut().intent = BehaviorIntent::DronePort;
+            1
+        },
+    )?;
+    Ok(())
 }
 
 pub fn hash_wasm_source(source: &str) -> Result<String> {
@@ -172,6 +369,17 @@ pub fn wat_const_action(action_code: i32) -> String {
     )
 }
 
+pub fn wat_drill_mine() -> String {
+    r#"(module
+  (import "xac:drill" "output_blocked" (func $output_blocked (result i32)))
+  (import "xac:drill" "mine" (func $mine (result i32)))
+  (func (export "tick")
+    (if (i32.eqz (call $output_blocked))
+      (then
+        (drop (call $mine))))))"#
+        .to_string()
+}
+
 pub fn wat_spin_action(spin_count: u32, action_code: i32) -> String {
     format!(
         r#"(module
@@ -199,7 +407,9 @@ mod tests {
         let compiled = runtime
             .compile_wat(BlockKind::Drill, &wat_const_action(1))
             .unwrap();
-        let eval = runtime.evaluate_compiled(&compiled, 20).unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 20, BehaviorHostInput::default())
+            .unwrap();
 
         assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
         assert!(!eval.over_budget);
@@ -227,7 +437,9 @@ mod tests {
         let compiled = runtime
             .compile_wat(BlockKind::Drill, &wat_spin_action(10_000, 1))
             .unwrap();
-        let eval = runtime.evaluate_compiled(&compiled, 1).unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 1, BehaviorHostInput::default())
+            .unwrap();
 
         assert!(eval.over_budget);
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
@@ -240,7 +452,9 @@ mod tests {
             .compile_wat(BlockKind::Drill, &wat_const_action(30))
             .unwrap();
 
-        let err = runtime.evaluate_compiled(&compiled, 20).unwrap_err();
+        let err = runtime
+            .evaluate_compiled(&compiled, 20, BehaviorHostInput::default())
+            .unwrap_err();
         assert!(err.to_string().contains("invalid action code 30"));
     }
 
@@ -254,5 +468,31 @@ mod tests {
             action_code_to_intent(BlockKind::Assembler, 21).unwrap(),
             BehaviorIntent::Assembler { prefer_ammo: true }
         ));
+    }
+
+    #[test]
+    fn host_imports_allow_drill_code_to_call_game_api() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(BlockKind::Drill, &wat_drill_mine())
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+            .unwrap();
+
+        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+        assert!(!eval.over_budget);
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                30,
+                BehaviorHostInput {
+                    output_blocked: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
     }
 }

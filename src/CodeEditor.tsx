@@ -21,6 +21,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
     monaco.languages.setMonarchTokensProvider("xac-wat", {
       keywords: [
         "module",
+        "import",
         "func",
         "export",
         "param",
@@ -30,10 +31,15 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "local.set",
         "block",
         "loop",
+        "if",
+        "then",
+        "drop",
+        "call",
         "br",
         "br_if",
         "i32.const",
         "i32.add",
+        "i32.eqz",
         "i32.ge_s"
       ],
       tokenizer: {

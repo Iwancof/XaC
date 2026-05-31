@@ -5,9 +5,12 @@ use std::path::{Path, PathBuf};
 use xac_core::{
     BehaviorId, BehaviorSource, BehaviorSummary, Block, BlockKind, BuildResult, DeliveryJob,
     Direction, Drone, DroneState, Enemy, EnemyKind, EntityId, GameSnapshot, Inventory, ItemKind,
-    LogEntry, LogLevel, Network, Pos, TerrainKind, Tile,
+    LogEntry, LogLevel, Network, Pos, TerrainKind, Tile, WorldPos,
 };
-use xac_wasm::{hash_wasm_source, BehaviorIntent, BehaviorRuntime, CompiledBehavior, TargetRule};
+use xac_wasm::{
+    hash_wasm_source, BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior,
+    TargetRule,
+};
 
 pub const MAP_WIDTH: i32 = 64;
 pub const MAP_HEIGHT: i32 = 64;
@@ -94,14 +97,17 @@ impl Simulation {
         pos: Pos,
         dir: Direction,
     ) -> Result<GameSnapshot> {
-        if !self.in_bounds(pos) {
+        let footprint = footprint_positions(kind, pos);
+        if footprint.iter().any(|tile| !self.in_bounds(*tile)) {
             return Err(anyhow!("position is outside the map"));
         }
-        let idx = self
-            .tile_index(pos)
-            .ok_or_else(|| anyhow!("invalid tile"))?;
-        if !self.tiles[idx].buildable || self.tiles[idx].block_id.is_some() {
-            return Err(anyhow!("tile is not buildable or is already occupied"));
+        for tile in &footprint {
+            let idx = self
+                .tile_index(*tile)
+                .ok_or_else(|| anyhow!("invalid tile"))?;
+            if !self.tiles[idx].buildable || self.tiles[idx].block_id.is_some() {
+                return Err(anyhow!("tile is not buildable or is already occupied"));
+            }
         }
 
         let id = self.make_id(kind_name(kind));
@@ -110,7 +116,7 @@ impl Simulation {
         if kind == BlockKind::Turret {
             block.tags.push("frontline".to_string());
         }
-        self.tiles[idx].block_id = Some(id.clone());
+        self.set_tile_footprint(kind, pos, Some(id.clone()));
         self.blocks.insert(id.clone(), block);
         self.fuel_banks.insert(id.clone(), 0.0);
         self.selected_id = Some(id.clone());
@@ -330,7 +336,7 @@ impl Simulation {
     }
 
     fn seed_world(&mut self) {
-        let core_pos = Pos { x: 32, y: 32 };
+        let core_pos = Pos { x: 30, y: 30 };
         let core_id = self.make_id("core");
         let mut core = make_block(core_id.clone(), BlockKind::Core, core_pos, Direction::East);
         core.inventory.capacity = 1000;
@@ -338,7 +344,7 @@ impl Simulation {
         core.inventory.add(ItemKind::Plate, 20);
         core.inventory.add(ItemKind::Ammo, 60);
         core.status = "core online".to_string();
-        self.set_tile_block(core_pos, Some(core_id.clone()));
+        self.set_tile_footprint(BlockKind::Core, core_pos, Some(core_id.clone()));
         self.blocks.insert(core_id.clone(), core);
         self.selected_id = Some(core_id);
         self.log(
@@ -399,8 +405,9 @@ impl Simulation {
                     continue;
                 }
             };
+            let host_input = self.behavior_host_input(&id);
 
-            match self.runtime.evaluate_compiled(&compiled, fuel) {
+            match self.runtime.evaluate_compiled(&compiled, fuel, host_input) {
                 Ok(eval) => {
                     self.spend_behavior_fuel(&id, eval.fuel_spent);
                     if eval.over_budget {
@@ -427,6 +434,17 @@ impl Simulation {
                     self.log(LogLevel::Error, id, error.to_string());
                 }
             }
+        }
+    }
+
+    fn behavior_host_input(&self, block_id: &str) -> BehaviorHostInput {
+        let Some(block) = self.blocks.get(block_id) else {
+            return BehaviorHostInput::default();
+        };
+        BehaviorHostInput {
+            output_blocked: self.output_blocked(block_id),
+            can_produce: self.can_produce(block_id),
+            ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
         }
     }
 
@@ -600,12 +618,6 @@ impl Simulation {
     }
 
     fn run_enemies(&mut self) {
-        let core_pos = self
-            .blocks
-            .values()
-            .find(|b| b.kind == BlockKind::Core)
-            .map(|b| b.pos)
-            .unwrap_or(Pos { x: 32, y: 32 });
         let enemy_ids: Vec<_> = self.enemies.keys().cloned().collect();
         let blocks_snapshot = self.blocks.clone();
 
@@ -613,35 +625,36 @@ impl Simulation {
             let Some(enemy) = self.enemies.get_mut(&enemy_id) else {
                 continue;
             };
-            if enemy.move_cooldown > 0 {
-                enemy.move_cooldown -= 1;
-                continue;
-            }
-            enemy.move_cooldown = enemy.speed_ticks;
-            let target_pos = if enemy.kind == EnemyKind::WireCutter {
-                nearest_block_pos(&blocks_snapshot, enemy.pos, |kind| {
+            let target = if enemy.kind == EnemyKind::WireCutter {
+                nearest_block_target(&blocks_snapshot, enemy.pos, |kind| {
                     matches!(
                         kind,
                         BlockKind::Wire | BlockKind::CpuNode | BlockKind::DronePort
                     )
                 })
-                .unwrap_or(core_pos)
+                .or_else(|| {
+                    nearest_block_target(&blocks_snapshot, enemy.pos, |kind| {
+                        kind == BlockKind::Core
+                    })
+                })
             } else {
-                core_pos
+                nearest_block_target(&blocks_snapshot, enemy.pos, |kind| kind == BlockKind::Core)
+            };
+            let Some((target_id, target_pos)) = target else {
+                continue;
             };
 
-            if enemy.pos.manhattan(target_pos) <= 1 {
-                if let Some(block_id) = block_at_snapshot(&blocks_snapshot, target_pos) {
-                    if let Some(block) = self.blocks.get_mut(&block_id) {
-                        block.hp -= if enemy.kind == EnemyKind::Armored {
-                            8
-                        } else {
-                            5
-                        };
-                    }
+            enemy.target_id = Some(target_id.clone());
+            if enemy.pos.distance(target_pos) <= 0.2 {
+                if let Some(block) = self.blocks.get_mut(&target_id) {
+                    block.hp -= if enemy.kind == EnemyKind::Armored {
+                        8
+                    } else {
+                        5
+                    };
                 }
             } else {
-                enemy.pos = step_toward(enemy.pos, target_pos);
+                enemy.pos = enemy.pos.move_toward(target_pos, enemy.move_speed);
             }
         }
     }
@@ -666,8 +679,8 @@ impl Simulation {
             let Some(job) = self.drones.get(&drone_id).and_then(|d| d.job.clone()) else {
                 continue;
             };
-            let pickup_pos = self.blocks.get(&job.pickup).map(|b| b.pos);
-            let dropoff_pos = self.blocks.get(&job.dropoff).map(|b| b.pos);
+            let pickup_pos = self.blocks.get(&job.pickup).map(block_center);
+            let dropoff_pos = self.blocks.get(&job.dropoff).map(block_center);
             let Some(dropoff_pos) = dropoff_pos else {
                 continue;
             };
@@ -678,7 +691,7 @@ impl Simulation {
                 drone.logic_fuel = drone.logic_fuel.saturating_sub(1);
                 if drone.cargo.count(&job.item) == 0 {
                     if let Some(pickup_pos) = pickup_pos {
-                        if drone.pos == pickup_pos {
+                        if drone.pos.distance(pickup_pos) <= 0.15 {
                             let loaded = self
                                 .blocks
                                 .get_mut(&job.pickup)
@@ -686,10 +699,10 @@ impl Simulation {
                                 .unwrap_or(0);
                             drone.cargo.add(job.item.clone(), loaded);
                         } else {
-                            drone.pos = step_toward(drone.pos, pickup_pos);
+                            drone.pos = drone.pos.move_toward(pickup_pos, 0.18);
                         }
                     }
-                } else if drone.pos == dropoff_pos {
+                } else if drone.pos.distance(dropoff_pos) <= 0.15 {
                     let delivered = drone.cargo.remove(&job.item, job.amount);
                     if let Some(block) = self.blocks.get_mut(&job.dropoff) {
                         block.inventory.add(job.item.clone(), delivered);
@@ -697,7 +710,7 @@ impl Simulation {
                     }
                     completed = true;
                 } else {
-                    drone.pos = step_toward(drone.pos, dropoff_pos);
+                    drone.pos = drone.pos.move_toward(dropoff_pos, 0.18);
                 }
             }
             if completed {
@@ -713,13 +726,18 @@ impl Simulation {
         let Some(port) = self.blocks.get(port_id).cloned() else {
             return;
         };
-        if !self.drones.values().any(|d| d.pos == port.pos) {
+        let port_pos = block_center(&port);
+        if !self
+            .drones
+            .values()
+            .any(|d| d.pos.distance(port_pos) <= 0.15)
+        {
             let id = self.make_id("drone");
             self.drones.insert(
                 id.clone(),
                 Drone {
                     id,
-                    pos: port.pos,
+                    pos: port_pos,
                     battery: 100.0,
                     logic_fuel: 1000,
                     cargo: Inventory::with_capacity(20),
@@ -761,6 +779,37 @@ impl Simulation {
             dropoff,
             priority: 50,
         });
+    }
+
+    fn output_blocked(&self, block_id: &str) -> bool {
+        let Some(block) = self.blocks.get(block_id) else {
+            return true;
+        };
+        if !block.inventory.has_space(1) {
+            return true;
+        }
+        let Some(dst_id) = self.block_id_at(block.pos.step(block.dir)) else {
+            return false;
+        };
+        !self
+            .blocks
+            .get(&dst_id)
+            .map(|dst| can_accept_item(dst.kind, &ItemKind::Ore) && dst.inventory.has_space(1))
+            .unwrap_or(false)
+    }
+
+    fn can_produce(&self, block_id: &str) -> bool {
+        let Some(block) = self.blocks.get(block_id) else {
+            return false;
+        };
+        if block.kind != BlockKind::Assembler {
+            return false;
+        }
+        let can_make_ammo =
+            block.inventory.count(&ItemKind::Plate) >= 1 && block.inventory.has_space(2);
+        let can_make_plate =
+            block.inventory.count(&ItemKind::Ore) >= 2 && block.inventory.has_space(1);
+        can_make_ammo || can_make_plate
     }
 
     fn transfer_from(&mut self, block_id: &str, dir: Direction, amount: u32) -> bool {
@@ -806,10 +855,11 @@ impl Simulation {
     }
 
     fn choose_target(&self, origin: Pos, priority: &[TargetRule]) -> Option<EntityId> {
+        let origin = WorldPos::from_tile_center(origin);
         let in_range: Vec<_> = self
             .enemies
             .values()
-            .filter(|e| e.hp > 0 && origin.manhattan(e.pos) <= 8)
+            .filter(|e| e.hp > 0 && origin.distance(e.pos) <= 8.0)
             .collect();
         if in_range.is_empty() {
             return None;
@@ -820,7 +870,7 @@ impl Simulation {
                     if let Some(enemy) = in_range
                         .iter()
                         .filter(|e| e.kind == *kind)
-                        .min_by_key(|e| origin.manhattan(e.pos))
+                        .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
                     {
                         return Some(enemy.id.clone());
                     }
@@ -831,7 +881,10 @@ impl Simulation {
                     }
                 }
                 TargetRule::Nearest => {
-                    if let Some(enemy) = in_range.iter().min_by_key(|e| origin.manhattan(e.pos)) {
+                    if let Some(enemy) = in_range
+                        .iter()
+                        .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
+                    {
                         return Some(enemy.id.clone());
                     }
                 }
@@ -848,16 +901,16 @@ impl Simulation {
         }
         self.networks.clear();
 
-        let network_nodes: BTreeSet<_> = self
+        let connector_positions: BTreeSet<_> = self
             .blocks
             .values()
-            .filter(|b| b.kind.is_network_node())
-            .map(|b| b.pos)
+            .filter(|b| b.kind.is_network_connector())
+            .flat_map(|b| footprint_positions(b.kind, b.pos))
             .collect();
         let mut seen = BTreeSet::new();
         let mut next_network = 1_u32;
 
-        for start in network_nodes.iter().copied() {
+        for start in connector_positions.iter().copied() {
             if seen.contains(&start) {
                 continue;
             }
@@ -868,16 +921,31 @@ impl Simulation {
                 component.push(pos);
                 for dir in Direction::all() {
                     let next = pos.step(dir);
-                    if network_nodes.contains(&next) && seen.insert(next) {
+                    if connector_positions.contains(&next) && seen.insert(next) {
                         queue.push_back(next);
                     }
                 }
             }
 
-            let block_ids: Vec<_> = component
-                .iter()
-                .filter_map(|pos| self.block_id_at(*pos))
-                .collect();
+            let mut block_ids = BTreeSet::new();
+            for pos in &component {
+                if let Some(id) = self.block_id_at(*pos) {
+                    block_ids.insert(id);
+                }
+                for dir in Direction::all() {
+                    if let Some(id) = self.block_id_at(pos.step(dir)) {
+                        if self
+                            .blocks
+                            .get(&id)
+                            .map(|block| block.kind.is_network_node())
+                            .unwrap_or(false)
+                        {
+                            block_ids.insert(id);
+                        }
+                    }
+                }
+            }
+            let block_ids: Vec<_> = block_ids.into_iter().collect();
             let cpu_pool = block_ids
                 .iter()
                 .filter_map(|id| self.blocks.get(id))
@@ -907,6 +975,12 @@ impl Simulation {
                     }
                 }
             }
+            let read_only_cache = !block_ids.iter().any(|id| {
+                self.blocks
+                    .get(id)
+                    .map(|block| block.kind == BlockKind::Core)
+                    .unwrap_or(false)
+            });
             self.networks.insert(
                 next_network,
                 Network {
@@ -916,11 +990,7 @@ impl Simulation {
                     effective_per_device,
                     block_ids,
                     store: BTreeMap::new(),
-                    read_only_cache: !component.iter().any(|pos| {
-                        self.block_id_at(*pos)
-                            .and_then(|id| self.blocks.get(&id).map(|b| b.kind == BlockKind::Core))
-                            .unwrap_or(false)
-                    }),
+                    read_only_cache,
                 },
             );
             next_network += 1;
@@ -940,12 +1010,15 @@ impl Simulation {
     fn spawn_enemy(&mut self, kind: EnemyKind) {
         let id = self.make_id("enemy");
         let lane = (self.tick as i32 / 40) % 20;
-        let pos = Pos { x: 4 + lane, y: 4 };
-        let (hp, speed_ticks) = match kind {
-            EnemyKind::Grunt => (30, 8),
-            EnemyKind::Runner => (20, 3),
-            EnemyKind::Armored => (90, 12),
-            EnemyKind::WireCutter => (38, 5),
+        let pos = WorldPos {
+            x: 4.5 + lane as f32,
+            y: 4.5,
+        };
+        let (hp, speed_ticks, move_speed) = match kind {
+            EnemyKind::Grunt => (30, 8, 0.07),
+            EnemyKind::Runner => (20, 3, 0.14),
+            EnemyKind::Armored => (90, 12, 0.045),
+            EnemyKind::WireCutter => (38, 5, 0.10),
         };
         self.enemies.insert(
             id.clone(),
@@ -957,6 +1030,7 @@ impl Simulation {
                 max_hp: hp,
                 speed_ticks,
                 move_cooldown: 0,
+                move_speed,
                 target_id: None,
             },
         );
@@ -979,12 +1053,12 @@ impl Simulation {
             .blocks
             .values()
             .filter(|b| b.hp <= 0 && b.kind != BlockKind::Core)
-            .map(|b| (b.id.clone(), b.pos))
+            .map(|b| (b.id.clone(), b.kind, b.pos))
             .collect();
-        for (id, pos) in destroyed_blocks {
+        for (id, kind, pos) in destroyed_blocks {
             self.blocks.remove(&id);
             self.fuel_banks.remove(&id);
-            self.set_tile_block(pos, None);
+            self.set_tile_footprint(kind, pos, None);
             self.log(LogLevel::Warn, id, "block destroyed".to_string());
         }
         self.recompute_networks();
@@ -1026,9 +1100,11 @@ impl Simulation {
         self.tile_at(pos).and_then(|t| t.block_id.clone())
     }
 
-    fn set_tile_block(&mut self, pos: Pos, block_id: Option<EntityId>) {
-        if let Some(idx) = self.tile_index(pos) {
-            self.tiles[idx].block_id = block_id;
+    fn set_tile_footprint(&mut self, kind: BlockKind, pos: Pos, block_id: Option<EntityId>) {
+        for tile in footprint_positions(kind, pos) {
+            if let Some(idx) = self.tile_index(tile) {
+                self.tiles[idx].block_id = block_id.clone();
+            }
         }
     }
 
@@ -1224,41 +1300,51 @@ fn cpu_scaled_threshold(effective_cpu_rate: f32, base: u32) -> u32 {
     ((base as f32 / speedup).ceil() as u32).max(3)
 }
 
-fn step_toward(from: Pos, to: Pos) -> Pos {
-    let dx = to.x - from.x;
-    let dy = to.y - from.y;
-    if dx.abs() > dy.abs() {
-        Pos {
-            x: from.x + dx.signum(),
-            y: from.y,
+fn footprint_positions(kind: BlockKind, pos: Pos) -> Vec<Pos> {
+    let (width, height) = kind.footprint_size();
+    let mut positions = Vec::with_capacity((width * height) as usize);
+    for y in pos.y..pos.y + height {
+        for x in pos.x..pos.x + width {
+            positions.push(Pos { x, y });
         }
-    } else if dy != 0 {
-        Pos {
-            x: from.x,
-            y: from.y + dy.signum(),
-        }
-    } else {
-        from
+    }
+    positions
+}
+
+fn block_center(block: &Block) -> WorldPos {
+    let (width, height) = block.kind.footprint_size();
+    WorldPos {
+        x: block.pos.x as f32 + width as f32 / 2.0,
+        y: block.pos.y as f32 + height as f32 / 2.0,
     }
 }
 
-fn nearest_block_pos(
+fn closest_point_on_block(origin: WorldPos, block: &Block) -> WorldPos {
+    let (width, height) = block.kind.footprint_size();
+    let min_x = block.pos.x as f32;
+    let min_y = block.pos.y as f32;
+    let max_x = min_x + width as f32;
+    let max_y = min_y + height as f32;
+    WorldPos {
+        x: origin.x.clamp(min_x, max_x),
+        y: origin.y.clamp(min_y, max_y),
+    }
+}
+
+fn nearest_block_target(
     blocks: &BTreeMap<EntityId, Block>,
-    origin: Pos,
+    origin: WorldPos,
     predicate: impl Fn(BlockKind) -> bool,
-) -> Option<Pos> {
+) -> Option<(EntityId, WorldPos)> {
     blocks
         .values()
         .filter(|block| predicate(block.kind))
-        .min_by_key(|block| origin.manhattan(block.pos))
-        .map(|block| block.pos)
-}
-
-fn block_at_snapshot(blocks: &BTreeMap<EntityId, Block>, pos: Pos) -> Option<EntityId> {
-    blocks
-        .values()
-        .find(|block| block.pos == pos)
-        .map(|block| block.id.clone())
+        .min_by(|a, b| {
+            origin
+                .distance(closest_point_on_block(origin, a))
+                .total_cmp(&origin.distance(closest_point_on_block(origin, b)))
+        })
+        .map(|block| (block.id.clone(), closest_point_on_block(origin, block)))
 }
 
 #[cfg(test)]
@@ -1268,18 +1354,32 @@ mod tests {
     #[test]
     fn placing_wire_and_cpu_node_forms_network() {
         let mut sim = Simulation::new("/tmp/xac-test").unwrap();
-        sim.place_block(BlockKind::Wire, Pos { x: 33, y: 32 }, Direction::East)
+        sim.place_block(BlockKind::Wire, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
-        sim.place_block(BlockKind::CpuNode, Pos { x: 34, y: 32 }, Direction::East)
+        sim.place_block(BlockKind::CpuNode, Pos { x: 35, y: 32 }, Direction::East)
             .unwrap();
         let snapshot = sim.snapshot();
         assert!(snapshot.networks.iter().any(|n| n.cpu_pool >= 200.0));
     }
 
     #[test]
+    fn core_occupies_four_by_four_tiles() {
+        let sim = Simulation::new("/tmp/xac-test").unwrap();
+        let core = sim
+            .blocks
+            .values()
+            .find(|block| block.kind == BlockKind::Core)
+            .unwrap();
+        assert_eq!(core.pos, Pos { x: 30, y: 30 });
+        assert_eq!(sim.block_id_at(Pos { x: 30, y: 30 }), Some(core.id.clone()));
+        assert_eq!(sim.block_id_at(Pos { x: 33, y: 33 }), Some(core.id.clone()));
+        assert_eq!(sim.block_id_at(Pos { x: 34, y: 33 }), None);
+    }
+
+    #[test]
     fn builtin_copy_is_editable_and_reassigned() {
         let mut sim = Simulation::new("/tmp/xac-test").unwrap();
-        sim.place_block(BlockKind::Turret, Pos { x: 33, y: 32 }, Direction::East)
+        sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let block_id = sim.selected_id.clone().unwrap();
         let source = sim.edit_builtin_copy(&block_id).unwrap();
@@ -1291,10 +1391,14 @@ mod tests {
     fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
         let mut sim = Simulation::new("/tmp/xac-test").unwrap();
 
-        sim.place_block(BlockKind::Core, Pos { x: 20, y: 29 }, Direction::East)
-            .unwrap();
-        sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
-            .unwrap();
+        for x in 20..=30 {
+            sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+                .unwrap();
+        }
+        for x in 21..30 {
+            sim.place_block(BlockKind::Conveyor, Pos { x, y: 30 }, Direction::East)
+                .unwrap();
+        }
         sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
             .unwrap();
 
@@ -1306,20 +1410,23 @@ mod tests {
         let source = sim.open_behavior("builtin.drill.basic").unwrap();
         assert!(source.source.contains("(module"));
         assert!(source.source.contains(r#"(export "tick")"#));
-        assert!(source.source.contains("(loop"));
-        assert!(source.source.contains("(i32.const 1)"));
+        assert!(source.source.contains(r#"(import "xac:drill" "mine""#));
+        assert!(source.source.contains(r#"(call $output_blocked)"#));
 
-        sim.step_ticks(260);
-        let conveyor_id = sim.block_id_at(Pos { x: 21, y: 30 }).unwrap();
-        let mined = sim.blocks[&drill_id].inventory.count(&ItemKind::Ore)
-            + sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore);
-        assert!(mined > 0, "drill should mine ore from its tile");
+        let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+        let starting_core_ore = sim.blocks[&core_id].inventory.count(&ItemKind::Ore);
+        sim.step_ticks(500);
+        let delivered = sim.blocks[&core_id].inventory.count(&ItemKind::Ore);
+        assert!(
+            delivered > starting_core_ore,
+            "drill ore should ride conveyors into the 4x4 core"
+        );
     }
 
     #[test]
     fn behavior_build_compiles_wat_and_save_invalidates_cache() {
         let mut sim = Simulation::new("/tmp/xac-test").unwrap();
-        sim.place_block(BlockKind::Turret, Pos { x: 33, y: 32 }, Direction::East)
+        sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
             .unwrap();
         let block_id = sim.selected_id.clone().unwrap();
         let source = sim.edit_builtin_copy(&block_id).unwrap();
@@ -1346,14 +1453,12 @@ mod tests {
     fn cpu_node_increases_wasm_driven_drill_throughput() {
         fn setup(with_cpu_node: bool) -> (Simulation, EntityId) {
             let mut sim = Simulation::new("/tmp/xac-test").unwrap();
-            sim.place_block(BlockKind::Core, Pos { x: 20, y: 29 }, Direction::East)
-                .unwrap();
             if with_cpu_node {
-                sim.place_block(BlockKind::CpuNode, Pos { x: 20, y: 28 }, Direction::East)
-                    .unwrap();
-            }
-            for x in 21..29 {
-                sim.place_block(BlockKind::Router, Pos { x, y: 29 }, Direction::East)
+                for x in 20..=30 {
+                    sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+                        .unwrap();
+                }
+                sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
                     .unwrap();
             }
             sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)

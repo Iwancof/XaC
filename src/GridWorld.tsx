@@ -95,8 +95,9 @@ export function GridWorld({
             onEntityClickRef.current(null);
             return;
           }
-          const block = current.blocks.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
-          const enemy = current.enemies.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
+          const tile = current.tiles.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
+          const block = current.blocks.find((item) => item.id === tile?.block_id);
+          const enemy = current.enemies.find((item) => Math.floor(item.pos.x) === pos.x && Math.floor(item.pos.y) === pos.y);
           if (buildKindRef.current) {
             onTileClickRef.current(pos);
           } else if (block) {
@@ -191,7 +192,8 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
       for (const id of network.block_ids) {
         const block = snapshot.blocks.find((item) => item.id === id);
         if (!block) continue;
-        g.rect(block.pos.x * TILE + 1, block.pos.y * TILE + 1, TILE - 2, TILE - 2).fill({
+        const [width, height] = footprintSize(block.kind);
+        g.rect(block.pos.x * TILE + 1, block.pos.y * TILE + 1, width * TILE - 2, height * TILE - 2).fill({
           color,
           alpha: 0.22
         });
@@ -203,7 +205,8 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
     for (const block of snapshot.blocks) {
       if (!block.active) continue;
       const alpha = Math.min(0.55, 0.08 + block.effective_cpu_rate / 180);
-      g.rect(block.pos.x * TILE + 1, block.pos.y * TILE + 1, TILE - 2, TILE - 2).fill({
+      const [width, height] = footprintSize(block.kind);
+      g.rect(block.pos.x * TILE + 1, block.pos.y * TILE + 1, width * TILE - 2, height * TILE - 2).fill({
         color: 0x36d399,
         alpha
       });
@@ -212,7 +215,8 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
 
   if (overlay === "attack") {
     for (const block of snapshot.blocks.filter((item) => item.kind === "turret")) {
-      g.circle(block.pos.x * TILE + 8, block.pos.y * TILE + 8, TILE * 8).stroke({
+      const center = blockCenter(block);
+      g.circle(center.x, center.y, TILE * 8).stroke({
         width: 1,
         color: 0xf43f5e,
         alpha: 0.18
@@ -225,8 +229,9 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
       if (!drone.job) continue;
       const dropoff = snapshot.blocks.find((block) => block.id === drone.job?.dropoff);
       if (!dropoff) continue;
-      g.moveTo(drone.pos.x * TILE + 8, drone.pos.y * TILE + 8);
-      g.lineTo(dropoff.pos.x * TILE + 8, dropoff.pos.y * TILE + 8);
+      const dropoffCenter = blockCenter(dropoff);
+      g.moveTo(drone.pos.x * TILE, drone.pos.y * TILE);
+      g.lineTo(dropoffCenter.x, dropoffCenter.y);
       g.stroke({ width: 2, color: 0x38bdf8, alpha: 0.55 });
     }
   }
@@ -236,8 +241,11 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
   for (const block of blocks) {
     const x = block.pos.x * TILE;
     const y = block.pos.y * TILE;
+    const [width, height] = footprintSize(block.kind);
+    const pixelWidth = width * TILE;
+    const pixelHeight = height * TILE;
     const color = COLORS[block.kind];
-    g.roundRect(x + 2, y + 2, TILE - 4, TILE - 4, 3).fill(color);
+    g.roundRect(x + 2, y + 2, pixelWidth - 4, pixelHeight - 4, 3).fill(color);
     if (block.kind === "wire") {
       g.moveTo(x + 2, y + 8);
       g.lineTo(x + 14, y + 8);
@@ -246,21 +254,21 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
       g.stroke({ width: 2, color: 0xd8e7ff, alpha: 0.65 });
     }
     if (block.kind === "conveyor" || block.kind === "drill" || block.kind === "assembler") {
-      drawArrow(g, x + 8, y + 8, block.dir, 0x101417);
+      drawArrow(g, x + pixelWidth / 2, y + pixelHeight / 2, block.dir, 0x101417);
     }
     if (block.status === "over_budget") {
-      g.rect(x + 3, y + 3, TILE - 6, TILE - 6).stroke({ width: 2, color: 0xfacc15 });
+      g.rect(x + 3, y + 3, pixelWidth - 6, pixelHeight - 6).stroke({ width: 2, color: 0xfacc15 });
     }
     if (selectedId === block.id) {
-      g.rect(x + 1, y + 1, TILE - 2, TILE - 2).stroke({ width: 2, color: 0xffffff });
+      g.rect(x + 1, y + 1, pixelWidth - 2, pixelHeight - 2).stroke({ width: 2, color: 0xffffff });
     }
   }
 }
 
 function drawEnemies(g: Graphics, enemies: Enemy[], selectedId: string | null) {
   for (const enemy of enemies) {
-    const x = enemy.pos.x * TILE + 8;
-    const y = enemy.pos.y * TILE + 8;
+    const x = enemy.pos.x * TILE;
+    const y = enemy.pos.y * TILE;
     g.circle(x, y, 6).fill(ENEMY_COLORS[enemy.kind]);
     g.rect(x - 6, y - 9, 12, 2).fill(0x1f2937);
     g.rect(x - 6, y - 9, Math.max(1, 12 * (enemy.hp / enemy.max_hp)), 2).fill(0x22c55e);
@@ -272,8 +280,8 @@ function drawEnemies(g: Graphics, enemies: Enemy[], selectedId: string | null) {
 
 function drawDrones(g: Graphics, snapshot: GameSnapshot) {
   for (const drone of snapshot.drones) {
-    const x = drone.pos.x * TILE + 8;
-    const y = drone.pos.y * TILE + 8;
+    const x = drone.pos.x * TILE;
+    const y = drone.pos.y * TILE;
     g.moveTo(x, y - 6);
     g.lineTo(x + 7, y + 5);
     g.lineTo(x - 7, y + 5);
@@ -302,4 +310,16 @@ function label(kind: BlockKind) {
 
 function arrow(dir: Direction) {
   return { north: "^", east: ">", south: "v", west: "<" }[dir];
+}
+
+function footprintSize(kind: BlockKind): [number, number] {
+  return kind === "core" ? [4, 4] : [1, 1];
+}
+
+function blockCenter(block: Block) {
+  const [width, height] = footprintSize(block.kind);
+  return {
+    x: (block.pos.x + width / 2) * TILE,
+    y: (block.pos.y + height / 2) * TILE
+  };
 }
