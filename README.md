@@ -124,6 +124,16 @@ if has_pending_job return
 idle
 ```
 
+Carrier drone code can also bypass the delivery-job helper and command the
+physical drone directly. `move_to` advances the free-moving drone toward a tile,
+`load` and `unload` transfer cargo to the touched block, and `cargo_count`
+branches on the drone's current cargo:
+
+```text
+if cargo_count ammo == 0 load ammo 5
+if cargo_count ammo > 0 move_to 42 30
+```
+
 Drone ports are also code-driven. The default port charges docked drones, checks
 network ammo stock, creates a frontline delivery job, and dispatches an idle
 carrier:

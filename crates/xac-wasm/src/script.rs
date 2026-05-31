@@ -74,6 +74,10 @@ enum HostImport {
     DroneReturnToPort,
     DroneClaimDeliveryJob,
     DroneDeliver,
+    DroneMoveTo,
+    DroneLoad,
+    DroneUnload,
+    DroneCargoCount,
     DroneIdle,
     CommonFuelRemaining,
     CommonStockCount,
@@ -171,6 +175,18 @@ impl HostImport {
             HostImport::DroneDeliver => {
                 r#"  (import "xac:drone" "deliver" (func $deliver (result i32)))"#
             }
+            HostImport::DroneMoveTo => {
+                r#"  (import "xac:drone" "move_to" (func $move_to (param i32 i32) (result i32)))"#
+            }
+            HostImport::DroneLoad => {
+                r#"  (import "xac:drone" "load" (func $load (param i32 i32) (result i32)))"#
+            }
+            HostImport::DroneUnload => {
+                r#"  (import "xac:drone" "unload" (func $unload (param i32 i32) (result i32)))"#
+            }
+            HostImport::DroneCargoCount => {
+                r#"  (import "xac:drone" "cargo_count" (func $cargo_count (param i32) (result i32)))"#
+            }
             HostImport::DroneIdle => r#"  (import "xac:drone" "idle" (func $idle (result i32)))"#,
             HostImport::CommonFuelRemaining => {
                 r#"  (import "xac:common" "fuel_remaining" (func $fuel_remaining (result i64)))"#
@@ -243,6 +259,11 @@ enum Condition {
     },
     HasJob,
     HasPendingJob,
+    CargoCount {
+        item: ItemKind,
+        comparison: CountComparison,
+        value: i32,
+    },
     FuelGt {
         value: u64,
     },
@@ -298,6 +319,18 @@ enum ScriptAction {
     ReturnToPort,
     ClaimDeliveryJob,
     Deliver,
+    MoveTo {
+        x: i32,
+        y: i32,
+    },
+    Load {
+        item: ItemKind,
+        amount: i32,
+    },
+    Unload {
+        item: ItemKind,
+        amount: i32,
+    },
     Idle,
     NetSet {
         key: i32,
@@ -425,6 +458,14 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         )),
         ["if", "has_job", rest @ ..] => Ok((Condition::HasJob, rest)),
         ["if", "has_pending_job", rest @ ..] => Ok((Condition::HasPendingJob, rest)),
+        ["if", "cargo_count", item, comparison, value, rest @ ..] => Ok((
+            Condition::CargoCount {
+                item: parse_item_or_err(line_no, item)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "cargo count threshold", value)?,
+            },
+            rest,
+        )),
         ["if", "fuel_remaining", ">", value, rest @ ..] => Ok((
             Condition::FuelGt {
                 value: parse_u64(line_no, "fuel remaining threshold", value)?,
@@ -571,6 +612,30 @@ fn parse_script_action(
             imports.insert(HostImport::DroneDeliver);
             Ok(ScriptAction::Deliver)
         }
+        ["move_to", x, y] => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "move_to")?;
+            imports.insert(HostImport::DroneMoveTo);
+            Ok(ScriptAction::MoveTo {
+                x: parse_i32(line_no, "move target x", x)?,
+                y: parse_i32(line_no, "move target y", y)?,
+            })
+        }
+        ["load", item, amount] => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "load")?;
+            imports.insert(HostImport::DroneLoad);
+            Ok(ScriptAction::Load {
+                item: parse_item_or_err(line_no, item)?,
+                amount: parse_i32(line_no, "load amount", amount)?,
+            })
+        }
+        ["unload", item, amount] => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "unload")?;
+            imports.insert(HostImport::DroneUnload);
+            Ok(ScriptAction::Unload {
+                item: parse_item_or_err(line_no, item)?,
+                amount: parse_i32(line_no, "unload amount", amount)?,
+            })
+        }
         ["idle"] => {
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "idle")?;
             imports.insert(HostImport::DroneIdle);
@@ -660,6 +725,10 @@ fn add_condition_import(
         Condition::HasPendingJob => {
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "has_pending_job")?;
             imports.insert(HostImport::DroneHasPendingJob);
+        }
+        Condition::CargoCount { .. } => {
+            ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "cargo_count")?;
+            imports.insert(HostImport::DroneCargoCount);
         }
         Condition::FuelGt { .. } => {
             imports.insert(HostImport::CommonFuelRemaining);
@@ -858,6 +927,11 @@ fn render_condition(condition: Condition) -> String {
         }
         Condition::HasJob => "(call $has_job)".to_string(),
         Condition::HasPendingJob => "(call $has_pending_job)".to_string(),
+        Condition::CargoCount {
+            item,
+            comparison,
+            value,
+        } => render_count_condition("cargo_count", &item, comparison, value),
         Condition::FuelGt { value } => {
             format!("(i64.gt_u (call $fuel_remaining) (i64.const {value}))")
         }
@@ -952,6 +1026,17 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
             out.push(format!("{indent}(drop (call $claim_delivery_job))"))
         }
         ScriptAction::Deliver => out.push(format!("{indent}(drop (call $deliver))")),
+        ScriptAction::MoveTo { x, y } => out.push(format!(
+            "{indent}(drop (call $move_to (i32.const {x}) (i32.const {y})))"
+        )),
+        ScriptAction::Load { item, amount } => out.push(format!(
+            "{indent}(drop (call $load (i32.const {}) (i32.const {amount})))",
+            item_code(&item)
+        )),
+        ScriptAction::Unload { item, amount } => out.push(format!(
+            "{indent}(drop (call $unload (i32.const {}) (i32.const {amount})))",
+            item_code(&item)
+        )),
         ScriptAction::Idle => out.push(format!("{indent}(drop (call $idle))")),
         ScriptAction::NetSet { key, value } => out.push(format!(
             "{indent}(drop (call $net_set_i32 (i32.const {key}) (i32.const {value})))"

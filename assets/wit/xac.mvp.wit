@@ -90,6 +90,10 @@ interface drone-api {
   logic-fuel-remaining: func() -> u64;
   has-job: func() -> bool;
   has-pending-job: func() -> bool;
+  move-to: func(x: s32, y: s32) -> bool;
+  load: func(item-kind: string, amount: s32) -> s32;
+  unload: func(item-kind: string, amount: s32) -> s32;
+  cargo-count: func(item-kind: string) -> s32;
   return-to-port: func() -> bool;
   claim-delivery-job: func() -> bool;
   deliver: func() -> bool;

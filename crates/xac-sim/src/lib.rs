@@ -1283,6 +1283,69 @@ mod tests {
     }
 
     #[test]
+    fn carrier_drone_low_level_script_loads_moves_and_unloads() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Storage, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let pickup_id = sim.selected_id.clone().unwrap();
+        sim.blocks
+            .get_mut(&pickup_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ammo, 6);
+        sim.place_block(BlockKind::Storage, Pos { x: 35, y: 30 }, Direction::East)
+            .unwrap();
+        let dropoff_id = sim.selected_id.clone().unwrap();
+        let behavior_id = install_test_drone_behavior_source(&mut sim, "load ammo 5");
+        let drone_id = sim.make_id("drone");
+        let pickup = sim.blocks[&pickup_id].clone();
+        sim.drones.insert(
+            drone_id.clone(),
+            Drone {
+                id: drone_id.clone(),
+                home_port: pickup_id.clone(),
+                behavior_ref: Some(behavior_id.clone()),
+                pos: geometry::block_center(&pickup),
+                battery: 100.0,
+                logic_fuel: 1000,
+                cargo: Inventory::with_capacity(20),
+                state: DroneState::Docked,
+                job: None,
+            },
+        );
+        sim.fuel_banks.insert(drone_id.clone(), 100.0);
+
+        sim.step_ticks(1);
+
+        assert_eq!(sim.drones[&drone_id].cargo.count(&ItemKind::Ammo), 5);
+        assert_eq!(sim.blocks[&pickup_id].inventory.count(&ItemKind::Ammo), 1);
+
+        set_test_drone_behavior_source(
+            &mut sim,
+            &behavior_id,
+            "if cargo_count ammo > 0 move_to 35 30",
+        );
+        sim.fuel_banks.insert(drone_id.clone(), 100.0);
+        sim.step_ticks(400);
+        let dropoff_center = geometry::block_center(&sim.blocks[&dropoff_id]);
+        assert!(
+            sim.drones[&drone_id].pos.distance(dropoff_center) <= 0.2,
+            "move_to should drive the free-moving drone toward the requested tile"
+        );
+
+        set_test_drone_behavior_source(
+            &mut sim,
+            &behavior_id,
+            "if cargo_count ammo > 0 unload ammo 5",
+        );
+        sim.fuel_banks.insert(drone_id.clone(), 100.0);
+        sim.step_ticks(1);
+
+        assert_eq!(sim.drones[&drone_id].cargo.count(&ItemKind::Ammo), 0);
+        assert_eq!(sim.blocks[&dropoff_id].inventory.count(&ItemKind::Ammo), 5);
+    }
+
+    #[test]
     fn wire_cutter_breaks_wire_and_splits_cpu_network() {
         let mut sim = test_sim("sim");
         for x in 20..=30 {
@@ -1345,6 +1408,10 @@ mod tests {
     }
 
     fn install_test_drone_behavior(sim: &mut Simulation) -> BehaviorId {
+        install_test_drone_behavior_source(sim, &xac_wasm::wat_const_action(51))
+    }
+
+    fn install_test_drone_behavior_source(sim: &mut Simulation, source: &str) -> BehaviorId {
         let behavior_id = sim.make_id("behavior");
         sim.behaviors.insert(
             behavior_id.clone(),
@@ -1359,11 +1426,18 @@ mod tests {
                     source_path: "test://carrier-drone-claim.wat".to_string(),
                     build_status: "test".to_string(),
                 },
-                source: xac_wasm::wat_const_action(51),
+                source: source.to_string(),
                 wasm_hash: None,
             },
         );
         behavior_id
+    }
+
+    fn set_test_drone_behavior_source(sim: &mut Simulation, behavior_id: &str, source: &str) {
+        let package = sim.behaviors.get_mut(behavior_id).unwrap();
+        package.source = source.to_string();
+        package.wasm_hash = None;
+        sim.compiled_behaviors.remove(behavior_id);
     }
 
     fn test_sim(name: &str) -> Simulation {

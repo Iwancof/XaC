@@ -1,8 +1,10 @@
-use xac_core::{BehaviorKind, BlockKind, DeliveryJob, Drone, DroneState, Inventory, ItemKind};
+use xac_core::{
+    BehaviorKind, BlockKind, DeliveryJob, Drone, DroneState, Inventory, ItemKind, Pos, WorldPos,
+};
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, DroneCommand, DronePortCommand};
 
 use crate::block_defs::can_accept_item;
-use crate::geometry::block_center;
+use crate::geometry::{block_center, closest_point_on_block};
 use crate::{Simulation, TICKS_PER_SECOND};
 
 const CARRIER_DRONE_LOCAL_CPU_RATE: f32 = 4.0;
@@ -184,13 +186,20 @@ impl Simulation {
     }
 
     fn run_carrier_drone_behavior(&mut self, drone_id: &str) -> Option<DroneCommand> {
-        let (behavior_ref, battery, logic_fuel, has_job) = {
+        let (behavior_ref, battery, logic_fuel, has_job, cargo_counts) = {
             let drone = self.drones.get(drone_id)?;
+            let cargo_counts = drone
+                .cargo
+                .items
+                .iter()
+                .map(|(item, amount)| (item.clone(), i32::try_from(*amount).unwrap_or(i32::MAX)))
+                .collect();
             (
                 drone.behavior_ref.clone()?,
                 drone.battery,
                 drone.logic_fuel,
                 drone.job.is_some(),
+                cargo_counts,
             )
         };
         if logic_fuel == 0 {
@@ -220,6 +229,7 @@ impl Simulation {
             drone_logic_fuel: logic_fuel,
             drone_has_job: has_job,
             drone_has_pending_job: !self.pending_jobs.is_empty(),
+            drone_cargo_counts: cargo_counts,
             ..Default::default()
         };
         let eval = match self.runtime.evaluate_compiled(&compiled, fuel, input) {
@@ -308,6 +318,11 @@ impl Simulation {
                     self.idle_drone(drone_id);
                 }
             }
+            DroneCommand::MoveTo { pos } => self.move_drone_to_tile(drone_id, pos),
+            DroneCommand::Load { item, amount } => self.load_drone_cargo(drone_id, item, amount),
+            DroneCommand::Unload { item, amount } => {
+                self.unload_drone_cargo(drone_id, item, amount);
+            }
             DroneCommand::Idle => self.idle_drone(drone_id),
         }
     }
@@ -333,6 +348,105 @@ impl Simulation {
         if self.drone_at_home(drone_id) {
             self.charge_docked_drone(drone_id);
         }
+    }
+
+    fn move_drone_to_tile(&mut self, drone_id: &str, pos: Pos) {
+        let target = WorldPos::from_tile_center(pos);
+        if let Some(drone) = self.drones.get_mut(drone_id) {
+            drone.state = DroneState::Offline;
+            drone.pos = drone.pos.move_toward(target, DRONE_MOVE_SPEED);
+            drone.battery = (drone.battery - 0.05).max(0.0);
+        }
+        if self.drone_at_home(drone_id) {
+            self.charge_docked_drone(drone_id);
+        }
+    }
+
+    fn load_drone_cargo(&mut self, drone_id: &str, item: ItemKind, amount: u32) {
+        let Some(block_id) = self.drone_contact_block_id(drone_id) else {
+            return;
+        };
+        let free = self
+            .drones
+            .get(drone_id)
+            .map(|drone| drone.cargo.capacity.saturating_sub(drone.cargo.total()))
+            .unwrap_or(0);
+        let requested = amount.min(free);
+        if requested == 0 {
+            return;
+        }
+        let loaded = self
+            .blocks
+            .get_mut(&block_id)
+            .map(|block| block.inventory.remove(&item, requested))
+            .unwrap_or(0);
+        if loaded == 0 {
+            return;
+        }
+        let at_home = self.drone_at_home(drone_id);
+        if let Some(drone) = self.drones.get_mut(drone_id) {
+            drone.cargo.add(item.clone(), loaded);
+            drone.state = if at_home {
+                DroneState::Docked
+            } else {
+                DroneState::Offline
+            };
+        }
+        if let Some(block) = self.blocks.get_mut(&block_id) {
+            block.status = format!("drone loaded {}", item.as_str());
+        }
+    }
+
+    fn unload_drone_cargo(&mut self, drone_id: &str, item: ItemKind, amount: u32) {
+        let Some(block_id) = self.drone_contact_block_id(drone_id) else {
+            return;
+        };
+        let Some(block) = self.blocks.get(&block_id) else {
+            return;
+        };
+        if !can_accept_item(block.kind, &item) {
+            return;
+        }
+        let free = block
+            .inventory
+            .capacity
+            .saturating_sub(block.inventory.total());
+        let requested = amount.min(free);
+        if requested == 0 {
+            return;
+        }
+        let unloaded = self
+            .drones
+            .get_mut(drone_id)
+            .map(|drone| drone.cargo.remove(&item, requested))
+            .unwrap_or(0);
+        if unloaded == 0 {
+            return;
+        }
+        if let Some(block) = self.blocks.get_mut(&block_id) {
+            block.inventory.add(item.clone(), unloaded);
+            block.status = format!("drone unloaded {}", item.as_str());
+        }
+        let at_home = self.drone_at_home(drone_id);
+        if let Some(drone) = self.drones.get_mut(drone_id) {
+            drone.state = if at_home {
+                DroneState::Docked
+            } else {
+                DroneState::Offline
+            };
+        }
+    }
+
+    fn drone_contact_block_id(&self, drone_id: &str) -> Option<String> {
+        let pos = self.drones.get(drone_id)?.pos;
+        self.blocks
+            .values()
+            .filter_map(|block| {
+                let distance = pos.distance(closest_point_on_block(pos, block));
+                (distance <= DOCKING_DISTANCE).then_some((distance, block.id.clone()))
+            })
+            .min_by(|(a, _), (b, _)| a.total_cmp(b))
+            .map(|(_, id)| id)
     }
 
     fn idle_drone(&mut self, drone_id: &str) {
@@ -399,7 +513,7 @@ impl Simulation {
             .unwrap_or(false)
     }
 
-    fn drone_home_pos(&self, drone_id: &str) -> Option<xac_core::WorldPos> {
+    fn drone_home_pos(&self, drone_id: &str) -> Option<WorldPos> {
         self.drones
             .get(drone_id)
             .and_then(|drone| self.blocks.get(&drone.home_port))

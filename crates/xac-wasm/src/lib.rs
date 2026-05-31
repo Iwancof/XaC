@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
-use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
+use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind, Pos};
 
 mod script;
 use script::{
@@ -54,6 +54,9 @@ pub enum DroneCommand {
     ReturnToPort,
     ClaimDeliveryJob,
     Deliver,
+    MoveTo { pos: Pos },
+    Load { item: ItemKind, amount: u32 },
+    Unload { item: ItemKind, amount: u32 },
     Idle,
 }
 
@@ -99,6 +102,7 @@ pub struct BehaviorHostInput {
     pub drone_logic_fuel: u64,
     pub drone_has_job: bool,
     pub drone_has_pending_job: bool,
+    pub drone_cargo_counts: BTreeMap<ItemKind, i32>,
     pub net_i32: BTreeMap<i32, i32>,
     pub net_writable: bool,
 }
@@ -150,6 +154,8 @@ mod host_cost {
     pub const DRONE_SENSOR: u64 = 1;
     pub const DRONE_JOB: u64 = 5;
     pub const DRONE_ACTION: u64 = 2;
+    pub const DRONE_MOVE_TO: u64 = 2;
+    pub const DRONE_CARGO: u64 = 1;
     pub const STOCK_COUNT: u64 = 2;
     pub const STOCK_CAPACITY: u64 = 2;
     pub const HAS_SPACE: u64 = 2;
@@ -372,6 +378,10 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
                         | "return_to_port"
                         | "claim_delivery_job"
                         | "deliver"
+                        | "move_to"
+                        | "load"
+                        | "unload"
+                        | "cargo_count"
                         | "idle"
                 )
         }
@@ -965,6 +975,82 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 command: DroneCommand::Deliver,
             };
             1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "move_to",
+        |mut caller: Caller<'_, BehaviorHostState>, x: i32, y: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_MOVE_TO) {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::MoveTo { pos: Pos { x, y } },
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "load",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32, amount: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            let Ok(amount) = u32::try_from(amount) else {
+                return 0;
+            };
+            if amount == 0 {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Load { item, amount },
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "unload",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32, amount: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            let Ok(amount) = u32::try_from(amount) else {
+                return 0;
+            };
+            if amount == 0 {
+                return 0;
+            }
+            caller.data_mut().intent = BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Unload { item, amount },
+            };
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone",
+        "cargo_count",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_CARGO) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .drone_cargo_counts
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
         },
     )?;
     linker.func_wrap(
@@ -1784,6 +1870,108 @@ mod tests {
                 command: DroneCommand::ClaimDeliveryJob
             }
         ));
+    }
+
+    #[test]
+    fn carrier_drone_wat_can_use_low_level_physical_apis() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::CarrierDrone,
+                r#"(module
+                  (import "xac:drone" "move_to" (func $move_to (param i32 i32) (result i32)))
+                  (import "xac:drone" "load" (func $load (param i32 i32) (result i32)))
+                  (import "xac:drone" "unload" (func $unload (param i32 i32) (result i32)))
+                  (import "xac:drone" "cargo_count" (func $cargo_count (param i32) (result i32)))
+                  (func (export "tick")
+                    (if (i32.eqz (call $cargo_count (i32.const 2)))
+                      (then
+                        (drop (call $load (i32.const 2) (i32.const 5)))
+                        (return)))
+                    (drop (call $move_to (i32.const 42) (i32.const 30)))
+                    (drop (call $unload (i32.const 2) (i32.const 5)))))"#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 80, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Load {
+                    item: ItemKind::Ammo,
+                    amount: 5
+                }
+            }
+        ));
+
+        let mut cargo = BTreeMap::new();
+        cargo.insert(ItemKind::Ammo, 5);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    drone_cargo_counts: cargo,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Unload {
+                    item: ItemKind::Ammo,
+                    amount: 5
+                }
+            }
+        ));
+    }
+
+    #[test]
+    fn xac_script_can_drive_carrier_drone_low_level_apis() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "if cargo_count ammo == 0 load ammo 5\nif cargo_count ammo > 0 move_to 42 30";
+        let wat = compile_source_to_wat(BehaviorKind::CarrierDrone, source).unwrap();
+        assert!(wat.contains(r#""cargo_count""#));
+        assert!(wat.contains(r#""load""#));
+        assert!(wat.contains(r#""move_to""#));
+
+        let compiled = runtime
+            .compile_wat(BehaviorKind::CarrierDrone, source)
+            .unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 80, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::Load {
+                    item: ItemKind::Ammo,
+                    amount: 5
+                }
+            }
+        ));
+
+        let mut cargo = BTreeMap::new();
+        cargo.insert(ItemKind::Ammo, 5);
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                80,
+                BehaviorHostInput {
+                    drone_cargo_counts: cargo,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        match eval.intent {
+            BehaviorIntent::CarrierDrone {
+                command: DroneCommand::MoveTo { pos },
+            } => assert_eq!(pos, Pos { x: 42, y: 30 }),
+            other => panic!("expected move_to intent, got {other:?}"),
+        }
     }
 
     #[test]
