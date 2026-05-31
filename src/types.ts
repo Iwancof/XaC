@@ -73,6 +73,7 @@ export interface DeliveryJob {
 
 export interface Drone {
   id: string;
+  home_port: string;
   pos: Pos;
   battery: number;
   logic_fuel: number;

@@ -3,20 +3,21 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use xac_core::{
     BehaviorId, BehaviorSource, BehaviorSummary, Block, BlockKind, BuildResult, DeliveryJob,
-    Direction, Drone, DroneState, Enemy, EnemyKind, EntityId, GameSnapshot, Inventory, ItemKind,
-    LogEntry, LogLevel, Network, Pos, TerrainKind, Tile, WorldPos,
+    Direction, Drone, Enemy, EnemyKind, EntityId, GameSnapshot, ItemKind, LogEntry, LogLevel,
+    Network, Pos, TerrainKind, Tile, WorldPos,
 };
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, BehaviorRuntime, CompiledBehavior, TargetRule};
 
 mod behavior;
 mod block_defs;
+mod drone;
 mod geometry;
 
 use behavior::{builtin_behaviors, BehaviorPackage};
 use block_defs::{
     build_tiles, can_accept_item, cpu_scaled_threshold, default_behavior_for, kind_name, make_block,
 };
-use geometry::{block_center, footprint_positions, nearest_block_target};
+use geometry::{footprint_positions, nearest_block_target};
 
 pub const MAP_WIDTH: i32 = 64;
 pub const MAP_HEIGHT: i32 = 64;
@@ -658,128 +659,6 @@ impl Simulation {
         }
     }
 
-    fn run_drones(&mut self) {
-        let drone_ids: Vec<_> = self.drones.keys().cloned().collect();
-        for drone_id in drone_ids {
-            let job_needed = self
-                .drones
-                .get(&drone_id)
-                .and_then(|d| d.job.clone())
-                .is_none();
-            if job_needed {
-                if let Some(job) = self.pending_jobs.pop() {
-                    if let Some(drone) = self.drones.get_mut(&drone_id) {
-                        drone.job = Some(job);
-                        drone.state = DroneState::Delivering;
-                    }
-                }
-            }
-
-            let Some(job) = self.drones.get(&drone_id).and_then(|d| d.job.clone()) else {
-                continue;
-            };
-            let pickup_pos = self.blocks.get(&job.pickup).map(block_center);
-            let dropoff_pos = self.blocks.get(&job.dropoff).map(block_center);
-            let Some(dropoff_pos) = dropoff_pos else {
-                continue;
-            };
-
-            let mut completed = false;
-            if let Some(drone) = self.drones.get_mut(&drone_id) {
-                drone.battery = (drone.battery - 0.1).max(0.0);
-                drone.logic_fuel = drone.logic_fuel.saturating_sub(1);
-                if drone.cargo.count(&job.item) == 0 {
-                    if let Some(pickup_pos) = pickup_pos {
-                        if drone.pos.distance(pickup_pos) <= 0.15 {
-                            let loaded = self
-                                .blocks
-                                .get_mut(&job.pickup)
-                                .map(|b| b.inventory.remove(&job.item, job.amount))
-                                .unwrap_or(0);
-                            drone.cargo.add(job.item.clone(), loaded);
-                        } else {
-                            drone.pos = drone.pos.move_toward(pickup_pos, 0.18);
-                        }
-                    }
-                } else if drone.pos.distance(dropoff_pos) <= 0.15 {
-                    let delivered = drone.cargo.remove(&job.item, job.amount);
-                    if let Some(block) = self.blocks.get_mut(&job.dropoff) {
-                        block.inventory.add(job.item.clone(), delivered);
-                        block.status = format!("drone delivered {}", job.item.as_str());
-                    }
-                    completed = true;
-                } else {
-                    drone.pos = drone.pos.move_toward(dropoff_pos, 0.18);
-                }
-            }
-            if completed {
-                if let Some(drone) = self.drones.get_mut(&drone_id) {
-                    drone.job = None;
-                    drone.state = DroneState::Docked;
-                }
-            }
-        }
-    }
-
-    fn ensure_drone_and_job(&mut self, port_id: &str) {
-        let Some(port) = self.blocks.get(port_id).cloned() else {
-            return;
-        };
-        let port_pos = block_center(&port);
-        if !self
-            .drones
-            .values()
-            .any(|d| d.pos.distance(port_pos) <= 0.15)
-        {
-            let id = self.make_id("drone");
-            self.drones.insert(
-                id.clone(),
-                Drone {
-                    id,
-                    pos: port_pos,
-                    battery: 100.0,
-                    logic_fuel: 1000,
-                    cargo: Inventory::with_capacity(20),
-                    state: DroneState::Docked,
-                    job: None,
-                },
-            );
-        }
-        if !self.tick.is_multiple_of(60) {
-            return;
-        }
-        let Some(dropoff) = self
-            .blocks
-            .values()
-            .find(|b| b.kind == BlockKind::Turret && b.inventory.count(&ItemKind::Ammo) < 10)
-            .map(|b| b.id.clone())
-        else {
-            return;
-        };
-        let Some(pickup) = self
-            .blocks
-            .values()
-            .find(|b| {
-                matches!(
-                    b.kind,
-                    BlockKind::Storage | BlockKind::Core | BlockKind::Assembler
-                ) && b.inventory.count(&ItemKind::Ammo) >= 5
-            })
-            .map(|b| b.id.clone())
-        else {
-            return;
-        };
-        let job_id = self.make_id("job");
-        self.pending_jobs.push(DeliveryJob {
-            id: job_id,
-            item: ItemKind::Ammo,
-            amount: 10,
-            pickup,
-            dropoff,
-            priority: 50,
-        });
-    }
-
     fn output_blocked(&self, block_id: &str) -> bool {
         let Some(block) = self.blocks.get(block_id) else {
             return true;
@@ -1320,6 +1199,44 @@ mod tests {
         assert!(
             enemy_hp < 30,
             "turret builtin should call attack_nearest through Wasm host imports"
+        );
+    }
+
+    #[test]
+    fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+        let starting_core_ammo = sim.blocks[&core_id].inventory.count(&ItemKind::Ammo);
+
+        sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let port_id = sim.selected_id.clone().unwrap();
+        sim.place_block(BlockKind::Turret, Pos { x: 42, y: 30 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+
+        sim.step_ticks(360);
+
+        assert_eq!(
+            sim.drones.len(),
+            1,
+            "one drone_port should maintain one carrier drone instead of spawning every time it leaves"
+        );
+        let drone = sim.drones.values().next().unwrap();
+        assert_eq!(drone.home_port, port_id);
+        assert_eq!(drone.state, xac_core::DroneState::Docked);
+        assert!(drone.job.is_none());
+        assert!(
+            sim.pending_jobs.is_empty(),
+            "delivery job should be consumed after the turret receives ammo"
+        );
+        assert!(
+            sim.blocks[&turret_id].inventory.count(&ItemKind::Ammo) >= 10,
+            "carrier drone should deliver core ammo to the turret"
+        );
+        assert!(
+            sim.blocks[&core_id].inventory.count(&ItemKind::Ammo) < starting_core_ammo,
+            "delivery should remove ammo from core storage"
         );
     }
 }

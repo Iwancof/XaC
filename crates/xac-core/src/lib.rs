@@ -332,6 +332,7 @@ pub struct DeliveryJob {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Drone {
     pub id: EntityId,
+    pub home_port: EntityId,
     pub pos: WorldPos,
     pub battery: f32,
     pub logic_fuel: u64,
