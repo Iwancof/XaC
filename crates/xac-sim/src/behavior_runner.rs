@@ -5,6 +5,9 @@ use xac_wasm::{BehaviorHostInput, BehaviorIntent, CompiledBehavior, NetStoreWrit
 
 use crate::{Simulation, TICKS_PER_SECOND};
 
+const MIN_BEHAVIOR_INVOCATION_FUEL: u64 = 40;
+const BEHAVIOR_FUEL_BANK_SECONDS: f32 = 8.0;
+
 impl Simulation {
     pub(crate) fn run_programmable_behaviors(&mut self) {
         let ids: Vec<_> = self
@@ -137,9 +140,15 @@ impl Simulation {
 
     fn grant_behavior_fuel(&mut self, block_id: &str, cpu_rate: f32) -> u64 {
         let bank = self.fuel_banks.entry(block_id.to_string()).or_insert(0.0);
-        let max_bank = cpu_rate.max(1.0);
+        let max_bank = (cpu_rate.max(1.0) * BEHAVIOR_FUEL_BANK_SECONDS)
+            .max(MIN_BEHAVIOR_INVOCATION_FUEL as f32);
         *bank = (*bank + cpu_rate / TICKS_PER_SECOND as f32).min(max_bank);
-        bank.floor() as u64
+        let available = bank.floor() as u64;
+        if available >= MIN_BEHAVIOR_INVOCATION_FUEL {
+            available
+        } else {
+            0
+        }
     }
 
     fn spend_behavior_fuel(&mut self, block_id: &str, fuel_spent: u64) {

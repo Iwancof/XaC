@@ -37,6 +37,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "output_available",
         "can_produce",
         "ammo_count",
+        "fuel_remaining",
         "ammo",
         "plate",
         "nearest",

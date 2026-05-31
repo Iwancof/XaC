@@ -59,6 +59,7 @@ struct BehaviorHostState {
     intent: BehaviorIntent,
     assembler_recipe: ItemKind,
     net_writes: Vec<NetStoreWrite>,
+    host_over_budget: bool,
 }
 
 impl BehaviorHostState {
@@ -68,8 +69,26 @@ impl BehaviorHostState {
             intent: BehaviorIntent::Noop,
             assembler_recipe: ItemKind::Ammo,
             net_writes: Vec::new(),
+            host_over_budget: false,
         }
     }
+}
+
+mod host_cost {
+    pub const FUEL_REMAINING: u64 = 0;
+    pub const OUTPUT_BLOCKED: u64 = 1;
+    pub const MINE: u64 = 2;
+    pub const PUSH: u64 = 1;
+    pub const OUTPUT_AVAILABLE: u64 = 1;
+    pub const SET_RECIPE: u64 = 2;
+    pub const CAN_PRODUCE: u64 = 1;
+    pub const PRODUCE: u64 = 2;
+    pub const AMMO_COUNT: u64 = 1;
+    pub const ATTACK_NEAREST: u64 = 4;
+    pub const ATTACK_BEST: u64 = 8;
+    pub const DISPATCH: u64 = 5;
+    pub const NET_GET_I32: u64 = 2;
+    pub const NET_SET_I32: u64 = 4;
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -168,6 +187,9 @@ impl BehaviorRuntime {
                 action_code_to_intent(compiled.kind, action_code)?
             }
         };
+        if store.data().host_over_budget {
+            return Ok(over_budget_eval(&mut store, fuel, compiled));
+        }
         let fuel_remaining = store.get_fuel().unwrap_or(0);
 
         Ok(BehaviorEval {
@@ -217,9 +239,20 @@ fn over_budget_eval(
 
 fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     linker.func_wrap(
+        "xac:common",
+        "fuel_remaining",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i64 {
+            charge_host(&mut caller, host_cost::FUEL_REMAINING);
+            caller.get_fuel().unwrap_or(0) as i64
+        },
+    )?;
+    linker.func_wrap(
         "xac:drill",
         "output_blocked",
-        |caller: Caller<'_, BehaviorHostState>| -> i32 {
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::OUTPUT_BLOCKED) {
+                return 0;
+            }
             if caller.data().input.output_blocked {
                 1
             } else {
@@ -231,6 +264,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:drill",
         "mine",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::MINE) {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::DrillDefault;
             1
         },
@@ -239,6 +275,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:router",
         "push_any",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::PUSH) {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::Router {
                 preferred: Direction::all().to_vec(),
             };
@@ -249,6 +288,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:router",
         "push_dir",
         |mut caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::PUSH) {
+                return 0;
+            }
             let Some(dir) = direction_from_code(dir) else {
                 return 0;
             };
@@ -261,7 +303,10 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     linker.func_wrap(
         "xac:router",
         "output_available",
-        |caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
+        |mut caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::OUTPUT_AVAILABLE) {
+                return 0;
+            }
             let Some(dir) = direction_from_code(dir) else {
                 return 0;
             };
@@ -276,6 +321,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:assembler",
         "set_recipe",
         |mut caller: Caller<'_, BehaviorHostState>, recipe: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::SET_RECIPE) {
+                return 0;
+            }
             let Some(recipe) = recipe_from_code(recipe) else {
                 return 0;
             };
@@ -286,7 +334,10 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     linker.func_wrap(
         "xac:assembler",
         "can_produce",
-        |caller: Caller<'_, BehaviorHostState>| -> i32 {
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::CAN_PRODUCE) {
+                return 0;
+            }
             let recipe = caller.data().assembler_recipe.clone();
             let can_progress = caller.data().input.assembler_can_produce[recipe_index(&recipe)]
                 || caller.data().input.can_produce;
@@ -301,6 +352,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:assembler",
         "produce",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::PRODUCE) {
+                return 0;
+            }
             let recipe = caller.data().assembler_recipe.clone();
             let can_progress = caller.data().input.assembler_can_produce[recipe_index(&recipe)]
                 || caller.data().input.can_produce;
@@ -314,12 +368,20 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     linker.func_wrap(
         "xac:turret",
         "ammo_count",
-        |caller: Caller<'_, BehaviorHostState>| -> i32 { caller.data().input.ammo_count },
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::AMMO_COUNT) {
+                return 0;
+            }
+            caller.data().input.ammo_count
+        },
     )?;
     linker.func_wrap(
         "xac:turret",
         "attack_nearest",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::ATTACK_NEAREST) {
+                return 0;
+            }
             if caller.data().input.ammo_count <= 0 {
                 return 0;
             }
@@ -333,6 +395,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:turret",
         "attack_best",
         |mut caller: Caller<'_, BehaviorHostState>, policy: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::ATTACK_BEST) {
+                return 0;
+            }
             if caller.data().input.ammo_count <= 0 {
                 return 0;
             }
@@ -349,6 +414,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:drone_port",
         "dispatch",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DISPATCH) {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::DronePort;
             1
         },
@@ -356,7 +424,10 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     linker.func_wrap(
         "xac:net",
         "store_get_i32",
-        |caller: Caller<'_, BehaviorHostState>, key: i32| -> i32 {
+        |mut caller: Caller<'_, BehaviorHostState>, key: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::NET_GET_I32) {
+                return 0;
+            }
             caller.data().input.net_i32.get(&key).copied().unwrap_or(0)
         },
     )?;
@@ -364,6 +435,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:net",
         "store_set_i32",
         |mut caller: Caller<'_, BehaviorHostState>, key: i32, value: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::NET_SET_I32) {
+                return 0;
+            }
             let data = caller.data_mut();
             if !data.input.net_writable {
                 return 0;
@@ -374,6 +448,22 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         },
     )?;
     Ok(())
+}
+
+fn charge_host(caller: &mut Caller<'_, BehaviorHostState>, cost: u64) -> bool {
+    let Ok(fuel) = caller.get_fuel() else {
+        caller.data_mut().host_over_budget = true;
+        return false;
+    };
+    if fuel < cost {
+        caller.data_mut().host_over_budget = true;
+        return false;
+    }
+    if caller.set_fuel(fuel - cost).is_err() {
+        caller.data_mut().host_over_budget = true;
+        return false;
+    }
+    true
 }
 
 pub fn compile_source_to_wat(kind: BlockKind, source: &str) -> Result<String> {
@@ -696,6 +786,79 @@ mod tests {
         assert!(matches!(
             eval.intent,
             BehaviorIntent::Router { preferred } if preferred == vec![Direction::East]
+        ));
+    }
+
+    #[test]
+    fn xac_script_can_branch_on_remaining_fuel() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(BlockKind::Drill, "if fuel_remaining > 12 mine")
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 8, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+        assert!(!eval.over_budget);
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::DrillDefault));
+        assert!(
+            eval.fuel_spent >= host_cost::MINE,
+            "host API mine should charge explicit fuel"
+        );
+    }
+
+    #[test]
+    fn host_api_cost_can_exhaust_behavior_budget() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BlockKind::Turret,
+                r#"(module
+                  (import "xac:turret" "attack_best" (func $attack_best (param i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $attack_best (i32.const 1)))))"#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                host_cost::ATTACK_BEST - 1,
+                BehaviorHostInput {
+                    ammo_count: 5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(eval.over_budget);
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    ammo_count: 5,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(!eval.over_budget);
+        assert!(
+            eval.fuel_spent >= host_cost::ATTACK_BEST,
+            "attack_best should charge explicit host fuel"
+        );
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Turret { priority } if matches!(
+                priority.as_slice(),
+                [TargetRule::LowestHp, TargetRule::Nearest]
+            )
         ));
     }
 

@@ -50,6 +50,7 @@ enum HostImport {
     TurretAttackNearest,
     TurretAttackBest,
     DronePortDispatch,
+    CommonFuelRemaining,
     NetStoreGetI32,
     NetStoreSetI32,
 }
@@ -91,6 +92,9 @@ impl HostImport {
             HostImport::DronePortDispatch => {
                 r#"  (import "xac:drone_port" "dispatch" (func $dispatch (result i32)))"#
             }
+            HostImport::CommonFuelRemaining => {
+                r#"  (import "xac:common" "fuel_remaining" (func $fuel_remaining (result i64)))"#
+            }
             HostImport::NetStoreGetI32 => {
                 r#"  (import "xac:net" "store_get_i32" (func $net_get_i32 (param i32) (result i32)))"#
             }
@@ -107,6 +111,7 @@ enum Condition {
     OutputAvailable(Direction),
     CanProduce,
     AmmoGtZero,
+    FuelGt { value: u64 },
     NetGt { key: i32, value: i32 },
     NetEq { key: i32, value: i32 },
 }
@@ -173,6 +178,12 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         )),
         ["if", "can_produce", rest @ ..] => Ok((Condition::CanProduce, rest)),
         ["if", "ammo_count", ">", "0", rest @ ..] => Ok((Condition::AmmoGtZero, rest)),
+        ["if", "fuel_remaining", ">", value, rest @ ..] => Ok((
+            Condition::FuelGt {
+                value: parse_u64(line_no, "fuel remaining threshold", value)?,
+            },
+            rest,
+        )),
         ["if", "net", key, ">", value, rest @ ..] => Ok((
             Condition::NetGt {
                 key: parse_i32(line_no, "network key", key)?,
@@ -280,6 +291,9 @@ fn add_condition_import(
             ensure_kind(kind, BlockKind::Turret, line_no, "ammo_count")?;
             imports.insert(HostImport::TurretAmmoCount);
         }
+        Condition::FuelGt { .. } => {
+            imports.insert(HostImport::CommonFuelRemaining);
+        }
         Condition::NetGt { .. } | Condition::NetEq { .. } => {
             imports.insert(HostImport::NetStoreGetI32);
         }
@@ -329,6 +343,12 @@ fn parse_i32(line_no: usize, label: &str, value: &str) -> Result<i32> {
         .map_err(|_| anyhow!("line {line_no}: invalid {label} {value}"))
 }
 
+fn parse_u64(line_no: usize, label: &str, value: &str) -> Result<u64> {
+    value
+        .parse()
+        .map_err(|_| anyhow!("line {line_no}: invalid {label} {value}"))
+}
+
 fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
     match statement {
         ScriptStatement::Action(action) => render_action(action.clone(), "    ", out),
@@ -352,6 +372,9 @@ fn render_condition(condition: Condition) -> String {
         }
         Condition::CanProduce => "(call $can_produce)".to_string(),
         Condition::AmmoGtZero => "(i32.gt_s (call $ammo_count) (i32.const 0))".to_string(),
+        Condition::FuelGt { value } => {
+            format!("(i64.gt_u (call $fuel_remaining) (i64.const {value}))")
+        }
         Condition::NetGt { key, value } => {
             format!("(i32.gt_s (call $net_get_i32 (i32.const {key})) (i32.const {value}))")
         }

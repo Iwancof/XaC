@@ -59,6 +59,14 @@ mine
 The backend lowers that source to WebAssembly Text, compiles it to Wasm with
 Wasmtime, links a small host API surface such as `xac:drill/mine`, and runs
 each `tick()` with fuel derived from the block's effective network CPU rate.
+Blocks bank fuel before invoking behavior, so local CPU still works slowly while
+wire/core/cpu-node networks reach API-heavy behavior faster. Host API calls also
+charge explicit fuel costs, and XaC Script can branch on remaining fuel:
+
+```text
+if fuel_remaining > 12 mine
+```
+
 Assembler production reads `assets/recipes.toml`; `set_recipe ammo` records an
 explicit recipe goal on the block and can build missing intermediate plate from
 the same recipe table.

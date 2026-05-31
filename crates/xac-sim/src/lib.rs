@@ -529,6 +529,7 @@ mod tests {
             .unwrap()
             .inventory
             .remove(&ItemKind::Ore, 1);
+        sim.fuel_banks.insert(router_id.clone(), 100.0);
         sim.step_ticks(1);
 
         assert_eq!(
@@ -637,6 +638,55 @@ mod tests {
         assert!(
             fast_ore > slow_ore,
             "cpu node should increase WAT-driven drill throughput: slow={slow_ore}, fast={fast_ore}"
+        );
+    }
+
+    #[test]
+    fn local_cpu_banks_fuel_until_api_heavy_behavior_can_run() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Turret, Pos { x: 42, y: 32 }, Direction::East)
+            .unwrap();
+        let turret_id = sim.selected_id.clone().unwrap();
+        assign_script(
+            &mut sim,
+            &turret_id,
+            "if ammo_count > 0 attack_best lowest_hp",
+        );
+        sim.blocks
+            .get_mut(&turret_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ammo, 3);
+        let enemy_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            enemy_id.clone(),
+            Enemy {
+                id: enemy_id.clone(),
+                kind: EnemyKind::Grunt,
+                pos: WorldPos { x: 43.5, y: 32.5 },
+                hp: 30,
+                max_hp: 30,
+                speed_ticks: 8,
+                move_cooldown: 0,
+                move_speed: 0.0,
+                target_id: None,
+            },
+        );
+        let starting_hp = sim.enemies[&enemy_id].hp;
+
+        sim.step_ticks(20);
+        assert_eq!(
+            sim.enemies[&enemy_id].hp, starting_hp,
+            "local CPU should bank fuel instead of running API-heavy code immediately"
+        );
+
+        sim.step_ticks(300);
+        assert!(
+            sim.enemies
+                .get(&enemy_id)
+                .map(|enemy| enemy.hp < starting_hp)
+                .unwrap_or(true),
+            "after banking enough local CPU fuel, attack_best should run through Wasm host API"
         );
     }
 
