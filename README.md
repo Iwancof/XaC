@@ -11,7 +11,7 @@ The current implementation is a vertical slice:
 - React/TypeScript IDE UI
 - PixiJS grid rendering and overlays
 - Monaco behavior editor
-- Built-in WAT behavior presets with copy-on-write and fork/edit flow
+- Built-in XaC Script behavior presets with copy-on-write and fork/edit flow
 
 ## Run
 
@@ -56,6 +56,9 @@ mine
 The backend lowers that source to WebAssembly Text, compiles it to Wasm with
 Wasmtime, links a small host API surface such as `xac:drill/mine`, and runs
 each `tick()` with fuel derived from the block's effective network CPU rate.
+Assembler production reads `assets/recipes.toml`; `set_recipe ammo` records an
+explicit recipe goal on the block and can build missing intermediate plate from
+the same recipe table.
 Script can also touch the shared network store through integer keys:
 
 ```text

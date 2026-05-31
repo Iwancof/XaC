@@ -49,6 +49,12 @@ export function Inspector({
             <strong>{selectedBlock.hp}</strong>
             <span>CPU</span>
             <strong>{selectedBlock.effective_cpu_rate.toFixed(1)} fuel/s</strong>
+            {selectedBlock.recipe && (
+              <>
+                <span>Recipe</span>
+                <strong>{selectedBlock.recipe}</strong>
+              </>
+            )}
             <span>Network</span>
             <strong>{selectedBlock.network_id ?? "local"}</strong>
           </div>

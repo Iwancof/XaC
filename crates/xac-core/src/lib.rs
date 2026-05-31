@@ -110,6 +110,17 @@ pub enum ItemKind {
 }
 
 impl ItemKind {
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "ore" => Some(ItemKind::Ore),
+            "plate" => Some(ItemKind::Plate),
+            "ammo" => Some(ItemKind::Ammo),
+            "cpu_part" => Some(ItemKind::CpuPart),
+            "drone_part" => Some(ItemKind::DronePart),
+            _ => None,
+        }
+    }
+
     pub fn as_str(&self) -> &'static str {
         match self {
             ItemKind::Ore => "ore",
@@ -297,6 +308,7 @@ pub struct Block {
     pub dir: Direction,
     pub hp: i32,
     pub inventory: Inventory,
+    pub recipe: Option<String>,
     pub behavior_ref: Option<BehaviorId>,
     pub tags: Vec<String>,
     pub active: bool,

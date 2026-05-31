@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
-use xac_core::{BlockKind, Direction, EnemyKind};
+use xac_core::{BlockKind, Direction, EnemyKind, ItemKind};
 
 mod script;
 use script::{compile_xac_script, is_wat_source};
@@ -13,7 +13,7 @@ pub enum BehaviorIntent {
     Noop,
     DrillDefault,
     Router { preferred: Vec<Direction> },
-    Assembler { prefer_ammo: bool },
+    Assembler { recipe: ItemKind },
     Turret { priority: Vec<TargetRule> },
     DronePort,
     CarrierDrone,
@@ -46,6 +46,7 @@ pub struct NetStoreWrite {
 pub struct BehaviorHostInput {
     pub output_blocked: bool,
     pub can_produce: bool,
+    pub assembler_can_produce: [bool; 2],
     pub ammo_count: i32,
     pub router_output_available: [bool; 4],
     pub net_i32: BTreeMap<i32, i32>,
@@ -56,7 +57,7 @@ pub struct BehaviorHostInput {
 struct BehaviorHostState {
     input: BehaviorHostInput,
     intent: BehaviorIntent,
-    assembler_prefer_ammo: bool,
+    assembler_recipe: ItemKind,
     net_writes: Vec<NetStoreWrite>,
 }
 
@@ -65,7 +66,7 @@ impl BehaviorHostState {
         Self {
             input,
             intent: BehaviorIntent::Noop,
-            assembler_prefer_ammo: true,
+            assembler_recipe: ItemKind::Ammo,
             net_writes: Vec::new(),
         }
     }
@@ -275,7 +276,10 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:assembler",
         "set_recipe",
         |mut caller: Caller<'_, BehaviorHostState>, recipe: i32| -> i32 {
-            caller.data_mut().assembler_prefer_ammo = recipe == 1;
+            let Some(recipe) = recipe_from_code(recipe) else {
+                return 0;
+            };
+            caller.data_mut().assembler_recipe = recipe;
             1
         },
     )?;
@@ -283,7 +287,10 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:assembler",
         "can_produce",
         |caller: Caller<'_, BehaviorHostState>| -> i32 {
-            if caller.data().input.can_produce {
+            let recipe = caller.data().assembler_recipe.clone();
+            let can_progress = caller.data().input.assembler_can_produce[recipe_index(&recipe)]
+                || caller.data().input.can_produce;
+            if can_progress {
                 1
             } else {
                 0
@@ -294,11 +301,13 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "xac:assembler",
         "produce",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
-            if !caller.data().input.can_produce {
+            let recipe = caller.data().assembler_recipe.clone();
+            let can_progress = caller.data().input.assembler_can_produce[recipe_index(&recipe)]
+                || caller.data().input.can_produce;
+            if !can_progress {
                 return 0;
             }
-            let prefer_ammo = caller.data().assembler_prefer_ammo;
-            caller.data_mut().intent = BehaviorIntent::Assembler { prefer_ammo };
+            caller.data_mut().intent = BehaviorIntent::Assembler { recipe };
             1
         },
     )?;
@@ -403,8 +412,12 @@ fn action_code_to_intent(kind: BlockKind, action_code: i32) -> Result<BehaviorIn
         12 if kind == BlockKind::Router => router_dir(Direction::East),
         13 if kind == BlockKind::Router => router_dir(Direction::South),
         14 if kind == BlockKind::Router => router_dir(Direction::West),
-        20 if kind == BlockKind::Assembler => Ok(BehaviorIntent::Assembler { prefer_ammo: false }),
-        21 if kind == BlockKind::Assembler => Ok(BehaviorIntent::Assembler { prefer_ammo: true }),
+        20 if kind == BlockKind::Assembler => Ok(BehaviorIntent::Assembler {
+            recipe: ItemKind::Plate,
+        }),
+        21 if kind == BlockKind::Assembler => Ok(BehaviorIntent::Assembler {
+            recipe: ItemKind::Ammo,
+        }),
         30 if kind == BlockKind::Turret => Ok(BehaviorIntent::Turret {
             priority: vec![TargetRule::Nearest],
         }),
@@ -440,6 +453,22 @@ fn direction_index(dir: Direction) -> usize {
         Direction::East => 1,
         Direction::South => 2,
         Direction::West => 3,
+    }
+}
+
+fn recipe_from_code(code: i32) -> Option<ItemKind> {
+    match code {
+        0 => Some(ItemKind::Plate),
+        1 => Some(ItemKind::Ammo),
+        _ => None,
+    }
+}
+
+fn recipe_index(recipe: &ItemKind) -> usize {
+    match recipe {
+        ItemKind::Plate => 0,
+        ItemKind::Ammo => 1,
+        _ => 0,
     }
 }
 
@@ -548,7 +577,7 @@ mod tests {
         ));
         assert!(matches!(
             action_code_to_intent(BlockKind::Assembler, 21).unwrap(),
-            BehaviorIntent::Assembler { prefer_ammo: true }
+            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
         ));
     }
 
@@ -713,14 +742,14 @@ mod tests {
                 &assembler,
                 30,
                 BehaviorHostInput {
-                    can_produce: true,
+                    assembler_can_produce: [false, true],
                     ..Default::default()
                 },
             )
             .unwrap();
         assert!(matches!(
             eval.intent,
-            BehaviorIntent::Assembler { prefer_ammo: true }
+            BehaviorIntent::Assembler { recipe } if recipe == ItemKind::Ammo
         ));
 
         let turret = runtime

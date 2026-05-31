@@ -291,6 +291,7 @@ function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind))
     dir,
     hp: kind === "core" ? 500 : kind === "wire" ? 15 : 90,
     inventory: { items: {}, capacity: capacityFor(kind) },
+    recipe: null,
     behavior_ref: defaultBehaviorFor(kind),
     tags: kind === "turret" ? ["frontline"] : [],
     active: isProgrammable(kind),

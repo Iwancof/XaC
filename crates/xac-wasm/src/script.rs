@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
-use xac_core::{BlockKind, Direction};
+use xac_core::{BlockKind, Direction, ItemKind};
 
 pub(crate) fn is_wat_source(source: &str) -> bool {
     source
@@ -111,14 +111,14 @@ enum Condition {
     NetEq { key: i32, value: i32 },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum ScriptAction {
     Return,
     Noop,
     Mine,
     PushAny,
     PushDir(Direction),
-    SetRecipe { ammo: bool },
+    SetRecipe { recipe: ItemKind },
     Produce,
     AttackNearest,
     AttackBest { lowest_hp: bool },
@@ -220,7 +220,7 @@ fn parse_script_action(
             ensure_kind(kind, BlockKind::Assembler, line_no, "set_recipe")?;
             imports.insert(HostImport::AssemblerSetRecipe);
             Ok(ScriptAction::SetRecipe {
-                ammo: parse_recipe(line_no, recipe)?,
+                recipe: parse_recipe(line_no, recipe)?,
             })
         }
         ["produce"] => {
@@ -307,10 +307,10 @@ fn parse_direction(line_no: usize, dir: &str) -> Result<Direction> {
     }
 }
 
-fn parse_recipe(line_no: usize, recipe: &str) -> Result<bool> {
+fn parse_recipe(line_no: usize, recipe: &str) -> Result<ItemKind> {
     match recipe {
-        "ammo" => Ok(true),
-        "plate" => Ok(false),
+        "ammo" => Ok(ItemKind::Ammo),
+        "plate" => Ok(ItemKind::Plate),
         _ => Err(anyhow!("line {line_no}: unknown recipe {recipe}")),
     }
 }
@@ -331,11 +331,11 @@ fn parse_i32(line_no: usize, label: &str, value: &str) -> Result<i32> {
 
 fn render_statement(statement: &ScriptStatement, out: &mut Vec<String>) {
     match statement {
-        ScriptStatement::Action(action) => render_action(*action, "    ", out),
+        ScriptStatement::Action(action) => render_action(action.clone(), "    ", out),
         ScriptStatement::If { condition, action } => {
             out.push(format!("    (if {}", render_condition(*condition)));
             out.push("      (then".to_string());
-            render_action(*action, "        ", out);
+            render_action(action.clone(), "        ", out);
             out.push("      ))".to_string());
         }
     }
@@ -371,9 +371,9 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
             "{indent}(drop (call $push_dir (i32.const {})))",
             direction_code(dir)
         )),
-        ScriptAction::SetRecipe { ammo } => out.push(format!(
+        ScriptAction::SetRecipe { recipe } => out.push(format!(
             "{indent}(drop (call $set_recipe (i32.const {})))",
-            if ammo { 1 } else { 0 }
+            recipe_code(&recipe)
         )),
         ScriptAction::Produce => out.push(format!("{indent}(drop (call $produce))")),
         ScriptAction::AttackNearest => out.push(format!("{indent}(drop (call $attack_nearest))")),
@@ -394,5 +394,13 @@ fn direction_code(dir: Direction) -> i32 {
         Direction::East => 1,
         Direction::South => 2,
         Direction::West => 3,
+    }
+}
+
+fn recipe_code(recipe: &ItemKind) -> i32 {
+    match recipe {
+        ItemKind::Plate => 0,
+        ItemKind::Ammo => 1,
+        _ => 0,
     }
 }

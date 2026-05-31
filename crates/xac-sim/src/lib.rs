@@ -17,6 +17,7 @@ mod drone;
 mod geometry;
 mod network;
 mod production;
+mod recipes;
 
 use behavior::{builtin_behaviors, BehaviorPackage};
 use block_defs::{build_tiles, default_behavior_for, kind_name, make_block};
@@ -473,6 +474,10 @@ impl Simulation {
         BehaviorHostInput {
             output_blocked: self.output_blocked(block_id),
             can_produce: self.can_produce(block_id),
+            assembler_can_produce: [
+                self.can_progress_recipe(block_id, ItemKind::Plate.as_str()),
+                self.can_progress_recipe(block_id, ItemKind::Ammo.as_str()),
+            ],
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
             router_output_available: Direction::all()
                 .map(|dir| self.output_available(block_id, dir)),
@@ -588,13 +593,11 @@ impl Simulation {
                     }
                 }
             }
-            BehaviorIntent::Assembler { prefer_ammo } => {
+            BehaviorIntent::Assembler { recipe } => {
+                let recipe_id = recipe.as_str().to_string();
                 if let Some(block) = self.blocks.get_mut(block_id) {
-                    block.status = if prefer_ammo {
-                        "recipe: ammo priority".to_string()
-                    } else {
-                        "recipe: plate priority".to_string()
-                    };
+                    block.recipe = Some(recipe_id.clone());
+                    block.status = format!("recipe: {recipe_id} priority");
                 }
                 self.run_assembler(block_id);
             }
@@ -933,9 +936,32 @@ mod tests {
         sim.step_ticks(40);
 
         let assembler = &sim.blocks[&assembler_id];
+        assert_eq!(assembler.recipe.as_deref(), Some("ammo"));
         assert!(
             assembler.inventory.count(&ItemKind::Ammo) > 0,
             "assembler builtin should call set_recipe/can_produce/produce through Wasm host imports"
+        );
+    }
+
+    #[test]
+    fn assembler_recipe_goal_builds_missing_intermediate_from_assets() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
+            .unwrap();
+        let assembler_id = sim.selected_id.clone().unwrap();
+        sim.blocks
+            .get_mut(&assembler_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ore, 2);
+
+        sim.step_ticks(80);
+
+        let assembler = &sim.blocks[&assembler_id];
+        assert_eq!(assembler.recipe.as_deref(), Some("ammo"));
+        assert!(
+            assembler.inventory.count(&ItemKind::Ammo) > 0,
+            "ammo goal should use assets/recipes.toml to make missing plate before ammo"
         );
     }
 

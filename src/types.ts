@@ -41,6 +41,7 @@ export interface Block {
   dir: Direction;
   hp: number;
   inventory: Inventory;
+  recipe: string | null;
   behavior_ref: string | null;
   tags: string[];
   active: boolean;

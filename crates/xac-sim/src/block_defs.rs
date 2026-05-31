@@ -39,6 +39,7 @@ pub fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Bl
         dir,
         hp: block_hp(kind),
         inventory: Inventory::with_capacity(inventory_capacity(kind)),
+        recipe: None,
         behavior_ref: None,
         tags: Vec::new(),
         active: kind.is_programmable(),

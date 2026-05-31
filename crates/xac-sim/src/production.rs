@@ -1,6 +1,9 @@
 use xac_core::{BlockKind, Direction, ItemKind, TerrainKind};
 
 use crate::block_defs::{can_accept_item, cpu_scaled_threshold};
+use crate::recipes::{
+    apply_recipe, can_progress_any_recipe, can_progress_recipe, next_recipe_for_goal,
+};
 use crate::Simulation;
 
 impl Simulation {
@@ -46,31 +49,36 @@ impl Simulation {
     }
 
     pub(crate) fn run_assembler(&mut self, block_id: &str) {
-        let prefer_ammo = self
-            .blocks
-            .get(block_id)
-            .map(|b| b.status.contains("ammo"))
-            .unwrap_or(true);
+        let recipe = {
+            let Some(block) = self.blocks.get(block_id) else {
+                return;
+            };
+            if block.kind != BlockKind::Assembler {
+                return;
+            }
+            next_recipe_for_goal(block, block.recipe.as_deref()).cloned()
+        };
+
+        let Some(recipe) = recipe else {
+            if let Some(block) = self.blocks.get_mut(block_id) {
+                block.progress = 0;
+                let goal = block.recipe.as_deref().unwrap_or("any");
+                block.status = format!("waiting for {goal} inputs");
+            }
+            return;
+        };
+
         let Some(block) = self.blocks.get_mut(block_id) else {
             return;
         };
         block.progress += 1;
-        let threshold = cpu_scaled_threshold(block.effective_cpu_rate, 40);
+        let threshold = cpu_scaled_threshold(block.effective_cpu_rate, recipe.time_ticks);
         if block.progress < threshold {
             return;
         }
         block.progress = 0;
-        if prefer_ammo
-            && block.inventory.count(&ItemKind::Plate) >= 1
-            && block.inventory.has_space(2)
-        {
-            block.inventory.remove(&ItemKind::Plate, 1);
-            block.inventory.add(ItemKind::Ammo, 2);
-            block.status = "produced ammo".to_string();
-        } else if block.inventory.count(&ItemKind::Ore) >= 2 && block.inventory.has_space(1) {
-            block.inventory.remove(&ItemKind::Ore, 2);
-            block.inventory.add(ItemKind::Plate, 1);
-            block.status = "produced plate".to_string();
+        if apply_recipe(block, &recipe) {
+            block.status = format!("produced {}", recipe.id);
         }
     }
 
@@ -98,11 +106,17 @@ impl Simulation {
         if block.kind != BlockKind::Assembler {
             return false;
         }
-        let can_make_ammo =
-            block.inventory.count(&ItemKind::Plate) >= 1 && block.inventory.has_space(2);
-        let can_make_plate =
-            block.inventory.count(&ItemKind::Ore) >= 2 && block.inventory.has_space(1);
-        can_make_ammo || can_make_plate
+        can_progress_any_recipe(block)
+    }
+
+    pub(crate) fn can_progress_recipe(&self, block_id: &str, recipe_id: &str) -> bool {
+        let Some(block) = self.blocks.get(block_id) else {
+            return false;
+        };
+        if block.kind != BlockKind::Assembler {
+            return false;
+        }
+        can_progress_recipe(block, recipe_id)
     }
 
     pub(crate) fn transfer_from(&mut self, block_id: &str, dir: Direction, amount: u32) -> bool {
