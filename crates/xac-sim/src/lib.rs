@@ -15,6 +15,7 @@ mod block_defs;
 mod combat;
 mod drone;
 mod geometry;
+mod logistics;
 mod network;
 mod production;
 mod recipes;
@@ -818,6 +819,52 @@ mod tests {
             sim.networks[&network_id].store.get("7"),
             Some(&serde_json::Value::from(42))
         );
+    }
+
+    #[test]
+    fn router_output_available_script_waits_for_free_destination() {
+        let mut sim = Simulation::new("/tmp/xac-test").unwrap();
+        sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let router_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &router_id, "if output_available east push east");
+        sim.place_block(BlockKind::Conveyor, Pos { x: 35, y: 30 }, Direction::East)
+            .unwrap();
+        let conveyor_id = sim.selected_id.clone().unwrap();
+
+        sim.blocks
+            .get_mut(&router_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ore, 1);
+        sim.blocks
+            .get_mut(&conveyor_id)
+            .unwrap()
+            .inventory
+            .add(ItemKind::Ore, 1);
+
+        sim.step_ticks(1);
+
+        assert_eq!(
+            sim.blocks[&router_id].inventory.count(&ItemKind::Ore),
+            1,
+            "router script should not push when output_available east is false"
+        );
+        assert_eq!(sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore), 1);
+
+        sim.blocks
+            .get_mut(&conveyor_id)
+            .unwrap()
+            .inventory
+            .remove(&ItemKind::Ore, 1);
+        sim.step_ticks(1);
+
+        assert_eq!(
+            sim.blocks[&router_id].inventory.count(&ItemKind::Ore),
+            0,
+            "router script should push as soon as the east destination has space"
+        );
+        assert_eq!(sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore), 1);
     }
 
     #[test]
