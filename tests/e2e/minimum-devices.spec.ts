@@ -416,6 +416,16 @@ mine
   await expect(page.locator(".behavior-meta")).toContainText("Ammo East Router Copy");
   await expect(page.locator(".behavior-meta")).toContainText("project behavior");
 
+  const invalidRouterSource = "push sideways\n";
+  await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), invalidRouterSource);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /push sideways/);
+  await expect(saveButton).toBeEnabled();
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await buildButton.click();
+  await expect(page.locator(".build-fail")).toContainText("mock build failed: unsupported router line 1");
+  await expect(page.locator(".behavior-meta")).toContainText("status build failed");
+
   const routerSource = "if output_available ammo south push ammo south\n";
   await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), routerSource);
   await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /push ammo south/);
@@ -452,13 +462,15 @@ if can_produce produce
     return (
       (call.cmd === "assign_behavior" && call.args.blockId === "router_1") ||
       (call.cmd === "edit_builtin_copy" && ["router_1", "assembler_1"].includes(String(call.args.blockId))) ||
-      (call.cmd === "save_behavior" && [routerSource, assemblerSource].includes(String(call.args.source))) ||
+      (call.cmd === "save_behavior" && [invalidRouterSource, routerSource, assemblerSource].includes(String(call.args.source))) ||
       (call.cmd === "build_behavior" && ["behavior_3", "behavior_4"].includes(String(call.args.behaviorId)))
     );
   });
   expect(scriptEditCalls).toEqual([
     { cmd: "assign_behavior", args: { blockId: "router_1", behaviorId: "builtin.router.ammo_east" } },
     { cmd: "edit_builtin_copy", args: { blockId: "router_1" } },
+    { cmd: "save_behavior", args: { behaviorId: "behavior_3", source: invalidRouterSource } },
+    { cmd: "build_behavior", args: { behaviorId: "behavior_3" } },
     { cmd: "save_behavior", args: { behaviorId: "behavior_3", source: routerSource } },
     { cmd: "build_behavior", args: { behaviorId: "behavior_3" } },
     { cmd: "edit_builtin_copy", args: { blockId: "assembler_1" } },
