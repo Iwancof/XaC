@@ -13,7 +13,8 @@ interface GridWorldProps {
   direction: Direction;
   overlay: Overlay;
   onTileClick: (pos: Pos) => void;
-  onTilesPaint: (positions: Pos[]) => void;
+  onTilesPaint: (positions: Pos[], direction: Direction) => void;
+  onPaintDirectionChange: (direction: Direction) => void;
   onEntityClick: (id: string | null) => void;
 }
 
@@ -39,24 +40,34 @@ export function GridWorld({
   overlay,
   onTileClick,
   onTilesPaint,
+  onPaintDirectionChange,
   onEntityClick
 }: GridWorldProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const appRef = useRef<Application | null>(null);
   const stageRef = useRef<Container | null>(null);
   const snapshotRef = useRef<GameSnapshot | null>(null);
+  const snapshotFrameBaseMsRef = useRef(0);
+  const selectedIdRef = useRef<string | null>(selectedId);
   const buildKindRef = useRef<BlockKind | null>(buildKind);
+  const directionRef = useRef<Direction>(direction);
+  const overlayRef = useRef<Overlay>(overlay);
   const onTileClickRef = useRef(onTileClick);
   const onTilesPaintRef = useRef(onTilesPaint);
+  const onPaintDirectionChangeRef = useRef(onPaintDirectionChange);
   const onEntityClickRef = useRef(onEntityClick);
   const paintRef = useRef<PaintState | null>(null);
 
   useEffect(() => {
+    selectedIdRef.current = selectedId;
     buildKindRef.current = buildKind;
+    directionRef.current = direction;
+    overlayRef.current = overlay;
     onTileClickRef.current = onTileClick;
     onTilesPaintRef.current = onTilesPaint;
+    onPaintDirectionChangeRef.current = onPaintDirectionChange;
     onEntityClickRef.current = onEntityClick;
-  }, [buildKind, onTileClick, onTilesPaint, onEntityClick]);
+  }, [selectedId, buildKind, direction, overlay, onTileClick, onTilesPaint, onPaintDirectionChange, onEntityClick]);
 
   useEffect(() => {
     let disposed = false;
@@ -120,22 +131,27 @@ export function GridWorld({
           if (!paint || !current || !buildKindRef.current) return;
           const pos = tileFromWorld(pointerWorld(event));
           if (!inSnapshotBounds(current, pos)) return;
-          addPaintTiles(paint, pos);
+          const nextDirection = addPaintTiles(paint, pos);
+          if (nextDirection && nextDirection !== directionRef.current) {
+            directionRef.current = nextDirection;
+            onPaintDirectionChangeRef.current(nextDirection);
+          }
         });
         const finishPaint = () => {
           const paint = paintRef.current;
           paintRef.current = null;
           if (!paint || !buildKindRef.current) return;
+          const paintDirection = paint.direction ?? directionRef.current;
           if (paint.positions.length === 1) {
             onTileClickRef.current(paint.positions[0]);
           } else {
-            onTilesPaintRef.current(paint.positions);
+            onTilesPaintRef.current(paint.positions, paintDirection);
           }
         };
         app.stage.on("pointerup", finishPaint);
         app.stage.on("pointerupoutside", finishPaint);
         app.stage.on("pointercancel", finishPaint);
-        renderWorld(stage, snapshotRef.current, selectedId, buildKind, direction, overlay);
+        renderWorld(stage, snapshotRef.current, selectedId, buildKind, direction, overlay, performance.now());
       });
 
     return () => {
@@ -149,18 +165,48 @@ export function GridWorld({
 
   useEffect(() => {
     snapshotRef.current = snapshot;
+    snapshotFrameBaseMsRef.current = performance.now();
     if (stageRef.current) {
-      renderWorld(stageRef.current, snapshot, selectedId, buildKind, direction, overlay);
+      renderWorld(stageRef.current, snapshot, selectedId, buildKind, direction, overlay, performance.now());
     }
   }, [snapshot, selectedId, buildKind, direction, overlay]);
 
+  useEffect(() => {
+    let frame = 0;
+    const animate = (now: number) => {
+      if (
+        stageRef.current &&
+        snapshotRef.current &&
+        hasAnimatedItemFlows(snapshotRef.current, now - snapshotFrameBaseMsRef.current)
+      ) {
+        renderWorld(
+          stageRef.current,
+          snapshotRef.current,
+          selectedIdRef.current,
+          buildKindRef.current,
+          directionRef.current,
+          overlayRef.current,
+          now
+        );
+      }
+      frame = window.requestAnimationFrame(animate);
+    };
+    frame = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
   return <div ref={hostRef} className="grid-world" data-testid="grid-world" />;
+}
+
+function hasAnimatedItemFlows(snapshot: GameSnapshot, snapshotAgeMs: number) {
+  return snapshotAgeMs < 2400 && snapshot.item_flows.some((flow) => snapshot.tick - flow.tick <= 48);
 }
 
 interface PaintState {
   positions: Pos[];
   seen: Set<string>;
   last: Pos;
+  direction: Direction | null;
 }
 
 function pointerWorld(event: { global: { x: number; y: number } }) {
@@ -182,11 +228,13 @@ function makePaintState(pos: Pos): PaintState {
   return {
     positions: [pos],
     seen: new Set([posKey(pos)]),
-    last: pos
+    last: pos,
+    direction: null
   };
 }
 
 function addPaintTiles(paint: PaintState, pos: Pos) {
+  const nextDirection = directionFromDelta(pos.x - paint.last.x, pos.y - paint.last.y);
   for (const tile of tileLine(paint.last, pos)) {
     const key = posKey(tile);
     if (!paint.seen.has(key)) {
@@ -195,6 +243,16 @@ function addPaintTiles(paint: PaintState, pos: Pos) {
     }
   }
   paint.last = pos;
+  if (nextDirection) paint.direction = nextDirection;
+  return nextDirection;
+}
+
+function directionFromDelta(dx: number, dy: number): Direction | null {
+  if (dx === 0 && dy === 0) return null;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx >= 0 ? "east" : "west";
+  }
+  return dy >= 0 ? "south" : "north";
 }
 
 function tileLine(from: Pos, to: Pos) {
@@ -220,7 +278,8 @@ function renderWorld(
   selectedId: string | null,
   buildKind: BlockKind | null,
   direction: Direction,
-  overlay: Overlay
+  overlay: Overlay,
+  renderTimeMs: number
 ) {
   stage.removeChildren();
   if (!snapshot) return;
@@ -229,7 +288,7 @@ function renderWorld(
   drawTiles(graphics, snapshot);
   drawOverlays(graphics, snapshot, overlay);
   drawBlocks(graphics, snapshot.blocks, selectedId);
-  drawItemFlows(graphics, snapshot);
+  drawItemFlows(graphics, snapshot, renderTimeMs);
   drawEnemies(graphics, snapshot.enemies, selectedId);
   drawDrones(graphics, snapshot, selectedId);
   stage.addChild(graphics);
@@ -386,17 +445,27 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
   }
 }
 
-function drawItemFlows(g: Graphics, snapshot: GameSnapshot) {
+function drawItemFlows(g: Graphics, snapshot: GameSnapshot, renderTimeMs: number) {
+  const tickFraction = ((renderTimeMs % 100) / 100) * 2;
   for (const flow of snapshot.item_flows) {
     const age = Math.max(0, snapshot.tick - flow.tick);
-    if (age > 30) continue;
-    const progress = Math.min(1, age / 12);
+    if (age > 48) continue;
+    const progress = Math.min(1, (age + tickFraction) / 14);
     const x = lerp(flow.from.x, flow.to.x, progress) * TILE;
     const y = lerp(flow.from.y, flow.to.y, progress) * TILE;
-    const alpha = 0.9 - progress * 0.45;
-    const radius = Math.min(5, 2.5 + flow.amount * 0.35);
-    g.circle(x, y, radius).fill({ color: itemColor(flow.item), alpha });
-    g.circle(x, y, radius + 1).stroke({ width: 1, color: 0x0e1214, alpha: 0.55 });
+    const color = itemColor(flow.item);
+    const alpha = Math.max(0, 0.95 - progress * 0.4 - Math.max(0, age - 18) * 0.035);
+    const radius = Math.min(6, 3.25 + flow.amount * 0.45);
+    g.moveTo(flow.from.x * TILE, flow.from.y * TILE);
+    g.lineTo(flow.to.x * TILE, flow.to.y * TILE);
+    g.stroke({ width: 2, color, alpha: alpha * 0.22 });
+    g.circle(x, y, radius + 4).fill({ color, alpha: alpha * 0.16 });
+    g.circle(x, y, radius).fill({ color, alpha });
+    g.circle(x, y, radius + 1.5).stroke({ width: 1.5, color: 0x0e1214, alpha: 0.75 });
+    const trail = Math.max(0, progress - 0.16);
+    const tx = lerp(flow.from.x, flow.to.x, trail) * TILE;
+    const ty = lerp(flow.from.y, flow.to.y, trail) * TILE;
+    g.circle(tx, ty, Math.max(1.5, radius * 0.45)).fill({ color, alpha: alpha * 0.55 });
   }
 }
 

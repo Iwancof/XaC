@@ -1,13 +1,20 @@
 use xac_core::EnemyKind;
 
+pub(crate) const ENEMY_WAVES_ENABLED: bool = false;
 pub(crate) const WAVE_PERIOD_TICKS: u64 = 80;
 pub(crate) const FIRST_WAVE_TICK: u64 = 20;
 
 pub(crate) fn current_wave(tick: u64) -> u32 {
+    if !ENEMY_WAVES_ENABLED {
+        return 0;
+    }
     (tick / WAVE_PERIOD_TICKS) as u32 + 1
 }
 
 pub(crate) fn next_wave_in(tick: u64) -> u32 {
+    if !ENEMY_WAVES_ENABLED {
+        return 0;
+    }
     let phase = tick % WAVE_PERIOD_TICKS;
     if phase < FIRST_WAVE_TICK {
         (FIRST_WAVE_TICK - phase) as u32
@@ -17,7 +24,7 @@ pub(crate) fn next_wave_in(tick: u64) -> u32 {
 }
 
 pub(crate) fn should_spawn_wave(tick: u64) -> bool {
-    tick >= FIRST_WAVE_TICK && tick % WAVE_PERIOD_TICKS == FIRST_WAVE_TICK
+    ENEMY_WAVES_ENABLED && tick >= FIRST_WAVE_TICK && tick % WAVE_PERIOD_TICKS == FIRST_WAVE_TICK
 }
 
 pub(crate) fn wave_enemies(wave: u32) -> Vec<EnemyKind> {

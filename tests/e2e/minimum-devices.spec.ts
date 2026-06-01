@@ -1,8 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { dragTiles, tileCenter, type IpcCall } from "./support/xacHarness";
 
-test("places minimum devices from the right block list and opens drill behavior @smoke @placement", async ({ page }) => {
-  test.setTimeout(90_000);
+test("places minimum devices from the right block list and opens drill behavior @full @placement", async ({ page }) => {
+  test.setTimeout(120_000);
 
   await page.goto("/");
 
@@ -32,13 +32,13 @@ test("places minimum devices from the right block list and opens drill behavior 
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
   await expect(page.locator(".metrics")).toContainText("blocks 1");
-  await expect(page.locator(".metrics")).toContainText("wave 1");
+  await expect(page.locator(".metrics")).toContainText("wave 0");
   await expect(page.locator(".metrics")).toContainText("net CPU 120");
   await expect(page.locator(".metrics")).toContainText("core HP 500/500");
   await expect(page.locator(".metrics")).toContainText("core ore 40");
   await expect(page.locator(".metrics")).toContainText("core plate 20");
   await expect(page.locator(".metrics")).toContainText("core ammo 60");
-  await expect(page.locator(".metrics")).toContainText("enemies 1");
+  await expect(page.locator(".metrics")).toContainText("enemies 0");
   await expect(page.getByTestId("overlay-details")).toContainText("Network");
   await expect(page.getByTestId("overlay-details")).toContainText("net 1");
   await expect(page.getByTestId("overlay-details")).toContainText("CPU 120");
@@ -46,23 +46,8 @@ test("places minimum devices from the right block list and opens drill behavior 
   await expect(page.getByTestId("tutorial-progress")).toContainText("0/7");
   await expect(page.getByTestId("tutorial-mining-loop")).toHaveAttribute("data-state", "pending");
   await expect(page.locator(".inspector")).toContainText("core");
-  await canvas.click({ position: tileCenter(28, 28) });
-  await expect(page.locator(".inspector")).toContainText("runner");
-  await expect(page.locator(".inspector")).toContainText("28.50, 28.50");
-  await expect(page.locator(".inspector")).toContainText("core_1");
   await page.getByRole("button", { name: /Tick/ }).click();
-  await expect(page.locator(".inspector")).toContainText("28.60, 28.60");
-  const movedEnemy = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().enemies[0]);
-  expect(movedEnemy).toEqual(
-    expect.objectContaining({
-      id: "enemy_1",
-      target_id: "core_1",
-      pos: expect.objectContaining({
-        x: expect.closeTo(28.6, 0.02),
-        y: expect.closeTo(28.6, 0.02)
-      })
-    })
-  );
+  await expect(page.locator(".metrics")).toContainText("enemies 0");
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
 
@@ -176,11 +161,10 @@ test("places minimum devices from the right block list and opens drill behavior 
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
   await expect(page.locator(".inspector")).toContainText("Ore: 41");
-  await expect(page.locator(".inspector")).toContainText("under attack by enemy_1");
   const defendedCore = await page.evaluate(() =>
     window.__XAC_TEST_STATE__?.snapshot().blocks.find((block) => block.id === "core_1")
   );
-  expect(defendedCore?.hp).toBeLessThan(500);
+  expect(defendedCore?.hp).toBe(500);
 
   await canvas.click({ position: tileCenter(20, 30) });
   await expect(page.locator(".inspector")).toContainText("drill");
@@ -547,7 +531,7 @@ test("UI mock runs code-driven assembler ammo into turret defense @production @c
   await expect(page.getByTestId("tutorial-ammo-production")).toHaveAttribute("data-state", "complete");
 
   const enemyId = await page.evaluate(() => window.__XAC_TEST_STATE__!.spawnEnemy("grunt", { x: 37.5, y: 30.5 }));
-  expect(enemyId).toBe("enemy_2");
+  expect(enemyId).toBe("enemy_1");
   for (let i = 0; i < 5; i += 1) {
     await page.getByRole("button", { name: /\+40/ }).click();
   }
@@ -555,12 +539,12 @@ test("UI mock runs code-driven assembler ammo into turret defense @production @c
   const defended = await page.evaluate(() => {
     const snapshot = window.__XAC_TEST_STATE__!.snapshot();
     return {
-      enemy: snapshot.enemies.find((enemy) => enemy.id === "enemy_2"),
+      enemy: snapshot.enemies.find((enemy) => enemy.id === "enemy_1"),
       turret: snapshot.blocks.find((block) => block.id === "turret_1")
     };
   });
   expect(defended.enemy?.hp ?? 0).toBeLessThan(30);
-  expect(defended.turret?.target_id).toBe("enemy_2");
+  expect(defended.turret?.target_id).toBe("enemy_1");
   await expect(page.getByTestId("tutorial-defense")).toHaveAttribute("data-state", "complete");
 });
 
@@ -580,6 +564,8 @@ test("drag placement paints wire and conveyor mining lines @smoke @placement", a
   await canvas.click({ position: tileCenter(20, 30) });
 
   await page.getByRole("button", { name: /\+40/ }).click();
+  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await dragTiles(page, canvas, tileCenter(18, 30), tileCenter(18, 33));
 
   const dragged = await page.evaluate(() => {
     const snapshot = window.__XAC_TEST_STATE__!.snapshot();
@@ -587,13 +573,17 @@ test("drag placement paints wire and conveyor mining lines @smoke @placement", a
       drill: snapshot.blocks.find((block) => block.id === "drill_1"),
       wireCount: snapshot.blocks.filter((block) => block.kind === "wire").length,
       conveyorCount: snapshot.blocks.filter((block) => block.kind === "conveyor").length,
+      southConveyors: snapshot.blocks
+        .filter((block) => block.kind === "conveyor" && block.pos.x === 18)
+        .map((block) => block.dir),
       coreOre: snapshot.blocks.find((block) => block.id === "core_1")?.inventory.items.ore ?? 0,
       placeBlocksCalls: window.__XAC_TEST_STATE__!.calls.filter((call) => call.cmd === "place_blocks")
     };
   });
 
   expect(dragged.wireCount).toBe(11);
-  expect(dragged.conveyorCount).toBe(9);
+  expect(dragged.conveyorCount).toBe(13);
+  expect(dragged.southConveyors).toEqual(["south", "south", "south", "south"]);
   expect(dragged.drill).toEqual(expect.objectContaining({ network_id: 1, effective_cpu_rate: 201 }));
   expect(dragged.coreOre).toBeGreaterThan(40);
   expect(dragged.placeBlocksCalls).toEqual([
@@ -611,6 +601,14 @@ test("drag placement paints wire and conveyor mining lines @smoke @placement", a
         kind: "conveyor",
         positions: expect.arrayContaining([expect.objectContaining({ x: 21, y: 30 }), expect.objectContaining({ x: 29, y: 30 })]),
         dir: "east"
+      }
+    },
+    {
+      cmd: "place_blocks",
+      args: {
+        kind: "conveyor",
+        positions: expect.arrayContaining([expect.objectContaining({ x: 18, y: 30 }), expect.objectContaining({ x: 18, y: 33 })]),
+        dir: "south"
       }
     }
   ]);
@@ -710,7 +708,7 @@ test("wire cutter can sever a CPU network in the UI simulation @network", async 
   expect(connectedDrill).toEqual(expect.objectContaining({ network_id: 1, effective_cpu_rate: 201 }));
 
   const cutterId = await page.evaluate(() => window.__XAC_TEST_STATE__!.spawnEnemy("wire_cutter", { x: 20.5, y: 29.5 }));
-  expect(cutterId).toBe("enemy_2");
+  expect(cutterId).toBe("enemy_1");
   const threatStatus = await page.evaluate(() => window.__XAC_TEST_STATE__!.snapshot().status);
   expect(threatStatus.wire_threats).toBe(1);
   await expect(page.getByTestId("tutorial-cpu-network")).toHaveAttribute("data-state", "complete");

@@ -156,11 +156,11 @@ fn core_defeat_stops_simulation() {
 }
 
 #[test]
-fn wave_schedule_spawns_mixed_enemy_roles() {
-    assert_eq!(wave::current_wave(0), 1);
-    assert_eq!(wave::next_wave_in(0), 20);
+fn enemy_waves_are_disabled_for_factory_mode_but_schedule_is_preserved() {
+    assert_eq!(wave::current_wave(0), 0);
+    assert_eq!(wave::next_wave_in(0), 0);
     assert!(!wave::should_spawn_wave(19));
-    assert!(wave::should_spawn_wave(20));
+    assert!(!wave::should_spawn_wave(20));
     assert_eq!(wave::wave_enemies(1), vec![EnemyKind::Grunt]);
     assert_eq!(
         wave::wave_enemies(4),
@@ -174,23 +174,14 @@ fn wave_schedule_spawns_mixed_enemy_roles() {
     );
 
     let mut sim = test_sim("sim");
-    sim.step_ticks(20);
-    assert_eq!(sim.enemies.len(), 1);
-    assert_eq!(sim.enemies.values().next().unwrap().kind, EnemyKind::Grunt);
-
-    sim.step_ticks(80);
-    let runner_count = sim
-        .enemies
-        .values()
-        .filter(|enemy| enemy.kind == EnemyKind::Runner)
-        .count();
-    assert_eq!(runner_count, 1);
+    sim.step_ticks(200);
+    assert_eq!(sim.enemies.len(), 0);
     assert_eq!(
         sim.logs
             .iter()
             .filter(|entry| entry.source == "wave" && entry.message.contains("contact"))
             .count(),
-        2
+        0
     );
 }
 
@@ -763,6 +754,14 @@ fn edited_drill_behavior_mines_and_belts_ore_to_four_by_four_core() {
         .unwrap();
     let build = sim.build_behavior(&behavior_id).unwrap();
     assert!(build.success);
+    assert!(
+        build.wasm_hash.is_some(),
+        "building the edited Ore Drill behavior should produce cached Wasm"
+    );
+    assert!(
+        sim.compiled_behaviors.contains_key(&behavior_id),
+        "the compiled Ore Drill Wasm should be hot-loaded into the simulation"
+    );
     assert_eq!(
         sim.open_behavior(&behavior_id).unwrap().source,
         player_source
@@ -789,6 +788,15 @@ fn edited_drill_behavior_mines_and_belts_ore_to_four_by_four_core() {
             .any(|entry| { entry.source == drill_id && entry.message == "player drill online" }),
         "the player-edited drill code should actually execute through the Wasm host log API"
     );
+    let runtime = sim.blocks[&drill_id]
+        .behavior_runtime
+        .as_ref()
+        .expect("the edited Ore Drill Wasm should record runtime fuel stats");
+    assert!(runtime.run_count > 0);
+    assert!(runtime.fuel_spent > 0);
+    assert_eq!(runtime.runtime_error, None);
+    assert!(!runtime.over_budget);
+    assert_eq!(runtime.wasm_hash, build.wasm_hash);
     assert!(
         sim.blocks[&core_id].inventory.count(&ItemKind::Ore) > starting_core_ore,
         "ore mined by the edited drill behavior should ride conveyors into the 4x4 core"

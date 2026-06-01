@@ -92,9 +92,10 @@ function buildTutorialSteps(snapshot: GameSnapshot): TutorialStep[] {
     },
     {
       id: "defense",
-      label: "Hold a wave",
-      detail: "Turret spends ammo",
+      label: "Run compiled code",
+      detail: "Wasm behavior spends fuel",
       complete:
+        blocks.some((block) => (block.behavior_runtime?.run_count ?? 0) > 0) ||
         blocks.some((block) => block.kind === "turret" && block.target_id) ||
         snapshot.logs.some((entry) => entry.source.startsWith("turret_") && entry.message.startsWith("attacking"))
     },
@@ -111,9 +112,11 @@ function buildTutorialSteps(snapshot: GameSnapshot): TutorialStep[] {
     },
     {
       id: "wire-cutter",
-      label: "Repair the split",
-      detail: "Wire cutter event",
-      complete: snapshot.logs.some((entry) => entry.source.startsWith("wire_") && entry.message.includes("destroyed"))
+      label: "Watch item flow",
+      detail: "Animated belt transfer",
+      complete:
+        snapshot.item_flows.length > 0 ||
+        snapshot.logs.some((entry) => entry.source.startsWith("wire_") && entry.message.includes("destroyed"))
     }
   ];
 }

@@ -170,11 +170,10 @@ function snapshot(): GameSnapshot {
 }
 
 function gameStatus(blocks: Block[], networks: Network[], enemies: Enemy[]) {
-  const wavePhase = state.tick % 80;
   const coreHp = currentCoreHp(blocks);
   return {
-    wave: Math.floor(state.tick / 80) + 1,
-    next_wave_in: wavePhase < 20 ? 20 - wavePhase : 100 - wavePhase,
+    wave: 0,
+    next_wave_in: 0,
     core_hp: coreHp,
     core_max_hp: blockMaxHp("core"),
     defeated: coreHp <= 0,
@@ -270,7 +269,9 @@ function runTicks(count: number) {
       }
     }
     runMockDrones(droneContext());
-    runEnemies(combatContext());
+    if (state.enemies.length > 0) {
+      runEnemies(combatContext());
+    }
     const combatCleanup = cleanupDestroyed(combatContext());
     state.blocks = combatCleanup.blocks;
     state.enemies = combatCleanup.enemies;

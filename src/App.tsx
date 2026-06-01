@@ -161,13 +161,14 @@ export function App() {
     runCommand(() => placeBlock(buildKind, pos.x, pos.y, direction));
   };
 
-  const handleTilesPaint = (positions: Pos[]) => {
+  const handleTilesPaint = (positions: Pos[], paintDirection: Direction) => {
     if (!buildKind || positions.length === 0) return;
+    setDirection(paintDirection);
     if (positions.length === 1) {
-      runCommand(() => placeBlock(buildKind, positions[0].x, positions[0].y, direction));
+      runCommand(() => placeBlock(buildKind, positions[0].x, positions[0].y, paintDirection));
       return;
     }
-    runCommand(() => placeBlocks(buildKind, positions, direction));
+    runCommand(() => placeBlocks(buildKind, positions, paintDirection));
   };
 
   const handleEntityClick = (id: string | null) => {
@@ -359,6 +360,7 @@ export function App() {
             overlay={overlay}
             onTileClick={handleTileClick}
             onTilesPaint={handleTilesPaint}
+            onPaintDirectionChange={setDirection}
             onEntityClick={handleEntityClick}
           />
         </div>

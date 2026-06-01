@@ -8,7 +8,6 @@ import {
 } from "../gameMetadata";
 import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
-import { enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
 import type {
   BehaviorRuntimeStats,
   BehaviorSource,
@@ -68,18 +67,7 @@ export function createInitialMockState(): MockState {
     tick: 0,
     running: false,
     blocks: [core],
-    enemies: [
-      {
-        id: "enemy_1",
-        kind: "runner",
-        pos: { x: 28.5, y: 28.5 },
-        hp: enemyMaxHp("runner"),
-        max_hp: enemyMaxHp("runner"),
-        move_speed: enemyMoveSpeed("runner"),
-        attack_cooldown: 0,
-        target_id: core.id
-      }
-    ],
+    enemies: [],
     drones: [],
     pendingJobs: [],
     itemFlows: [],
@@ -94,8 +82,7 @@ export function createInitialMockState(): MockState {
     selectedId: core.id,
     behaviors: builtinMockBehaviors(),
     idCounters: {
-      core: 1,
-      enemy: 1
+      core: 1
     },
     calls: [],
     saves: {}
