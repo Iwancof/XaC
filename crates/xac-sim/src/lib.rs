@@ -14,6 +14,7 @@ mod block_defs;
 mod combat;
 mod cpu;
 mod drone;
+mod drone_port;
 mod geometry;
 mod logistics;
 mod network;
@@ -384,7 +385,7 @@ impl Simulation {
         self.core_hp() <= 0
     }
 
-    fn make_id(&mut self, prefix: &str) -> String {
+    pub(crate) fn make_id(&mut self, prefix: &str) -> String {
         let id = format!("{prefix}_{}", self.next_id);
         self.next_id += 1;
         id
