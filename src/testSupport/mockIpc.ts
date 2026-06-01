@@ -1,4 +1,17 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
+import {
+  blockDefaultBehaviorId,
+  blockFootprintSize,
+  blockInventoryCapacity,
+  blockLocalCpuRate,
+  blockMaxHp,
+  blockNetworkCpuOutput,
+  canAcceptItem,
+  displayBlockKind,
+  DRILL_MINE_BASE_TICKS,
+  isNetworkNode,
+  isProgrammableBlock
+} from "../gameMetadata";
 import type {
   BehaviorSource,
   BehaviorSummary,
@@ -185,10 +198,10 @@ function gameStatus(blocks: Block[], networks: Network[], enemies: Enemy[]) {
     wave: Math.floor(state.tick / 80) + 1,
     next_wave_in: wavePhase < 20 ? 20 - wavePhase : 100 - wavePhase,
     core_hp: coreHp,
-    core_max_hp: 500,
+    core_max_hp: blockMaxHp("core"),
     defeated: coreHp <= 0,
     wire_threats: enemies.filter((enemy) => enemy.kind === "wire_cutter" && enemy.hp > 0).length,
-    damaged_wires: blocks.filter((block) => block.kind === "wire" && block.hp < 15).length,
+    damaged_wires: blocks.filter((block) => block.kind === "wire" && block.hp < blockMaxHp("wire")).length,
     network_cpu: networks.reduce((total, network) => total + network.cpu_pool, 0)
   };
 }
@@ -209,7 +222,7 @@ function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number
   const block = makeBlock(kind, pos, dir);
   state.blocks.push(block);
   state.selectedId = block.id;
-  log("info", block.id, `placed ${displayKind(kind)} at ${x},${y}`);
+  log("info", block.id, `placed ${displayBlockKind(kind)} at ${x},${y}`);
   return snapshot();
 }
 
@@ -225,7 +238,7 @@ function deconstructBlock(blockId: string) {
   if (state.selectedId === blockId) {
     state.selectedId = null;
   }
-  log("info", blockId, `deconstructed ${displayKind(block.kind)}`);
+  log("info", blockId, `deconstructed ${displayBlockKind(block.kind)}`);
   return snapshot();
 }
 
@@ -236,7 +249,7 @@ function rotateBlock(blockId: string) {
   }
   block.dir = rotateDirection(block.dir);
   block.status = `facing ${block.dir}`;
-  log("info", blockId, `rotated ${displayKind(block.kind)} to ${block.dir}`);
+  log("info", blockId, `rotated ${displayBlockKind(block.kind)} to ${block.dir}`);
   return snapshot();
 }
 
@@ -251,7 +264,7 @@ function runTicks(count: number) {
     for (const block of state.blocks) {
       if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch") continue;
       block.progress += 1;
-      if (block.progress >= 30 && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
+      if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
         block.progress = 0;
         addItem(block.inventory, "ore", 1);
         block.status = "mined ore";
@@ -353,14 +366,14 @@ function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind))
     kind,
     pos,
     dir,
-    hp: kind === "core" ? 500 : kind === "wire" ? 15 : 90,
-    inventory: { items: {}, capacity: capacityFor(kind) },
+    hp: blockMaxHp(kind),
+    inventory: { items: {}, capacity: blockInventoryCapacity(kind) },
     recipe: null,
-    behavior_ref: defaultBehaviorFor(kind),
+    behavior_ref: blockDefaultBehaviorId(kind),
     tags: kind === "turret" ? ["frontline"] : [],
-    active: isProgrammable(kind),
+    active: isProgrammableBlock(kind),
     network_id: isNetworkNode(kind) ? 1 : null,
-    effective_cpu_rate: localCpuRate(kind),
+    effective_cpu_rate: blockLocalCpuRate(kind),
     progress: 0,
     status: "idle"
   };
@@ -380,6 +393,58 @@ function builtinBehaviors(): Record<string, MutableBehavior> {
         build_status: "builtin"
       },
       source: DRILL_SOURCE
+    },
+    "builtin.router.basic": {
+      summary: {
+        id: "builtin.router.basic",
+        display_name: "Basic Router",
+        base_kind: "router",
+        world: "router-behavior",
+        builtin: true,
+        used_by: 0,
+        source_path: "assets/builtin/router/basic.xac",
+        build_status: "builtin"
+      },
+      source: "if output_available east push east\npush\n"
+    },
+    "builtin.assembler.basic": {
+      summary: {
+        id: "builtin.assembler.basic",
+        display_name: "Basic Assembler",
+        base_kind: "assembler",
+        world: "assembler-behavior",
+        builtin: true,
+        used_by: 0,
+        source_path: "assets/builtin/assembler/basic.xac",
+        build_status: "builtin"
+      },
+      source: "set_recipe ammo\nif can_produce produce\n"
+    },
+    "builtin.turret.basic": {
+      summary: {
+        id: "builtin.turret.basic",
+        display_name: "Basic Turret",
+        base_kind: "turret",
+        world: "turret-behavior",
+        builtin: true,
+        used_by: 0,
+        source_path: "assets/builtin/turret/basic.xac",
+        build_status: "builtin"
+      },
+      source: "if ammo_count > 0 attack_nearest\n"
+    },
+    "builtin.drone_port.basic": {
+      summary: {
+        id: "builtin.drone_port.basic",
+        display_name: "Basic Drone Port",
+        base_kind: "drone_port",
+        world: "drone-port-behavior",
+        builtin: true,
+        used_by: 0,
+        source_path: "assets/builtin/drone_port/basic.xac",
+        build_status: "builtin"
+      },
+      source: "if docked_drone_count > 0 charge_docked_drones\nif pending_job_count == 0 create_delivery_job ammo 10 frontline\nif pending_job_count > 0 dispatch_idle_drones\n"
     }
   };
 }
@@ -396,11 +461,11 @@ function recomputeNetworks(blocks: Block[]): Network[] {
   const activeDevices = blocks.filter((block) => block.active).length;
   const cpuPool = blocks
     .filter((block) => isNetworkNode(block.kind))
-    .reduce((sum, block) => sum + networkCpu(block.kind), 0);
+    .reduce((sum, block) => sum + blockNetworkCpuOutput(block.kind), 0);
   const effectivePerDevice = activeDevices ? cpuPool / activeDevices : 0;
   for (const block of blocks) {
     block.network_id = isNetworkNode(block.kind) ? 1 : null;
-    block.effective_cpu_rate = block.active ? localCpuRate(block.kind) + effectivePerDevice : 0;
+    block.effective_cpu_rate = block.active ? blockLocalCpuRate(block.kind) + effectivePerDevice : 0;
   }
   return [
     {
@@ -449,19 +514,12 @@ function transferFrom(block: Block) {
   if (!item) return false;
   const [kind, amount] = item as [ItemKind, number];
   const dst = blockAt(state.blocks, step(block.pos, block.dir));
-  if (!dst || !canAccept(dst.kind, kind) || inventoryTotal(dst.inventory) >= dst.inventory.capacity) return false;
+  if (!dst || !canAcceptItem(dst.kind, kind) || inventoryTotal(dst.inventory) >= dst.inventory.capacity) return false;
   block.inventory.items[kind] = Math.max(0, amount - 1);
   if (block.inventory.items[kind] === 0) delete block.inventory.items[kind];
   addItem(dst.inventory, kind, 1);
   block.status = `sent ${kind}`;
   dst.status = `received ${kind}`;
-  return true;
-}
-
-function canAccept(kind: BlockKind, item: ItemKind) {
-  if (kind === "wire" || kind === "cpu_node" || kind === "drill") return false;
-  if (kind === "turret") return item === "ammo";
-  if (kind === "assembler") return item === "ore" || item === "plate";
   return true;
 }
 
@@ -474,7 +532,7 @@ function blockAt(blocks: Block[], pos: Pos) {
 }
 
 function footprintPositions(kind: BlockKind, pos: Pos) {
-  const [width, height] = footprintSize(kind);
+  const [width, height] = blockFootprintSize(kind);
   const positions: Pos[] = [];
   for (let y = pos.y; y < pos.y + height; y += 1) {
     for (let x = pos.x; x < pos.x + width; x += 1) {
@@ -482,10 +540,6 @@ function footprintPositions(kind: BlockKind, pos: Pos) {
     }
   }
   return positions;
-}
-
-function footprintSize(kind: BlockKind): [number, number] {
-  return kind === "core" ? [4, 4] : [1, 1];
 }
 
 function step(pos: Pos, dir: Direction): Pos {
@@ -506,53 +560,6 @@ function rotateDirection(dir: Direction): Direction {
     west: "north"
   };
   return next[dir];
-}
-
-function defaultBehaviorFor(kind: BlockKind) {
-  return kind === "drill" ? "builtin.drill.basic" : null;
-}
-
-function isProgrammable(kind: BlockKind) {
-  return ["drill", "router", "assembler", "turret", "drone_port"].includes(kind);
-}
-
-function isNetworkNode(kind: BlockKind) {
-  return kind !== "conveyor";
-}
-
-function localCpuRate(kind: BlockKind) {
-  if (kind === "drill" || kind === "router") return 1;
-  if (kind === "assembler") return 2;
-  if (kind === "turret" || kind === "drone_port") return 3;
-  return 0;
-}
-
-function networkCpu(kind: BlockKind) {
-  if (kind === "core") return 120;
-  if (kind === "cpu_node") return 80;
-  if (kind === "drone_port") return 20;
-  return 0;
-}
-
-function capacityFor(kind: BlockKind) {
-  const capacities: Partial<Record<BlockKind, number>> = {
-    core: 1000,
-    storage: 300,
-    conveyor: 1,
-    router: 1,
-    turret: 80,
-    assembler: 100,
-    drill: 10,
-    drone_port: 120
-  };
-  return capacities[kind] ?? 0;
-}
-
-function displayKind(kind: BlockKind) {
-  return kind
-    .split("_")
-    .map((part) => part[0].toUpperCase() + part.slice(1))
-    .join("");
 }
 
 function usedBy(behaviorId: string) {

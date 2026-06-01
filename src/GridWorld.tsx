@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { useEffect, useRef } from "react";
+import { blockFootprintSize } from "./gameMetadata";
 import type { Block, BlockKind, Direction, Enemy, GameSnapshot, Pos, Tile } from "./types";
 
 type Overlay = "none" | "network" | "cpu" | "logistics" | "attack";
@@ -199,7 +200,7 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
       for (const id of network.block_ids) {
         const block = snapshot.blocks.find((item) => item.id === id);
         if (!block) continue;
-        const [width, height] = footprintSize(block.kind);
+        const [width, height] = blockFootprintSize(block.kind);
         g.rect(block.pos.x * TILE + 1, block.pos.y * TILE + 1, width * TILE - 2, height * TILE - 2).fill({
           color,
           alpha: 0.22
@@ -212,7 +213,7 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
     for (const block of snapshot.blocks) {
       if (!block.active) continue;
       const alpha = Math.min(0.55, 0.08 + block.effective_cpu_rate / 180);
-      const [width, height] = footprintSize(block.kind);
+      const [width, height] = blockFootprintSize(block.kind);
       g.rect(block.pos.x * TILE + 1, block.pos.y * TILE + 1, width * TILE - 2, height * TILE - 2).fill({
         color: 0x36d399,
         alpha
@@ -248,7 +249,7 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
   for (const block of blocks) {
     const x = block.pos.x * TILE;
     const y = block.pos.y * TILE;
-    const [width, height] = footprintSize(block.kind);
+    const [width, height] = blockFootprintSize(block.kind);
     const pixelWidth = width * TILE;
     const pixelHeight = height * TILE;
     const color = COLORS[block.kind];
@@ -328,12 +329,8 @@ function arrow(dir: Direction) {
   return { north: "^", east: ">", south: "v", west: "<" }[dir];
 }
 
-function footprintSize(kind: BlockKind): [number, number] {
-  return kind === "core" ? [4, 4] : [1, 1];
-}
-
 function blockCenter(block: Block) {
-  const [width, height] = footprintSize(block.kind);
+  const [width, height] = blockFootprintSize(block.kind);
   return {
     x: (block.pos.x + width / 2) * TILE,
     y: (block.pos.y + height / 2) * TILE
