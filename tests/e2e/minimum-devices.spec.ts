@@ -16,6 +16,7 @@ declare global {
         blocks: Array<{
           id: string;
           kind: string;
+          behavior_ref: string | null;
           hp: number;
           inventory: { items: Partial<Record<string, number>> };
           network_id: number | null;
@@ -518,6 +519,65 @@ if can_produce produce
     { cmd: "edit_builtin_copy", args: { blockId: "assembler_1" } },
     { cmd: "save_behavior", args: { behaviorId: "behavior_4", source: assemblerSource } },
     { cmd: "build_behavior", args: { behaviorId: "behavior_4" } }
+  ]);
+});
+
+test("project behavior can be edited in place or forked for one block", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.getByTestId("grid-world").locator("canvas");
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole("button", { name: /Turret/ }).click();
+  await canvas.click({ position: tileCenter(34, 30) });
+  await expect(page.locator(".inspector")).toContainText("turret_1");
+  await page.getByRole("button", { name: "Edit Copy", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Turret Copy");
+  await expect(page.locator(".behavior-meta")).toContainText("project behavior");
+  await expect(page.getByLabel("Assign behavior preset")).toHaveValue("behavior_1");
+  await expect(page.getByRole("button", { name: "Edit", exact: true })).toBeVisible();
+
+  await canvas.click({ position: tileCenter(35, 30) });
+  await expect(page.locator(".inspector")).toContainText("turret_2");
+  await page.getByLabel("Assign behavior preset").selectOption("behavior_1");
+  await expect(page.locator(".inspector")).toContainText("behavior: Basic Turret Copy");
+
+  await page.keyboard.press("Escape");
+  await canvas.click({ position: tileCenter(34, 30) });
+  await expect(page.locator(".inspector")).toContainText("turret_1");
+  await expect(page.getByLabel("Assign behavior preset")).toHaveValue("behavior_1");
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Turret Copy");
+  await expect(page.locator(".behavior-meta")).toContainText("behavior_1");
+
+  await page.getByRole("button", { name: "Fork", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Turret Copy Fork");
+  await expect(page.locator(".behavior-meta")).toContainText("behavior_2");
+  await expect(page.getByLabel("Assign behavior preset")).toHaveValue("behavior_2");
+
+  const turretRefs = await page.evaluate(() => {
+    const blocks = window.__XAC_TEST_STATE__?.snapshot().blocks ?? [];
+    return Object.fromEntries(
+      blocks.filter((block) => block.kind === "turret").map((block) => [block.id, block.behavior_ref])
+    );
+  });
+  expect(turretRefs).toEqual({
+    turret_1: "behavior_2",
+    turret_2: "behavior_1"
+  });
+
+  const behaviorCalls = await page.evaluate(() => {
+    return (
+      window.__XAC_TEST_STATE__?.calls.filter((call) =>
+        ["edit_builtin_copy", "assign_behavior", "fork_behavior"].includes(call.cmd)
+      ) ?? []
+    );
+  });
+  expect(behaviorCalls).toEqual([
+    { cmd: "edit_builtin_copy", args: { blockId: "turret_1" } },
+    { cmd: "assign_behavior", args: { blockId: "turret_2", behaviorId: "behavior_1" } },
+    { cmd: "edit_builtin_copy", args: { blockId: "turret_1" } },
+    { cmd: "fork_behavior", args: { blockId: "turret_1" } }
   ]);
 });
 

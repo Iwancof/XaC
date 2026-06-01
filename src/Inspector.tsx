@@ -1,4 +1,4 @@
-import { Box, Code2, Copy, GitBranch, Hammer, RotateCw, Save, Trash2 } from "lucide-react";
+import { Box, Code2, Copy, GitBranch, Hammer, Pencil, RotateCw, Save, Trash2 } from "lucide-react";
 import { displayItemKind } from "./itemMetadata";
 import type {
   BehaviorRuntimeStats,
@@ -54,6 +54,14 @@ export function Inspector({
     ? snapshot?.networks.find((network) => network.id === selectedBlock.network_id)
     : null;
   const droneBehaviorRef = selectedDrone?.behavior_ref ?? null;
+  const selectedBehaviorRef = selectedBlock?.behavior_ref ?? droneBehaviorRef;
+  const selectedBehaviorSummary =
+    compatibleBehaviors.find((item) => item.id === selectedBehaviorRef) ??
+    (behavior?.summary.id === selectedBehaviorRef ? behavior.summary : null);
+  const selectedBehaviorIsProject = selectedBehaviorSummary?.builtin === false;
+  const EditBehaviorIcon = selectedBehaviorIsProject ? Pencil : Copy;
+  const editBehaviorLabel = selectedBehaviorIsProject ? "Edit" : "Edit Copy";
+  const editBehaviorTitle = selectedBehaviorIsProject ? "Edit project behavior" : "Copy built-in preset and edit";
 
   return (
     <section className="inspector">
@@ -121,9 +129,9 @@ export function Inspector({
                   <Code2 size={16} />
                   Open
                 </button>
-                <button onClick={onEditCopy} title="Copy built-in preset and edit">
-                  <Copy size={16} />
-                  Edit Copy
+                <button onClick={onEditCopy} title={editBehaviorTitle}>
+                  <EditBehaviorIcon size={16} />
+                  {editBehaviorLabel}
                 </button>
                 <button onClick={onFork} title="Fork behavior for this block">
                   <GitBranch size={16} />
@@ -215,9 +223,9 @@ export function Inspector({
                   <Code2 size={16} />
                   Open
                 </button>
-                <button onClick={onEditCopy} title="Copy built-in preset and edit">
-                  <Copy size={16} />
-                  Edit Copy
+                <button onClick={onEditCopy} title={editBehaviorTitle}>
+                  <EditBehaviorIcon size={16} />
+                  {editBehaviorLabel}
                 </button>
                 <button onClick={onFork} title="Fork behavior for this drone">
                   <GitBranch size={16} />

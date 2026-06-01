@@ -338,6 +338,73 @@ fn builtin_copy_is_editable_and_reassigned() {
 }
 
 #[test]
+fn project_behavior_can_be_edited_in_place_or_forked_for_one_block() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+        .unwrap();
+    let first_turret_id = sim.selected_id.clone().unwrap();
+
+    let copied = sim.edit_builtin_copy(&first_turret_id).unwrap();
+    let project_behavior_id = copied.summary.id.clone();
+    let project_source = "attack_best runner wire_cutter";
+    sim.save_behavior(&project_behavior_id, project_source.to_string())
+        .unwrap();
+
+    sim.place_block(BlockKind::Turret, Pos { x: 35, y: 32 }, Direction::East)
+        .unwrap();
+    let second_turret_id = sim.selected_id.clone().unwrap();
+    sim.assign_behavior(&second_turret_id, &project_behavior_id)
+        .unwrap();
+    assert_eq!(
+        sim.open_behavior(&project_behavior_id)
+            .unwrap()
+            .summary
+            .used_by,
+        2
+    );
+
+    let behavior_count = sim.behaviors.len();
+    let reopened = sim.edit_builtin_copy(&first_turret_id).unwrap();
+    assert_eq!(reopened.summary.id, project_behavior_id);
+    assert_eq!(reopened.summary.used_by, 2);
+    assert_eq!(reopened.source, project_source);
+    assert_eq!(
+        sim.behaviors.len(),
+        behavior_count,
+        "editing a project behavior should open the existing source instead of copying again"
+    );
+
+    let forked = sim.fork_behavior(&first_turret_id).unwrap();
+
+    assert_ne!(forked.summary.id, project_behavior_id);
+    assert!(!forked.summary.builtin);
+    assert_eq!(forked.summary.build_status, "forked");
+    assert_eq!(forked.source, project_source);
+    assert_eq!(
+        sim.blocks[&first_turret_id].behavior_ref.as_deref(),
+        Some(forked.summary.id.as_str())
+    );
+    assert_eq!(
+        sim.blocks[&second_turret_id].behavior_ref.as_deref(),
+        Some(project_behavior_id.as_str())
+    );
+    assert_eq!(
+        sim.open_behavior(&project_behavior_id)
+            .unwrap()
+            .summary
+            .used_by,
+        1
+    );
+    assert_eq!(
+        sim.open_behavior(&forked.summary.id)
+            .unwrap()
+            .summary
+            .used_by,
+        1
+    );
+}
+
+#[test]
 fn compatible_builtin_behavior_can_be_assigned_to_block() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
