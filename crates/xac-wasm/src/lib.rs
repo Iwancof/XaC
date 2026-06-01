@@ -15,7 +15,7 @@ use tiny::{compile_tiny_source, is_tiny_source};
 mod types;
 pub use types::{
     AssemblerCommand, BehaviorEval, BehaviorHostInput, BehaviorIntent, BehaviorLog, DrillCommand,
-    DroneCommand, DronePortCommand, NetStoreWrite, TargetRule,
+    DroneCommand, DronePortCommand, NetStoreDelete, NetStoreOp, NetStoreWrite, TargetRule,
 };
 
 #[derive(Clone, Debug)]
@@ -23,7 +23,7 @@ struct BehaviorHostState {
     input: BehaviorHostInput,
     intent: BehaviorIntent,
     assembler_recipe: ItemKind,
-    net_writes: Vec<NetStoreWrite>,
+    net_ops: Vec<NetStoreOp>,
     logs: Vec<BehaviorLog>,
     host_over_budget: bool,
 }
@@ -38,7 +38,7 @@ impl BehaviorHostState {
             input,
             intent: BehaviorIntent::Noop,
             assembler_recipe,
-            net_writes: Vec::new(),
+            net_ops: Vec::new(),
             logs: Vec::new(),
             host_over_budget: false,
         }
@@ -84,6 +84,7 @@ mod host_cost {
     pub const HAS_SPACE: u64 = 2;
     pub const NET_GET_I32: u64 = 2;
     pub const NET_SET_I32: u64 = 4;
+    pub const NET_DELETE_I32: u64 = 2;
 }
 
 const MAX_LOG_MESSAGE_BYTES: usize = 256;
@@ -192,7 +193,7 @@ impl BehaviorRuntime {
 
         Ok(BehaviorEval {
             intent,
-            net_writes: store.data().net_writes.clone(),
+            net_ops: store.data().net_ops.clone(),
             logs: store.data().logs.clone(),
             fuel_spent: fuel.saturating_sub(fuel_remaining),
             fuel_remaining,
@@ -244,7 +245,7 @@ fn allowed_common_import(module: &str, name: &str) -> bool {
             name,
             "log" | "fuel_remaining" | "stock_count" | "stock_capacity" | "has_space"
         ),
-        "xac:net" => matches!(name, "store_get_i32" | "store_set_i32"),
+        "xac:net" => matches!(name, "store_get_i32" | "store_set_i32" | "store_delete_i32"),
         _ => false,
     }
 }
@@ -346,7 +347,7 @@ fn over_budget_eval(
     let fuel_remaining = store.get_fuel().unwrap_or(0);
     BehaviorEval {
         intent: BehaviorIntent::Noop,
-        net_writes: Vec::new(),
+        net_ops: Vec::new(),
         logs: Vec::new(),
         fuel_spent: fuel.saturating_sub(fuel_remaining),
         fuel_remaining,
@@ -1129,7 +1130,25 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 return 0;
             }
             data.input.net_i32.insert(key, value);
-            data.net_writes.push(NetStoreWrite { key, value });
+            data.net_ops
+                .push(NetStoreOp::Set(NetStoreWrite { key, value }));
+            1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:net",
+        "store_delete_i32",
+        |mut caller: Caller<'_, BehaviorHostState>, key: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::NET_DELETE_I32) {
+                return 0;
+            }
+            let data = caller.data_mut();
+            if !data.input.net_writable {
+                return 0;
+            }
+            data.input.net_i32.remove(&key);
+            data.net_ops
+                .push(NetStoreOp::Delete(NetStoreDelete { key }));
             1
         },
     )?;

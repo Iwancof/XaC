@@ -350,7 +350,10 @@ fn xac_script_can_read_and_write_network_store() {
         )
         .unwrap();
 
-    assert_eq!(eval.net_writes, vec![NetStoreWrite { key: 7, value: 42 }]);
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 7, value: 42 })]
+    );
     assert!(matches!(
         eval.intent,
         BehaviorIntent::Turret { priority } if matches!(
@@ -358,6 +361,75 @@ fn xac_script_can_read_and_write_network_store() {
             [TargetRule::LowestHp, TargetRule::Nearest]
         )
     ));
+}
+
+#[test]
+fn xac_script_can_delete_network_store_key() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = r#"
+        net_delete 7
+        if net 7 == 0 attack_nearest
+    "#;
+    let wat = compile_source_to_wat(BehaviorKind::Turret, source).unwrap();
+    assert!(wat.contains(r#""store_delete_i32""#));
+
+    let compiled = runtime.compile_wat(BehaviorKind::Turret, source).unwrap();
+    let mut net_i32 = BTreeMap::new();
+    net_i32.insert(7, 42);
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                ammo_count: 3,
+                net_i32,
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Delete(NetStoreDelete { key: 7 })]
+    );
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Turret { ref priority } if matches!(priority.as_slice(), [TargetRule::Nearest])
+    ));
+}
+
+#[test]
+fn tiny_source_can_delete_network_store_key() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = r#"
+        fn tick() {
+            net_set(7, 42);
+            net_delete(7);
+        }
+    "#;
+    let wat = compile_source_to_wat(BehaviorKind::Router, source).unwrap();
+    assert!(wat.contains(r#""store_delete_i32""#));
+
+    let compiled = runtime.compile_wat(BehaviorKind::Router, source).unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        eval.net_ops,
+        vec![
+            NetStoreOp::Set(NetStoreWrite { key: 7, value: 42 }),
+            NetStoreOp::Delete(NetStoreDelete { key: 7 })
+        ]
+    );
 }
 
 #[test]

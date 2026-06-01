@@ -111,6 +111,7 @@ enum HostImport {
     CommonHasSpace,
     NetStoreGetI32,
     NetStoreSetI32,
+    NetStoreDeleteI32,
 }
 
 impl HostImport {
@@ -252,6 +253,9 @@ impl HostImport {
             }
             HostImport::NetStoreSetI32 => {
                 r#"  (import "xac:net" "store_set_i32" (func $net_set_i32 (param i32 i32) (result i32)))"#
+            }
+            HostImport::NetStoreDeleteI32 => {
+                r#"  (import "xac:net" "store_delete_i32" (func $net_delete_i32 (param i32) (result i32)))"#
             }
         }
     }
@@ -406,6 +410,9 @@ enum ScriptAction {
     NetSet {
         key: i32,
         value: i32,
+    },
+    NetDelete {
+        key: i32,
     },
 }
 
@@ -770,6 +777,12 @@ fn parse_script_action(
             Ok(ScriptAction::NetSet {
                 key: parse_i32(line_no, "network key", key)?,
                 value: parse_i32(line_no, "network value", value)?,
+            })
+        }
+        ["net_delete" | "net_del", key] => {
+            imports.insert(HostImport::NetStoreDeleteI32);
+            Ok(ScriptAction::NetDelete {
+                key: parse_i32(line_no, "network key", key)?,
             })
         }
         [] => Ok(ScriptAction::Noop),
@@ -1221,6 +1234,9 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
         ScriptAction::NetSet { key, value } => out.push(format!(
             "{indent}(drop (call $net_set_i32 (i32.const {key}) (i32.const {value})))"
         )),
+        ScriptAction::NetDelete { key } => {
+            out.push(format!("{indent}(drop (call $net_delete_i32 (i32.const {key})))"))
+        }
     }
 }
 

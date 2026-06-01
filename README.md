@@ -109,6 +109,7 @@ Script can also touch the shared network store through integer keys:
 ```text
 net_set 7 42
 if net 7 == 42 attack_best lowest_hp
+net_delete 7
 ```
 
 Debug messages can be emitted from behavior code and appear in the game log:

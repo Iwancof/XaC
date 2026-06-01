@@ -555,6 +555,10 @@ fn action_to_script(line: usize, name: &str, args: &[Arg]) -> Result<String> {
                 number_arg(line, name, args, 1)?
             ))
         }
+        "net_delete" | "net_del" => {
+            require_arg_count(line, name, args, 1)?;
+            Ok(format!("net_delete {}", number_arg(line, name, args, 0)?))
+        }
         "log" => {
             require_arg_count(line, name, args, 1)?;
             let message = match &args[0] {

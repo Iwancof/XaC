@@ -453,6 +453,28 @@ fn xac_script_writes_network_store_and_recompute_preserves_it() {
 }
 
 #[test]
+fn xac_script_deletes_network_store_key_in_order() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let router_id = sim.selected_id.clone().unwrap();
+    let source = sim.edit_builtin_copy(&router_id).unwrap();
+    sim.save_behavior(
+        &source.summary.id,
+        "net_set 7 42\nnet_delete 7\nnet_set 8 9".to_string(),
+    )
+    .unwrap();
+    sim.fuel_banks.insert(router_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    let network_id = sim.blocks[&router_id].network_id.unwrap();
+    let store = &sim.networks[&network_id].store;
+    assert_eq!(store.get("7"), None);
+    assert_eq!(store.get("8"), Some(&serde_json::Value::from(9)));
+}
+
+#[test]
 fn xac_script_log_writes_game_log() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)

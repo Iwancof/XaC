@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel, TerrainKind};
 use xac_wasm::{
     AssemblerCommand, BehaviorHostInput, BehaviorIntent, BehaviorLog, CompiledBehavior,
-    DrillCommand, NetStoreWrite,
+    DrillCommand, NetStoreOp,
 };
 
 use crate::block_defs::can_accept_item;
@@ -67,7 +67,7 @@ impl Simulation {
                     if let Some(package) = self.behaviors.get_mut(&behavior_ref) {
                         package.wasm_hash = Some(eval.wasm_hash);
                     }
-                    self.apply_net_writes(&id, eval.net_writes);
+                    self.apply_net_ops(&id, eval.net_ops);
                     self.apply_behavior_logs(&id, eval.logs);
                     self.apply_behavior_intent(&id, eval.intent);
                 }
@@ -153,8 +153,8 @@ impl Simulation {
             .collect()
     }
 
-    fn apply_net_writes(&mut self, block_id: &str, writes: Vec<NetStoreWrite>) {
-        if writes.is_empty() {
+    fn apply_net_ops(&mut self, block_id: &str, ops: Vec<NetStoreOp>) {
+        if ops.is_empty() {
             return;
         }
         let Some(network_id) = self.blocks.get(block_id).and_then(|block| block.network_id) else {
@@ -166,10 +166,17 @@ impl Simulation {
         if network.read_only_cache {
             return;
         }
-        for write in writes {
-            network
-                .store
-                .insert(write.key.to_string(), serde_json::Value::from(write.value));
+        for op in ops {
+            match op {
+                NetStoreOp::Set(write) => {
+                    network
+                        .store
+                        .insert(write.key.to_string(), serde_json::Value::from(write.value));
+                }
+                NetStoreOp::Delete(delete) => {
+                    network.store.remove(&delete.key.to_string());
+                }
+            }
         }
     }
 

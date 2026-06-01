@@ -74,7 +74,7 @@ pub enum TargetRule {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BehaviorEval {
     pub intent: BehaviorIntent,
-    pub net_writes: Vec<NetStoreWrite>,
+    pub net_ops: Vec<NetStoreOp>,
     pub logs: Vec<BehaviorLog>,
     pub fuel_spent: u64,
     pub fuel_remaining: u64,
@@ -91,6 +91,17 @@ pub struct BehaviorLog {
 pub struct NetStoreWrite {
     pub key: i32,
     pub value: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct NetStoreDelete {
+    pub key: i32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub enum NetStoreOp {
+    Set(NetStoreWrite),
+    Delete(NetStoreDelete),
 }
 
 #[derive(Clone, Debug, Default)]
