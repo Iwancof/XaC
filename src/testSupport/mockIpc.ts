@@ -422,6 +422,17 @@ function buildBehavior(behaviorId: string): BuildResult {
   if (!behavior) {
     throw new Error(`unknown behavior: ${behaviorId}`);
   }
+  const error = validateMockBehavior(behavior);
+  if (error) {
+    behavior.summary.build_status = "build failed";
+    log("error", behaviorId, error);
+    return {
+      behavior_id: behaviorId,
+      success: false,
+      message: error,
+      wasm_hash: null
+    };
+  }
   behavior.summary.build_status = "built";
   return {
     behavior_id: behaviorId,
@@ -429,6 +440,52 @@ function buildBehavior(behaviorId: string): BuildResult {
     message: "mock build succeeded",
     wasm_hash: "mocked-wasm-hash"
   };
+}
+
+function validateMockBehavior(behavior: MutableBehavior) {
+  if (behavior.summary.base_kind !== "drill") return null;
+
+  const source = sourceWithoutComments(behavior.source);
+  if (source.startsWith("(module")) {
+    return source.includes('"tick"') ? null : "mock build failed: WAT behavior must export tick";
+  }
+  if (source.startsWith("fn tick")) {
+    return balancedDelimiters(source) ? null : "mock build failed: Tiny behavior has unbalanced delimiters";
+  }
+
+  const lines = source.split(/\n/).filter(Boolean);
+  if (lines.length === 0) {
+    return "mock build failed: drill behavior is empty";
+  }
+  for (const [index, line] of lines.entries()) {
+    if (!isSupportedDrillScriptLine(line)) {
+      return `mock build failed: unsupported drill line ${index + 1}: ${line}`;
+    }
+  }
+  return null;
+}
+
+function isSupportedDrillScriptLine(line: string) {
+  return (
+    line === "mine" ||
+    /^output\s+ore$/.test(line) ||
+    /^if\s+output_blocked\s+return$/.test(line) ||
+    /^if\s+ore_kind\s+==\s+ore\s+output\s+ore$/.test(line) ||
+    /^if\s+fuel_remaining\s+[<>]=?\s+\d+\s+mine$/.test(line)
+  );
+}
+
+function balancedDelimiters(source: string) {
+  const stack: string[] = [];
+  const pairs: Record<string, string> = { ")": "(", "}": "{" };
+  for (const char of source) {
+    if (char === "(" || char === "{") {
+      stack.push(char);
+    } else if (char === ")" || char === "}") {
+      if (stack.pop() !== pairs[char]) return false;
+    }
+  }
+  return stack.length === 0;
 }
 
 function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind)): Block {

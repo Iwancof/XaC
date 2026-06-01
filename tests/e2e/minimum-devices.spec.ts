@@ -230,6 +230,17 @@ test("places minimum devices from the right block list and opens drill behavior"
   const saveButton = page.getByRole("button", { name: "Save", exact: true });
   const buildButton = page.getByRole("button", { name: "Build", exact: true });
 
+  const invalidSource = `mine ???
+`;
+  await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), invalidSource);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /mine \?\?\?/);
+  await expect(saveButton).toBeEnabled();
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await buildButton.click();
+  await expect(page.locator(".build-fail")).toContainText("mock build failed: unsupported drill line 1");
+  await expect(page.locator(".behavior-meta")).toContainText("status build failed");
+
   const pausedSource = `if output_blocked return
 # paused in UI E2E
 `;
@@ -292,13 +303,17 @@ mine
     "save_behavior",
     "build_behavior",
     "save_behavior",
+    "build_behavior",
+    "save_behavior",
     "build_behavior"
   ]);
   expect(behaviorCalls[0].args).toEqual({ blockId: "drill_1" });
-  expect(behaviorCalls[1].args).toEqual({ behaviorId: "behavior_1", source: pausedSource });
+  expect(behaviorCalls[1].args).toEqual({ behaviorId: "behavior_1", source: invalidSource });
   expect(behaviorCalls[2].args).toEqual({ behaviorId: "behavior_1" });
-  expect(behaviorCalls[3].args).toEqual({ behaviorId: "behavior_1", source: editedSource });
+  expect(behaviorCalls[3].args).toEqual({ behaviorId: "behavior_1", source: pausedSource });
   expect(behaviorCalls[4].args).toEqual({ behaviorId: "behavior_1" });
+  expect(behaviorCalls[5].args).toEqual({ behaviorId: "behavior_1", source: editedSource });
+  expect(behaviorCalls[6].args).toEqual({ behaviorId: "behavior_1" });
 
   const placeCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "place_block") ?? [];
