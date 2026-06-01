@@ -13,7 +13,14 @@ declare global {
       calls: IpcCall[];
       snapshot: () => {
         behaviors: Array<{ id: string; source_path: string }>;
-        blocks: Array<{ id: string; kind: string; hp: number; network_id: number | null; effective_cpu_rate: number }>;
+        blocks: Array<{
+          id: string;
+          kind: string;
+          hp: number;
+          inventory: { items: Partial<Record<string, number>> };
+          network_id: number | null;
+          effective_cpu_rate: number;
+        }>;
         drones: Array<{ id: string; behavior_ref: string | null }>;
         enemies: Array<{ id: string; pos: { x: number; y: number }; target_id: string | null }>;
         item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
@@ -220,21 +227,46 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".behavior-meta")).toContainText("project behavior");
   await page.waitForFunction(() => Boolean(window.__XAC_EDITOR__));
 
-  const editedSource = `if output_blocked return
-# edited in UI E2E
-mine
-`;
-  await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), editedSource);
-  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /edited in UI E2E/);
-
   const saveButton = page.getByRole("button", { name: "Save", exact: true });
   const buildButton = page.getByRole("button", { name: "Build", exact: true });
+
+  const pausedSource = `if output_blocked return
+# paused in UI E2E
+`;
+  await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), pausedSource);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /paused in UI E2E/);
   await expect(saveButton).toBeEnabled();
   await saveButton.click();
   await expect(saveButton).toBeDisabled();
   await buildButton.click();
   await expect(page.locator(".build-ok")).toContainText("mock build succeeded");
   await expect(page.locator(".behavior-meta")).toContainText("status built");
+  const pausedCoreOre = await page.evaluate(() => {
+    const before = window.__XAC_TEST_STATE__!.snapshot().blocks.find((block) => block.id === "core_1")?.inventory.items.ore ?? 0;
+    return before;
+  });
+  await page.getByRole("button", { name: /\+40/ }).click();
+  const stillPausedCoreOre = await page.evaluate(
+    () => window.__XAC_TEST_STATE__!.snapshot().blocks.find((block) => block.id === "core_1")?.inventory.items.ore ?? 0
+  );
+  expect(stillPausedCoreOre).toBe(pausedCoreOre);
+
+  const editedSource = `if output_blocked return
+# edited in UI E2E
+mine
+`;
+  await page.evaluate((source) => window.__XAC_EDITOR__!.setValue(source), editedSource);
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /edited in UI E2E/);
+  await expect(saveButton).toBeEnabled();
+  await saveButton.click();
+  await expect(saveButton).toBeDisabled();
+  await buildButton.click();
+  await expect(page.locator(".build-ok")).toContainText("mock build succeeded");
+  await page.getByRole("button", { name: /\+40/ }).click();
+  const resumedCoreOre = await page.evaluate(
+    () => window.__XAC_TEST_STATE__!.snapshot().blocks.find((block) => block.id === "core_1")?.inventory.items.ore ?? 0
+  );
+  expect(resumedCoreOre).toBeGreaterThan(stillPausedCoreOre);
 
   await page.getByRole("button", { name: "Deconstruct", exact: true }).click();
   await expect(page.locator(".metrics")).toContainText("blocks 22");
@@ -255,10 +287,18 @@ mine
       ) ?? []
     );
   });
-  expect(behaviorCalls.map((call) => call.cmd)).toEqual(["edit_builtin_copy", "save_behavior", "build_behavior"]);
+  expect(behaviorCalls.map((call) => call.cmd)).toEqual([
+    "edit_builtin_copy",
+    "save_behavior",
+    "build_behavior",
+    "save_behavior",
+    "build_behavior"
+  ]);
   expect(behaviorCalls[0].args).toEqual({ blockId: "drill_1" });
-  expect(behaviorCalls[1].args).toEqual({ behaviorId: "behavior_1", source: editedSource });
+  expect(behaviorCalls[1].args).toEqual({ behaviorId: "behavior_1", source: pausedSource });
   expect(behaviorCalls[2].args).toEqual({ behaviorId: "behavior_1" });
+  expect(behaviorCalls[3].args).toEqual({ behaviorId: "behavior_1", source: editedSource });
+  expect(behaviorCalls[4].args).toEqual({ behaviorId: "behavior_1" });
 
   const placeCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "place_block") ?? [];

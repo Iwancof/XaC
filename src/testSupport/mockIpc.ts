@@ -289,10 +289,11 @@ function runTicks(count: number) {
     recomputeNetworks(state.blocks);
 
     for (const block of state.blocks) {
+      let shouldMine = false;
       if (block.active && block.behavior_ref) {
-        runMockBehavior(block);
+        shouldMine = runMockBehavior(block).mine;
       }
-      if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(block)) continue;
+      if (!shouldMine || block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(block)) continue;
       block.progress += 1;
       if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
         block.progress = 0;
@@ -853,12 +854,38 @@ function runMockBehavior(block: Block) {
   const fuelRate = block.effective_cpu_rate;
   const maxBank = Math.max(fuelRate * 8, minInvocationFuel);
   block.fuel_bank = Math.min(maxBank, block.fuel_bank + fuelRate / 20);
-  if (block.fuel_bank < minInvocationFuel) return;
+  if (block.fuel_bank < minInvocationFuel) return { mine: false };
 
   const fuelBudget = Math.floor(block.fuel_bank);
   const fuelSpent = Math.min(8, fuelBudget);
   block.fuel_bank = Math.max(0, block.fuel_bank - fuelSpent);
   recordRuntime(block, fuelBudget, fuelSpent, fuelBudget - fuelSpent, "mocked-wasm-hash");
+  return evaluateMockBehavior(block);
+}
+
+function evaluateMockBehavior(block: Block) {
+  const source = block.behavior_ref ? state.behaviors[block.behavior_ref]?.source ?? "" : "";
+  if (block.kind !== "drill") return { mine: false };
+  if (drillSourceReturnsWhenBlocked(source) && outputBlocked(block)) {
+    return { mine: false };
+  }
+  return { mine: drillSourceCallsMine(source) };
+}
+
+function drillSourceReturnsWhenBlocked(source: string) {
+  return /output_blocked\s*(?:\(\s*\))?\s*\)?\s*\{?\s*return/.test(sourceWithoutComments(source));
+}
+
+function drillSourceCallsMine(source: string) {
+  return /\bmine\s*(?:\(\s*\))?\s*(?:;|$)/m.test(sourceWithoutComments(source));
+}
+
+function sourceWithoutComments(source: string) {
+  return source
+    .split(/\r?\n/)
+    .map((line) => line.replace(/#.*/, "").trim())
+    .filter(Boolean)
+    .join("\n");
 }
 
 function recordRuntime(
