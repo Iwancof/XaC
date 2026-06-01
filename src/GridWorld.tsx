@@ -57,12 +57,17 @@ export function GridWorld({
   const onPaintDirectionChangeRef = useRef(onPaintDirectionChange);
   const onEntityClickRef = useRef(onEntityClick);
   const paintRef = useRef<PaintState | null>(null);
+  const placementPreviewRef = useRef<PlacementPreview | null>(null);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
     buildKindRef.current = buildKind;
     directionRef.current = direction;
     overlayRef.current = overlay;
+    if (!buildKind) {
+      paintRef.current = null;
+      placementPreviewRef.current = null;
+    }
     onTileClickRef.current = onTileClick;
     onTilesPaintRef.current = onTilesPaint;
     onPaintDirectionChangeRef.current = onPaintDirectionChange;
@@ -105,6 +110,17 @@ export function GridWorld({
           }
           if (buildKindRef.current) {
             paintRef.current = makePaintState(pos);
+            placementPreviewRef.current = makePlacementPreview(buildKindRef.current, directionRef.current, [pos], true);
+            renderWorld(
+              stage,
+              snapshotRef.current,
+              selectedIdRef.current,
+              buildKindRef.current,
+              directionRef.current,
+              overlayRef.current,
+              placementPreviewRef.current,
+              performance.now()
+            );
             return;
           }
           const worldTile = {
@@ -128,20 +144,52 @@ export function GridWorld({
         app.stage.on("pointermove", (event) => {
           const paint = paintRef.current;
           const current = snapshotRef.current;
-          if (!paint || !current || !buildKindRef.current) return;
+          const currentBuildKind = buildKindRef.current;
+          if (!current || !currentBuildKind) return;
           const pos = tileFromWorld(pointerWorld(event));
           if (!inSnapshotBounds(current, pos)) return;
+          if (!paint) {
+            placementPreviewRef.current = makePlacementPreview(currentBuildKind, directionRef.current, [pos], false);
+            renderWorld(
+              stage,
+              snapshotRef.current,
+              selectedIdRef.current,
+              currentBuildKind,
+              directionRef.current,
+              overlayRef.current,
+              placementPreviewRef.current,
+              performance.now()
+            );
+            return;
+          }
           const nextDirection = addPaintTiles(paint, pos);
           if (nextDirection && nextDirection !== directionRef.current) {
             directionRef.current = nextDirection;
             onPaintDirectionChangeRef.current(nextDirection);
           }
+          placementPreviewRef.current = makePlacementPreview(
+            currentBuildKind,
+            paint.direction ?? directionRef.current,
+            paint.positions,
+            true
+          );
+          renderWorld(
+            stage,
+            snapshotRef.current,
+            selectedIdRef.current,
+            currentBuildKind,
+            directionRef.current,
+            overlayRef.current,
+            placementPreviewRef.current,
+            performance.now()
+          );
         });
         const finishPaint = () => {
           const paint = paintRef.current;
           paintRef.current = null;
           if (!paint || !buildKindRef.current) return;
           const paintDirection = paint.direction ?? directionRef.current;
+          placementPreviewRef.current = null;
           if (paint.positions.length === 1) {
             onTileClickRef.current(paint.positions[0]);
           } else {
@@ -151,7 +199,7 @@ export function GridWorld({
         app.stage.on("pointerup", finishPaint);
         app.stage.on("pointerupoutside", finishPaint);
         app.stage.on("pointercancel", finishPaint);
-        renderWorld(stage, snapshotRef.current, selectedId, buildKind, direction, overlay, performance.now());
+        renderWorld(stage, snapshotRef.current, selectedId, buildKind, direction, overlay, placementPreviewRef.current, performance.now());
       });
 
     return () => {
@@ -167,7 +215,7 @@ export function GridWorld({
     snapshotRef.current = snapshot;
     snapshotFrameBaseMsRef.current = performance.now();
     if (stageRef.current) {
-      renderWorld(stageRef.current, snapshot, selectedId, buildKind, direction, overlay, performance.now());
+      renderWorld(stageRef.current, snapshot, selectedId, buildKind, direction, overlay, placementPreviewRef.current, performance.now());
     }
   }, [snapshot, selectedId, buildKind, direction, overlay]);
 
@@ -186,6 +234,7 @@ export function GridWorld({
           buildKindRef.current,
           directionRef.current,
           overlayRef.current,
+          placementPreviewRef.current,
           now
         );
       }
@@ -209,6 +258,13 @@ interface PaintState {
   direction: Direction | null;
 }
 
+interface PlacementPreview {
+  kind: BlockKind;
+  direction: Direction;
+  positions: Pos[];
+  active: boolean;
+}
+
 function pointerWorld(event: { global: { x: number; y: number } }) {
   return event.global;
 }
@@ -230,6 +286,15 @@ function makePaintState(pos: Pos): PaintState {
     seen: new Set([posKey(pos)]),
     last: pos,
     direction: null
+  };
+}
+
+function makePlacementPreview(kind: BlockKind, direction: Direction, positions: Pos[], active: boolean): PlacementPreview {
+  return {
+    kind,
+    direction,
+    positions: [...positions],
+    active
   };
 }
 
@@ -279,6 +344,7 @@ function renderWorld(
   buildKind: BlockKind | null,
   direction: Direction,
   overlay: Overlay,
+  placementPreview: PlacementPreview | null,
   renderTimeMs: number
 ) {
   stage.removeChildren();
@@ -287,8 +353,9 @@ function renderWorld(
   const graphics = new Graphics();
   drawTiles(graphics, snapshot);
   drawOverlays(graphics, snapshot, overlay);
-  drawBlocks(graphics, snapshot.blocks, selectedId);
+  drawBlocks(graphics, snapshot.blocks, selectedId, renderTimeMs);
   drawItemFlows(graphics, snapshot, renderTimeMs);
+  drawPlacementPreview(graphics, snapshot, placementPreview);
   drawEnemies(graphics, snapshot.enemies, selectedId);
   drawDrones(graphics, snapshot, selectedId);
   stage.addChild(graphics);
@@ -415,7 +482,7 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
   }
 }
 
-function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
+function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null, renderTimeMs: number) {
   for (const block of blocks) {
     const x = block.pos.x * TILE;
     const y = block.pos.y * TILE;
@@ -424,6 +491,12 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
     const pixelHeight = height * TILE;
     const color = COLORS[block.kind];
     g.roundRect(x + 2, y + 2, pixelWidth - 4, pixelHeight - 4, 3).fill(color);
+    if (block.kind === "conveyor") {
+      drawConveyorMotion(g, x, y, block.dir, renderTimeMs);
+    }
+    if (block.kind === "drill" && block.active && block.progress > 0) {
+      drawMiningPulse(g, x + pixelWidth / 2, y + pixelHeight / 2, renderTimeMs);
+    }
     if (block.kind === "wire") {
       g.moveTo(x + 2, y + 8);
       g.lineTo(x + 14, y + 8);
@@ -443,6 +516,59 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
       g.rect(x + 1, y + 1, pixelWidth - 2, pixelHeight - 2).stroke({ width: 2, color: 0xffffff });
     }
   }
+}
+
+function drawConveyorMotion(g: Graphics, x: number, y: number, direction: Direction, renderTimeMs: number) {
+  const axis = directionVector(direction);
+  const phase = ((renderTimeMs / 170) % 1) * 5;
+  for (let i = -1; i <= 2; i += 1) {
+    const travel = i * 5 + phase - 3;
+    const px = x + TILE / 2 + axis.x * travel;
+    const py = y + TILE / 2 + axis.y * travel;
+    g.circle(px, py, 1.5).fill({ color: 0xf3f7f9, alpha: 0.42 });
+  }
+}
+
+function drawMiningPulse(g: Graphics, x: number, y: number, renderTimeMs: number) {
+  const pulse = 0.5 + Math.sin(renderTimeMs / 130) * 0.5;
+  g.circle(x, y, 5 + pulse * 2).stroke({ width: 1.5, color: 0xf5c542, alpha: 0.35 + pulse * 0.35 });
+  g.circle(x - 3, y + 2, 1.8).fill({ color: 0xd8a94a, alpha: 0.6 });
+}
+
+function drawPlacementPreview(g: Graphics, snapshot: GameSnapshot, preview: PlacementPreview | null) {
+  if (!preview) return;
+  const [width, height] = blockFootprintSize(preview.kind);
+  for (const pos of preview.positions) {
+    const valid = canPreviewPlace(snapshot, preview.kind, pos);
+    const color = valid ? COLORS[preview.kind] : 0xf87171;
+    const x = pos.x * TILE;
+    const y = pos.y * TILE;
+    const pixelWidth = width * TILE;
+    const pixelHeight = height * TILE;
+    g.roundRect(x + 1, y + 1, pixelWidth - 2, pixelHeight - 2, 3).fill({
+      color,
+      alpha: preview.active ? 0.28 : 0.18
+    });
+    g.roundRect(x + 1, y + 1, pixelWidth - 2, pixelHeight - 2, 3).stroke({
+      width: 1.5,
+      color: valid ? 0x38bdf8 : 0xf87171,
+      alpha: preview.active ? 0.9 : 0.65
+    });
+    if (preview.kind === "conveyor" || preview.kind === "drill" || preview.kind === "assembler") {
+      drawArrow(g, x + pixelWidth / 2, y + pixelHeight / 2, preview.direction, valid ? 0xe8f7ff : 0xfecaca);
+    }
+  }
+}
+
+function canPreviewPlace(snapshot: GameSnapshot, kind: BlockKind, pos: Pos) {
+  const [width, height] = blockFootprintSize(kind);
+  for (let x = pos.x; x < pos.x + width; x += 1) {
+    for (let y = pos.y; y < pos.y + height; y += 1) {
+      const tile = snapshot.tiles.find((item) => item.pos.x === x && item.pos.y === y);
+      if (!tile?.buildable || tile.block_id) return false;
+    }
+  }
+  return true;
 }
 
 function drawItemFlows(g: Graphics, snapshot: GameSnapshot, renderTimeMs: number) {
@@ -504,6 +630,15 @@ function distance(a: Pos, b: Pos) {
 
 function lerp(a: number, b: number, t: number) {
   return a + (b - a) * t;
+}
+
+function directionVector(direction: Direction) {
+  return {
+    north: { x: 0, y: -1 },
+    east: { x: 1, y: 0 },
+    south: { x: 0, y: 1 },
+    west: { x: -1, y: 0 }
+  }[direction];
 }
 
 function drawArrow(g: Graphics, x: number, y: number, dir: Direction, color: number) {

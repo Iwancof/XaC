@@ -1,5 +1,20 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { dragTiles, tileCenter, type IpcCall } from "./support/xacHarness";
+
+type BuildTileId =
+  | "drill"
+  | "conveyor"
+  | "wire"
+  | "cpu_node"
+  | "router"
+  | "storage"
+  | "assembler"
+  | "turret"
+  | "drone_port";
+
+const clickBuild = async (page: Page, kind: BuildTileId) => {
+  await page.getByTestId(`build-tile-${kind}`).click();
+};
 
 test("places minimum devices from the right block list and opens drill behavior @full @placement", async ({ page }) => {
   test.setTimeout(120_000);
@@ -8,9 +23,9 @@ test("places minimum devices from the right block list and opens drill behavior 
 
   await expect(page.getByText("Blocks", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /Core/ })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: /Ore Drill/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Belt Conveyor/ })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Storage/ })).toBeVisible();
+  await expect(page.getByTestId("build-tile-drill")).toBeVisible();
+  await expect(page.getByTestId("build-tile-conveyor")).toBeVisible();
+  await expect(page.getByTestId("build-tile-storage")).toBeVisible();
   await expect(page.getByTestId("template-list")).toContainText("Rust Basic Drill");
   await expect(page.getByTestId("template-list")).toContainText("AssemblyScript Basic Router");
   const builtinBehaviorIds = await page.evaluate(() =>
@@ -51,18 +66,18 @@ test("places minimum devices from the right block list and opens drill behavior 
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
 
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await clickBuild(page, "drill");
   await expect(page.getByText("Placing drill")).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(page.getByText("Select to place")).toBeVisible();
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await clickBuild(page, "drill");
   await expect(page.getByText("Placing drill")).toBeVisible();
   await page.getByRole("button", { name: "Cancel placement", exact: true }).click();
   await expect(page.getByText("Select to place")).toBeVisible();
   await canvas.click({ position: tileCenter(18, 30) });
   await expect(page.locator(".metrics")).toContainText("blocks 1");
 
-  await page.getByRole("button", { name: /CPU Node/ }).click();
+  await clickBuild(page, "cpu_node");
   await expect(page.getByText("Placing cpu node")).toBeVisible();
   await canvas.click({ position: tileCenter(19, 29) });
   await expect(page.locator(".metrics")).toContainText("blocks 2");
@@ -75,7 +90,7 @@ test("places minimum devices from the right block list and opens drill behavior 
     ])
   );
 
-  await page.getByRole("button", { name: /Wire/ }).click();
+  await clickBuild(page, "wire");
   await expect(page.getByText("Placing wire")).toBeVisible();
   for (let x = 20; x <= 30; x += 1) {
     await canvas.click({ position: tileCenter(x, 29) });
@@ -92,7 +107,7 @@ test("places minimum devices from the right block list and opens drill behavior 
   ]);
   await expect(page.getByTestId("tutorial-cpu-network")).toHaveAttribute("data-state", "complete");
 
-  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await clickBuild(page, "conveyor");
   await expect(page.getByText("Placing conveyor")).toBeVisible();
   for (let x = 21; x < 30; x += 1) {
     await canvas.click({ position: tileCenter(x, 30) });
@@ -108,7 +123,7 @@ test("places minimum devices from the right block list and opens drill behavior 
   await rotateSelectedBlock.click();
   await expect(page.locator(".inspector")).toContainText("facing east");
 
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await clickBuild(page, "drill");
   await expect(page.getByText("Placing drill")).toBeVisible();
   await canvas.click({ position: tileCenter(20, 30) });
   await expect(page.locator(".metrics")).toContainText("blocks 23");
@@ -242,7 +257,7 @@ mine
   await expect(page.locator(".inspector")).toContainText("Select a block");
   await expect(page.locator(".log-panel")).toContainText("deconstructed Drill");
 
-  await page.getByRole("button", { name: /Storage/ }).click();
+  await clickBuild(page, "storage");
   await canvas.click({ position: tileCenter(20, 30) });
   await expect(page.locator(".metrics")).toContainText("blocks 23");
   await expect(page.locator(".inspector")).toContainText("storage");
@@ -298,7 +313,7 @@ mine
   });
   expect(deconstructCalls).toEqual([{ cmd: "deconstruct_block", args: { blockId: "drill_1" } }]);
 
-  await page.getByRole("button", { name: /Turret/ }).click();
+  await clickBuild(page, "turret");
   await canvas.click({ position: tileCenter(34, 30) });
   await expect(page.locator(".inspector")).toContainText("turret");
   await page.getByLabel("Assign behavior preset").selectOption("builtin.turret.priority");
@@ -316,7 +331,7 @@ mine
     { cmd: "assign_behavior", args: { blockId: "turret_1", behaviorId: "builtin.turret.priority" } }
   ]);
 
-  await page.getByRole("button", { name: /Drone Port/ }).click();
+  await clickBuild(page, "drone_port");
   await canvas.click({ position: tileCenter(35, 30) });
   await expect(page.locator(".inspector")).toContainText("drone_port");
 
@@ -362,7 +377,7 @@ mine
     { cmd: "open_behavior", args: { behaviorId: "builtin.carrier_drone.basic" } }
   ]);
 
-  await page.getByRole("button", { name: /Router/ }).click();
+  await clickBuild(page, "router");
   await canvas.click({ position: tileCenter(34, 28) });
   await expect(page.locator(".inspector")).toContainText("router");
   await page.getByLabel("Assign behavior preset").selectOption("builtin.router.ammo_east");
@@ -393,7 +408,7 @@ mine
   await buildButton.click();
   await expect(page.locator(".behavior-meta")).toContainText("status built");
 
-  await page.getByRole("button", { name: /Assembler/ }).click();
+  await clickBuild(page, "assembler");
   await canvas.click({ position: tileCenter(35, 28) });
   await expect(page.locator(".inspector")).toContainText("assembler");
   await page.getByRole("button", { name: "Open", exact: true }).click();
@@ -443,7 +458,7 @@ test("project behavior can be edited in place or forked for one block @behavior"
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
 
-  await page.getByRole("button", { name: /Turret/ }).click();
+  await clickBuild(page, "turret");
   await canvas.click({ position: tileCenter(34, 30) });
   await expect(page.locator(".inspector")).toContainText("turret_1");
   await page.getByRole("button", { name: "Edit Copy", exact: true }).click();
@@ -502,16 +517,16 @@ test("UI mock runs code-driven assembler ammo into turret defense @production @c
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
 
-  await page.getByRole("button", { name: /Assembler/ }).click();
+  await clickBuild(page, "assembler");
   await canvas.click({ position: tileCenter(34, 30) });
 
   await page.evaluate(() => window.__XAC_TEST_STATE__!.setBlockInventory("assembler_1", { plate: 1 }));
   for (let i = 0; i < 15; i += 1) {
     await page.getByRole("button", { name: /\+40/ }).click();
   }
-  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await clickBuild(page, "conveyor");
   await canvas.click({ position: tileCenter(35, 30) });
-  await page.getByRole("button", { name: /Turret/ }).click();
+  await clickBuild(page, "turret");
   await canvas.click({ position: tileCenter(36, 30) });
   for (let i = 0; i < 3; i += 1) {
     await page.getByRole("button", { name: /\+40/ }).click();
@@ -553,18 +568,22 @@ test("drag placement paints wire and conveyor mining lines @smoke @placement", a
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
+  await expect(page.getByTestId("build-fragment")).toContainText("Ore Drill");
+  await page.getByTestId("build-category-distribution").click();
+  await expect(page.getByTestId("build-fragment")).toContainText("Belt Conveyor");
+  await page.getByTestId("build-category-factory").click();
 
-  await page.getByRole("button", { name: /CPU Node/ }).click();
+  await clickBuild(page, "cpu_node");
   await canvas.click({ position: tileCenter(19, 29) });
-  await page.getByRole("button", { name: /Wire/ }).click();
+  await clickBuild(page, "wire");
   await dragTiles(page, canvas, tileCenter(20, 29), tileCenter(30, 29));
-  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await clickBuild(page, "conveyor");
   await dragTiles(page, canvas, tileCenter(21, 30), tileCenter(29, 30));
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await clickBuild(page, "drill");
   await canvas.click({ position: tileCenter(20, 30) });
 
   await page.getByRole("button", { name: /\+40/ }).click();
-  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await clickBuild(page, "conveyor");
   await dragTiles(page, canvas, tileCenter(18, 30), tileCenter(18, 33));
 
   const dragged = await page.evaluate(() => {
@@ -620,9 +639,9 @@ test("UI mock dispatches carrier drone ammo delivery @drones", async ({ page }) 
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
 
-  await page.getByRole("button", { name: /Drone Port/ }).click();
+  await clickBuild(page, "drone_port");
   await canvas.click({ position: tileCenter(34, 30) });
-  await page.getByRole("button", { name: /Turret/ }).click();
+  await clickBuild(page, "turret");
   await canvas.click({ position: tileCenter(42, 30) });
 
   for (let i = 0; i < 10; i += 1) {
@@ -655,7 +674,7 @@ test("quick save and load restore the UI world state @save", async ({ page }) =>
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
 
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await clickBuild(page, "drill");
   await canvas.click({ position: tileCenter(20, 30) });
   await expect(page.locator(".metrics")).toContainText("blocks 2");
   await expect(page.locator(".inspector")).toContainText("drill");
@@ -693,13 +712,13 @@ test("wire cutter can sever a CPU network in the UI simulation @network", async 
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
 
-  await page.getByRole("button", { name: /CPU Node/ }).click();
+  await clickBuild(page, "cpu_node");
   await canvas.click({ position: tileCenter(19, 29) });
-  await page.getByRole("button", { name: /Wire/ }).click();
+  await clickBuild(page, "wire");
   for (let x = 20; x <= 30; x += 1) {
     await canvas.click({ position: tileCenter(x, 29) });
   }
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await clickBuild(page, "drill");
   await canvas.click({ position: tileCenter(20, 30) });
 
   const connectedDrill = await page.evaluate(() =>

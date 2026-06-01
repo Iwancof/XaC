@@ -3,10 +3,8 @@ import {
   FolderOpen,
   Pause,
   Play,
-  RotateCw,
   Save,
-  StepForward,
-  X
+  StepForward
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -29,13 +27,13 @@ import {
   setRunning,
   stepTicks
 } from "./api";
+import { BuildPalette } from "./BuildPalette";
 import { CodeEditor } from "./CodeEditor";
 import { GridWorld } from "./GridWorld";
 import { Inspector } from "./Inspector";
 import { LogisticsPanel } from "./LogisticsPanel";
 import { OverlayDetails } from "./OverlayDetails";
 import { OVERLAYS, type Overlay } from "./overlays";
-import { PALETTE } from "./palette";
 import { TutorialPanel } from "./TutorialPanel";
 import type {
   BehaviorSource,
@@ -366,54 +364,18 @@ export function App() {
         </div>
 
         <aside className="right-pane">
-          <section className="block-list-panel">
-            <div className="panel-heading">
-              <span>Blocks</span>
-              <strong>{buildKind ? `Placing ${buildKind.replaceAll("_", " ")}` : "Select to place"}</strong>
-            </div>
-            <div className="block-list">
-              {PALETTE.map((item) => (
-                <button
-                  key={item.kind}
-                  className={buildKind === item.kind ? "block-item selected" : "block-item"}
-                  onClick={() => {
-                    setBuildKind(buildKind === item.kind ? null : item.kind);
-                    if (item.dir) setDirection(item.dir);
-                  }}
-                  title={`${item.category}: ${item.label}`}
-                >
-                  <span>{item.label}</span>
-                  <small>{item.category}</small>
-                </button>
-              ))}
-            </div>
-            <div className="placement-controls">
-              <span>Direction</span>
-              <select value={direction} onChange={(event) => setDirection(event.target.value as Direction)}>
-                <option value="north">North</option>
-                <option value="east">East</option>
-                <option value="south">South</option>
-                <option value="west">West</option>
-              </select>
-              <button
-                onClick={rotatePlacementDirection}
-                title="Rotate placement direction clockwise"
-                aria-label="Rotate placement direction"
-              >
-                <RotateCw size={16} />
-                Rotate
-              </button>
-              <button
-                onClick={cancelPlacement}
-                disabled={!buildKind}
-                title="Cancel placement mode"
-                aria-label="Cancel placement"
-              >
-                <X size={16} />
-                Cancel
-              </button>
-            </div>
-          </section>
+          <BuildPalette
+            snapshot={snapshot}
+            buildKind={buildKind}
+            direction={direction}
+            onSelectBlock={(kind, defaultDirection) => {
+              setBuildKind(kind);
+              if (defaultDirection) setDirection(defaultDirection);
+            }}
+            onDirectionChange={setDirection}
+            onRotateDirection={rotatePlacementDirection}
+            onCancelPlacement={cancelPlacement}
+          />
 
           <Inspector
             snapshot={snapshot}
