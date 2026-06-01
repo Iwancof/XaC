@@ -72,6 +72,7 @@ declare global {
       reset: () => void;
       snapshot: () => GameSnapshot;
       spawnCarrierDrone: (homePortId?: string) => string;
+      forceOverBudget: (entityId: string) => void;
     };
   }
 }
@@ -129,7 +130,8 @@ window.__XAC_TEST_STATE__ = {
     window.__XAC_TEST_STATE__!.calls = state.calls;
   },
   snapshot,
-  spawnCarrierDrone
+  spawnCarrierDrone,
+  forceOverBudget
 };
 
 function createInitialState(): MockState {
@@ -496,6 +498,25 @@ function spawnCarrierDrone(homePortId?: string) {
   return id;
 }
 
+function forceOverBudget(entityId: string) {
+  const block = state.blocks.find((candidate) => candidate.id === entityId);
+  if (block) {
+    block.status = "over_budget";
+    recordRuntime(block, 40, 40, 0, "mocked-over-budget-wasm", true);
+    log("warn", entityId, "over_budget with 40 fuel");
+    return;
+  }
+
+  const drone = state.drones.find((candidate) => candidate.id === entityId);
+  if (drone) {
+    recordRuntime(drone, 40, 40, 0, "mocked-over-budget-wasm", true);
+    log("warn", entityId, "drone over_budget with 40 fuel");
+    return;
+  }
+
+  throw new Error(`unknown runtime entity: ${entityId}`);
+}
+
 function recomputeNetworks(blocks: Block[]): Network[] {
   const blockIds = blocks.filter((block) => isNetworkNode(block.kind)).map((block) => block.id);
   const activeDevices = blocks.filter((block) => block.active).length;
@@ -636,7 +657,8 @@ function recordRuntime(
   fuelBudget: number,
   fuelSpent: number,
   fuelRemaining: number,
-  wasmHash: string
+  wasmHash: string,
+  overBudget = false
 ) {
   entity.behavior_runtime = {
     last_tick: state.tick,
@@ -644,7 +666,7 @@ function recordRuntime(
     fuel_budget: fuelBudget,
     fuel_spent: fuelSpent,
     fuel_remaining: fuelRemaining,
-    over_budget: false,
+    over_budget: overBudget,
     wasm_hash: wasmHash
   };
 }

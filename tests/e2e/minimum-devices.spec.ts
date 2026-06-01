@@ -16,6 +16,7 @@ declare global {
         selected_id: string | null;
       };
       spawnCarrierDrone: (homePortId?: string) => string;
+      forceOverBudget: (entityId: string) => void;
     };
     __XAC_EDITOR__?: {
       getValue: () => string;
@@ -135,7 +136,12 @@ test("places minimum devices from the right block list and opens drill behavior"
       expect.objectContaining({ item: "ore", amount: 1, from_entity: "conveyor_9", to_entity: "core_1" })
     ])
   );
-  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await page.evaluate(() => window.__XAC_TEST_STATE__!.forceOverBudget("drill_1"));
+  await page.keyboard.press("Escape");
+  await canvas.click({ position: tileCenter(20, 30) });
+  await expect(page.locator(".inspector")).toContainText("over budget");
+  await expect(page.locator(".inspector")).toContainText("fuel 40/40");
+  await expect(page.locator(".log-panel")).toContainText("over_budget with 40 fuel");
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
   await expect(page.locator(".inspector")).toContainText("ore: 41");

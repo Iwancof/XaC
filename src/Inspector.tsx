@@ -271,6 +271,7 @@ function RuntimeStats({ stats }: { stats: BehaviorRuntimeStats }) {
   const hash = stats.wasm_hash ? stats.wasm_hash.slice(0, 10) : "none";
   return (
     <div className={stats.over_budget ? "runtime-card over-budget" : "runtime-card"}>
+      <span>{stats.over_budget ? "over budget" : "budget ok"}</span>
       <span>runtime tick {stats.last_tick ?? "never"}</span>
       <span>runs {stats.run_count}</span>
       <span>
