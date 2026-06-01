@@ -9,6 +9,7 @@ use xac_wasm::{BehaviorRuntime, CompiledBehavior};
 
 mod behavior;
 mod behavior_api;
+mod behavior_host;
 mod behavior_runner;
 mod block_defs;
 mod combat;
