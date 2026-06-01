@@ -182,6 +182,31 @@ pub enum BlockKind {
     DronePort,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ItemAcceptance {
+    Any,
+    None,
+    Only(&'static [ItemKind]),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct BlockMetadata {
+    pub id: &'static str,
+    pub default_behavior_id: Option<&'static str>,
+    pub programmable: bool,
+    pub network_node: bool,
+    pub network_connector: bool,
+    pub local_cpu_rate: f32,
+    pub network_cpu_output: f32,
+    pub max_hp: i32,
+    pub footprint: (i32, i32),
+    pub inventory_capacity: u32,
+    pub accepts: ItemAcceptance,
+}
+
+const ACCEPTS_ORE_PLATE: &[ItemKind] = &[ItemKind::Ore, ItemKind::Plate];
+const ACCEPTS_AMMO: &[ItemKind] = &[ItemKind::Ammo];
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BehaviorKind {
@@ -207,118 +232,201 @@ impl BehaviorKind {
 }
 
 impl BlockKind {
-    pub fn as_str(self) -> &'static str {
+    pub fn all() -> [Self; 10] {
+        [
+            BlockKind::Core,
+            BlockKind::Wire,
+            BlockKind::CpuNode,
+            BlockKind::Drill,
+            BlockKind::Conveyor,
+            BlockKind::Router,
+            BlockKind::Storage,
+            BlockKind::Assembler,
+            BlockKind::Turret,
+            BlockKind::DronePort,
+        ]
+    }
+
+    pub fn metadata(self) -> BlockMetadata {
         match self {
-            BlockKind::Core => "core",
-            BlockKind::Wire => "wire",
-            BlockKind::CpuNode => "cpu_node",
-            BlockKind::Drill => "drill",
-            BlockKind::Conveyor => "conveyor",
-            BlockKind::Router => "router",
-            BlockKind::Storage => "storage",
-            BlockKind::Assembler => "assembler",
-            BlockKind::Turret => "turret",
-            BlockKind::DronePort => "drone_port",
+            BlockKind::Core => BlockMetadata {
+                id: "core",
+                default_behavior_id: None,
+                programmable: false,
+                network_node: true,
+                network_connector: true,
+                local_cpu_rate: 0.0,
+                network_cpu_output: 120.0,
+                max_hp: 500,
+                footprint: (4, 4),
+                inventory_capacity: 1000,
+                accepts: ItemAcceptance::Any,
+            },
+            BlockKind::Wire => BlockMetadata {
+                id: "wire",
+                default_behavior_id: None,
+                programmable: false,
+                network_node: true,
+                network_connector: true,
+                local_cpu_rate: 0.0,
+                network_cpu_output: 0.0,
+                max_hp: 15,
+                footprint: (1, 1),
+                inventory_capacity: 0,
+                accepts: ItemAcceptance::None,
+            },
+            BlockKind::CpuNode => BlockMetadata {
+                id: "cpu_node",
+                default_behavior_id: None,
+                programmable: false,
+                network_node: true,
+                network_connector: true,
+                local_cpu_rate: 0.0,
+                network_cpu_output: 80.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 0,
+                accepts: ItemAcceptance::None,
+            },
+            BlockKind::Drill => BlockMetadata {
+                id: "drill",
+                default_behavior_id: Some("builtin.drill.basic"),
+                programmable: true,
+                network_node: true,
+                network_connector: false,
+                local_cpu_rate: 1.0,
+                network_cpu_output: 0.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 10,
+                accepts: ItemAcceptance::None,
+            },
+            BlockKind::Conveyor => BlockMetadata {
+                id: "conveyor",
+                default_behavior_id: None,
+                programmable: false,
+                network_node: false,
+                network_connector: false,
+                local_cpu_rate: 0.0,
+                network_cpu_output: 0.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 1,
+                accepts: ItemAcceptance::Any,
+            },
+            BlockKind::Router => BlockMetadata {
+                id: "router",
+                default_behavior_id: Some("builtin.router.basic"),
+                programmable: true,
+                network_node: true,
+                network_connector: false,
+                local_cpu_rate: 1.0,
+                network_cpu_output: 0.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 1,
+                accepts: ItemAcceptance::Any,
+            },
+            BlockKind::Storage => BlockMetadata {
+                id: "storage",
+                default_behavior_id: None,
+                programmable: false,
+                network_node: true,
+                network_connector: false,
+                local_cpu_rate: 0.0,
+                network_cpu_output: 0.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 300,
+                accepts: ItemAcceptance::Any,
+            },
+            BlockKind::Assembler => BlockMetadata {
+                id: "assembler",
+                default_behavior_id: Some("builtin.assembler.basic"),
+                programmable: true,
+                network_node: true,
+                network_connector: false,
+                local_cpu_rate: 2.0,
+                network_cpu_output: 0.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 100,
+                accepts: ItemAcceptance::Only(ACCEPTS_ORE_PLATE),
+            },
+            BlockKind::Turret => BlockMetadata {
+                id: "turret",
+                default_behavior_id: Some("builtin.turret.basic"),
+                programmable: true,
+                network_node: true,
+                network_connector: false,
+                local_cpu_rate: 3.0,
+                network_cpu_output: 0.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 80,
+                accepts: ItemAcceptance::Only(ACCEPTS_AMMO),
+            },
+            BlockKind::DronePort => BlockMetadata {
+                id: "drone_port",
+                default_behavior_id: Some("builtin.drone_port.basic"),
+                programmable: true,
+                network_node: true,
+                network_connector: true,
+                local_cpu_rate: 3.0,
+                network_cpu_output: 20.0,
+                max_hp: 90,
+                footprint: (1, 1),
+                inventory_capacity: 120,
+                accepts: ItemAcceptance::Any,
+            },
         }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.metadata().id
     }
 
     pub fn default_behavior_id(self) -> Option<&'static str> {
-        match self {
-            BlockKind::Drill => Some("builtin.drill.basic"),
-            BlockKind::Router => Some("builtin.router.basic"),
-            BlockKind::Assembler => Some("builtin.assembler.basic"),
-            BlockKind::Turret => Some("builtin.turret.basic"),
-            BlockKind::DronePort => Some("builtin.drone_port.basic"),
-            _ => None,
-        }
+        self.metadata().default_behavior_id
     }
 
     pub fn is_programmable(self) -> bool {
-        matches!(
-            self,
-            BlockKind::Drill
-                | BlockKind::Router
-                | BlockKind::Assembler
-                | BlockKind::Turret
-                | BlockKind::DronePort
-        )
+        self.metadata().programmable
     }
 
     pub fn is_network_node(self) -> bool {
-        matches!(
-            self,
-            BlockKind::Core
-                | BlockKind::Wire
-                | BlockKind::CpuNode
-                | BlockKind::Drill
-                | BlockKind::Router
-                | BlockKind::Assembler
-                | BlockKind::Turret
-                | BlockKind::DronePort
-                | BlockKind::Storage
-        )
+        self.metadata().network_node
     }
 
     pub fn local_cpu_rate(self) -> f32 {
-        match self {
-            BlockKind::Router | BlockKind::Drill => 1.0,
-            BlockKind::Assembler => 2.0,
-            BlockKind::Turret | BlockKind::DronePort => 3.0,
-            _ => 0.0,
-        }
+        self.metadata().local_cpu_rate
     }
 
     pub fn network_cpu_output(self) -> f32 {
-        match self {
-            BlockKind::Core => 120.0,
-            BlockKind::CpuNode => 80.0,
-            BlockKind::DronePort => 20.0,
-            _ => 0.0,
-        }
+        self.metadata().network_cpu_output
     }
 
     pub fn max_hp(self) -> i32 {
-        match self {
-            BlockKind::Wire => 15,
-            BlockKind::Core => 500,
-            _ => 90,
-        }
+        self.metadata().max_hp
     }
 
     pub fn footprint_size(self) -> (i32, i32) {
-        match self {
-            BlockKind::Core => (4, 4),
-            _ => (1, 1),
-        }
+        self.metadata().footprint
     }
 
     pub fn is_network_connector(self) -> bool {
-        matches!(
-            self,
-            BlockKind::Core | BlockKind::Wire | BlockKind::CpuNode | BlockKind::DronePort
-        )
+        self.metadata().network_connector
     }
 
     pub fn inventory_capacity(self) -> u32 {
-        match self {
-            BlockKind::Core => 1000,
-            BlockKind::Storage => 300,
-            BlockKind::Conveyor | BlockKind::Router => 1,
-            BlockKind::Turret => 80,
-            BlockKind::Assembler => 100,
-            BlockKind::Drill => 10,
-            BlockKind::DronePort => 120,
-            BlockKind::Wire | BlockKind::CpuNode => 0,
-        }
+        self.metadata().inventory_capacity
     }
 
     pub fn can_accept_item(self, item: &ItemKind) -> bool {
-        match self {
-            BlockKind::Wire | BlockKind::CpuNode | BlockKind::Drill => false,
-            BlockKind::Turret => item == &ItemKind::Ammo,
-            BlockKind::Conveyor | BlockKind::Router => true,
-            BlockKind::Assembler => matches!(item, ItemKind::Ore | ItemKind::Plate),
-            BlockKind::Core | BlockKind::Storage | BlockKind::DronePort => true,
+        match self.metadata().accepts {
+            ItemAcceptance::Any => true,
+            ItemAcceptance::None => false,
+            ItemAcceptance::Only(items) => items.contains(item),
         }
     }
 }
@@ -617,6 +725,29 @@ pub struct GameSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde::Deserialize;
+
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SharedBlockMetadata {
+        max_hp: i32,
+        inventory_capacity: u32,
+        footprint: [i32; 2],
+        local_cpu_rate: f32,
+        network_cpu_output: f32,
+        programmable: bool,
+        network_node: bool,
+        network_connector: bool,
+        default_behavior_id: Option<String>,
+        accepts: SharedItemAcceptance,
+    }
+
+    #[derive(Debug, Deserialize)]
+    #[serde(untagged)]
+    enum SharedItemAcceptance {
+        Mode(String),
+        Items(Vec<ItemKind>),
+    }
 
     #[test]
     fn cpu_scaled_ticks_uses_core_speed_contract() {
@@ -694,6 +825,60 @@ mod tests {
         assert_eq!(BlockKind::Core.default_behavior_id(), None);
         assert_eq!(BlockKind::Conveyor.default_behavior_id(), None);
         assert_eq!(BlockKind::Wire.default_behavior_id(), None);
+    }
+
+    #[test]
+    fn shared_block_metadata_asset_matches_core_contract() {
+        let shared: std::collections::BTreeMap<String, SharedBlockMetadata> =
+            serde_json::from_str(include_str!("../../../assets/block_metadata.json")).unwrap();
+        assert_eq!(shared.len(), BlockKind::all().len());
+
+        for kind in BlockKind::all() {
+            let metadata = kind.metadata();
+            let shared = shared
+                .get(kind.as_str())
+                .unwrap_or_else(|| panic!("missing shared metadata for {}", kind.as_str()));
+            assert_eq!(shared.max_hp, metadata.max_hp, "{}", kind.as_str());
+            assert_eq!(
+                shared.inventory_capacity,
+                metadata.inventory_capacity,
+                "{}",
+                kind.as_str()
+            );
+            assert_eq!(
+                shared.footprint,
+                [metadata.footprint.0, metadata.footprint.1]
+            );
+            assert_eq!(shared.local_cpu_rate, metadata.local_cpu_rate);
+            assert_eq!(shared.network_cpu_output, metadata.network_cpu_output);
+            assert_eq!(shared.programmable, metadata.programmable);
+            assert_eq!(shared.network_node, metadata.network_node);
+            assert_eq!(shared.network_connector, metadata.network_connector);
+            assert_eq!(
+                shared.default_behavior_id.as_deref(),
+                metadata.default_behavior_id
+            );
+            assert_shared_acceptance(&shared.accepts, metadata.accepts, kind);
+        }
+    }
+
+    fn assert_shared_acceptance(
+        shared: &SharedItemAcceptance,
+        metadata: ItemAcceptance,
+        kind: BlockKind,
+    ) {
+        match (shared, metadata) {
+            (SharedItemAcceptance::Mode(mode), ItemAcceptance::Any) => {
+                assert_eq!(mode, "any", "{}", kind.as_str());
+            }
+            (SharedItemAcceptance::Mode(mode), ItemAcceptance::None) => {
+                assert_eq!(mode, "none", "{}", kind.as_str());
+            }
+            (SharedItemAcceptance::Items(shared), ItemAcceptance::Only(core)) => {
+                assert_eq!(shared.as_slice(), core, "{}", kind.as_str());
+            }
+            _ => panic!("acceptance mismatch for {}", kind.as_str()),
+        }
     }
 
     #[test]
