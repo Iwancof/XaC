@@ -124,8 +124,11 @@ test("places minimum devices from the right block list and opens drill behavior"
 
   await page.getByRole("button", { name: /\+40/ }).click();
   await expect(page.locator(".metrics")).toContainText("core ore 41");
+  await expect(page.locator(".metrics")).toContainText("flows");
   await expect(page.locator(".inspector")).toContainText("runtime tick");
   await expect(page.locator(".inspector")).toContainText("wasm mocked-was");
+  await expect(page.getByLabel("Logistics")).toContainText("ore x1");
+  await expect(page.getByLabel("Logistics")).toContainText("conveyor_9 -> core_1");
   const oreFlows = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().item_flows ?? []);
   expect(oreFlows).toEqual(
     expect.arrayContaining([

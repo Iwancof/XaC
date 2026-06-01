@@ -104,7 +104,8 @@ button.danger:hover:not(:disabled) {
 .topbar-controls,
 .metrics,
 .block-list,
-.overlay-controls {
+.overlay-controls,
+.logistics-heading {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -361,7 +362,7 @@ button.danger:hover:not(:disabled) {
 .bottom-bar {
   min-height: 0;
   display: grid;
-  grid-template-columns: 420px 1fr;
+  grid-template-columns: 390px minmax(280px, 420px) 1fr;
   gap: 12px;
   padding: 10px 12px;
   border-top: 1px solid #253038;
@@ -379,6 +380,7 @@ button.danger:hover:not(:disabled) {
   background: #173040;
 }
 
+.logistics-panel,
 .log-panel {
   min-width: 0;
   min-height: 0;
@@ -387,6 +389,73 @@ button.danger:hover:not(:disabled) {
   border-radius: 6px;
   padding: 6px;
   background: #0f1518;
+}
+
+.logistics-heading {
+  justify-content: space-between;
+  min-height: 22px;
+  color: #f3f7f9;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.logistics-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logistics-heading strong {
+  color: #8da0aa;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.logistics-list {
+  display: grid;
+  gap: 3px;
+  margin-top: 4px;
+}
+
+.logistics-row {
+  display: grid;
+  grid-template-columns: 44px 76px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  color: #b8c7ce;
+  font-size: 11px;
+}
+
+.logistics-row span {
+  color: #738691;
+}
+
+.logistics-row strong,
+.logistics-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logistics-row.flow strong {
+  color: #d8a94a;
+}
+
+.logistics-row.job strong {
+  color: #38bdf8;
+}
+
+.logistics-row small,
+.logistics-empty {
+  color: #8da0aa;
+}
+
+.logistics-empty {
+  display: grid;
+  place-items: center;
+  min-height: 44px;
+  font-size: 12px;
 }
 
 .log {
@@ -423,12 +492,14 @@ button.danger:hover:not(:disabled) {
 
   .bottom-bar {
     grid-template-columns: 1fr;
+    overflow: auto;
   }
 
   .block-item {
     width: 100%;
   }
 
+  .logistics-panel,
   .log-panel {
     min-height: 54px;
   }

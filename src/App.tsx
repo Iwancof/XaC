@@ -31,6 +31,7 @@ import {
 import { CodeEditor } from "./CodeEditor";
 import { GridWorld } from "./GridWorld";
 import { Inspector } from "./Inspector";
+import { LogisticsPanel } from "./LogisticsPanel";
 import { PALETTE } from "./palette";
 import type {
   BehaviorSource,
@@ -304,6 +305,8 @@ export function App() {
           <span>wire {snapshot?.status.wire_threats ?? 0}</span>
           <span>damage {snapshot?.status.damaged_wires ?? 0}</span>
           <span>net CPU {snapshot?.status.network_cpu.toFixed(0) ?? "0"}</span>
+          <span>jobs {snapshot?.pending_jobs.length ?? 0}</span>
+          <span>flows {snapshot?.item_flows.length ?? 0}</span>
           <span>core ore {coreItemCount("ore")}</span>
           <span>core plate {coreItemCount("plate")}</span>
           <span>core ammo {coreItemCount("ammo")}</span>
@@ -416,6 +419,8 @@ export function App() {
             </button>
           ))}
         </section>
+
+        <LogisticsPanel snapshot={snapshot} />
 
         <section className="log-panel">
           {error && <div className="log error">UI: {error}</div>}
