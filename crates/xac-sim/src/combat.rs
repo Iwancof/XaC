@@ -5,6 +5,16 @@ use crate::geometry::nearest_block_target;
 use crate::wave;
 use crate::Simulation;
 
+const TURRET_DAMAGE: i32 = 12;
+
+#[derive(Clone, Debug)]
+struct VisibleTurretTarget {
+    id: String,
+    kind: EnemyKind,
+    hp: i32,
+    distance: f32,
+}
+
 impl Simulation {
     pub(crate) fn run_turret_once(&mut self, turret_id: &str, priority: &[TargetRule]) {
         let Some(turret) = self.blocks.get(turret_id).cloned() else {
@@ -17,16 +27,8 @@ impl Simulation {
         if turret.inventory.count(&ItemKind::Ammo) == 0 {
             return;
         }
-        let target = self.choose_target(turret.pos, priority);
-        if let Some(enemy_id) = target {
-            if let Some(enemy) = self.enemies.get_mut(&enemy_id) {
-                enemy.hp -= 12;
-            }
-            if let Some(block) = self.blocks.get_mut(turret_id) {
-                block.inventory.remove(&ItemKind::Ammo, 1);
-                block.target_id = Some(enemy_id.clone());
-                block.status = format!("attacking {enemy_id}");
-            }
+        if let Some(enemy_id) = self.choose_target(turret.pos, priority) {
+            self.apply_turret_attack(turret_id, &enemy_id, format!("attacking {enemy_id}"));
         }
     }
 
@@ -41,21 +43,18 @@ impl Simulation {
         if turret.inventory.count(&ItemKind::Ammo) == 0 {
             return;
         }
-        let Some(enemy_id) = self
-            .visible_turret_target_ids(turret.pos)
+        let Some(target) = self
+            .visible_turret_targets(turret.pos)
             .get(index as usize)
             .cloned()
         else {
             return;
         };
-        if let Some(enemy) = self.enemies.get_mut(&enemy_id) {
-            enemy.hp -= 12;
-        }
-        if let Some(block) = self.blocks.get_mut(turret_id) {
-            block.inventory.remove(&ItemKind::Ammo, 1);
-            block.target_id = Some(enemy_id.clone());
-            block.status = format!("attacking scanned {index}: {enemy_id}");
-        }
+        self.apply_turret_attack(
+            turret_id,
+            &target.id,
+            format!("attacking scanned {index}: {}", target.id),
+        );
     }
 
     fn clear_block_target(&mut self, block_id: &str) {
@@ -71,17 +70,9 @@ impl Simulation {
         if turret.kind != BlockKind::Turret {
             return Vec::new();
         }
-        let origin = WorldPos::from_tile_center(turret.pos);
-        let range = turret.kind.attack_range_tiles().unwrap_or(0.0);
-        let mut in_range: Vec<_> = self
-            .enemies
-            .values()
-            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= range)
-            .collect();
-        in_range.sort_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)));
-        in_range
+        self.visible_turret_targets(turret.pos)
             .into_iter()
-            .map(|enemy| (enemy.kind, enemy.hp, origin.distance(enemy.pos)))
+            .map(|target| (target.kind, target.hp, target.distance))
             .collect()
     }
 
@@ -154,36 +145,30 @@ impl Simulation {
     }
 
     fn choose_target(&self, origin: Pos, priority: &[TargetRule]) -> Option<String> {
-        let origin = WorldPos::from_tile_center(origin);
-        let range = BlockKind::Turret.attack_range_tiles().unwrap_or(0.0);
-        let in_range: Vec<_> = self
-            .enemies
-            .values()
-            .filter(|e| e.hp > 0 && origin.distance(e.pos) <= range)
-            .collect();
-        if in_range.is_empty() {
+        let targets = self.visible_turret_targets(origin);
+        if targets.is_empty() {
             return None;
         }
         for rule in priority {
             match rule {
                 TargetRule::Kind(kind) => {
-                    if let Some(enemy) = in_range
+                    if let Some(enemy) = targets
                         .iter()
-                        .filter(|e| e.kind == *kind)
-                        .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
+                        .filter(|target| target.kind == *kind)
+                        .min_by(|a, b| a.distance.total_cmp(&b.distance))
                     {
                         return Some(enemy.id.clone());
                     }
                 }
                 TargetRule::LowestHp => {
-                    if let Some(enemy) = in_range.iter().min_by_key(|e| e.hp) {
+                    if let Some(enemy) = targets.iter().min_by_key(|target| target.hp) {
                         return Some(enemy.id.clone());
                     }
                 }
                 TargetRule::Nearest => {
-                    if let Some(enemy) = in_range
+                    if let Some(enemy) = targets
                         .iter()
-                        .min_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)))
+                        .min_by(|a, b| a.distance.total_cmp(&b.distance))
                     {
                         return Some(enemy.id.clone());
                     }
@@ -193,16 +178,35 @@ impl Simulation {
         None
     }
 
-    fn visible_turret_target_ids(&self, origin: Pos) -> Vec<String> {
+    fn visible_turret_targets(&self, origin: Pos) -> Vec<VisibleTurretTarget> {
         let origin = WorldPos::from_tile_center(origin);
         let range = BlockKind::Turret.attack_range_tiles().unwrap_or(0.0);
         let mut in_range: Vec<_> = self
             .enemies
             .values()
-            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= range)
+            .filter_map(|enemy| {
+                let distance = origin.distance(enemy.pos);
+                (enemy.hp > 0 && distance <= range).then_some(VisibleTurretTarget {
+                    id: enemy.id.clone(),
+                    kind: enemy.kind,
+                    hp: enemy.hp,
+                    distance,
+                })
+            })
             .collect();
-        in_range.sort_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)));
-        in_range.into_iter().map(|enemy| enemy.id.clone()).collect()
+        in_range.sort_by(|a, b| a.distance.total_cmp(&b.distance));
+        in_range
+    }
+
+    fn apply_turret_attack(&mut self, turret_id: &str, enemy_id: &str, status: String) {
+        if let Some(enemy) = self.enemies.get_mut(enemy_id) {
+            enemy.hp -= TURRET_DAMAGE;
+        }
+        if let Some(block) = self.blocks.get_mut(turret_id) {
+            block.inventory.remove(&ItemKind::Ammo, 1);
+            block.target_id = Some(enemy_id.to_string());
+            block.status = status;
+        }
     }
 }
 
