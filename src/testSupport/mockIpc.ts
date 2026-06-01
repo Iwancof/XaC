@@ -1,17 +1,11 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import {
-  blockDefaultBehaviorId,
   blockAttackRangeTiles,
-  blockInventoryCapacity,
-  blockLocalCpuRate,
   blockMaxHp,
   canAcceptItem,
   displayBlockKind,
-  DRILL_MINE_BASE_TICKS,
-  isNetworkNode,
-  isProgrammableBlock
+  DRILL_MINE_BASE_TICKS
 } from "../gameMetadata";
-import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
 import { enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
 import { MAP_HEIGHT, MAP_WIDTH, terrainAt } from "../mapSeed";
@@ -46,22 +40,27 @@ import {
 } from "./mockLogistics";
 import { recomputeNetworks } from "./mockNetwork";
 import { validateMockBehaviorBuild } from "./mockBehaviorValidator";
+import {
+  clone,
+  createInitialMockState,
+  createMockBlock,
+  type BehaviorOwner,
+  type CommandCall,
+  type IdKind,
+  type MockState,
+  type RuntimeEntity
+} from "./mockState";
 import type {
-  BehaviorRuntimeStats,
   BehaviorSource,
   BehaviorSummary,
   Block,
   BlockKind,
   BuildResult,
-  DeliveryJob,
   Direction,
-  Drone,
   Enemy,
   EnemyKind,
   GameSnapshot,
-  ItemFlowEvent,
   ItemKind,
-  LogEntry,
   LogLevel,
   Network,
   Pos,
@@ -70,35 +69,6 @@ import type {
 
 const MOCK_ASSEMBLER_RECIPE_TICKS = 20;
 const MOCK_TURRET_DAMAGE = 12;
-
-type CommandCall = {
-  cmd: string;
-  args: unknown;
-};
-
-type MutableBehavior = BehaviorSource;
-type IdKind = BlockKind | "behavior" | "drone" | "enemy" | "flow" | "job";
-type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
-type SavedMockState = Omit<MockState, "calls" | "saves">;
-type BehaviorOwner =
-  | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
-  | { kind: "drone"; entity: Drone; behaviorKind: "carrier_drone" };
-
-interface MockState {
-  tick: number;
-  running: boolean;
-  blocks: Block[];
-  enemies: Enemy[];
-  drones: Drone[];
-  pendingJobs: DeliveryJob[];
-  itemFlows: ItemFlowEvent[];
-  logs: LogEntry[];
-  selectedId: string | null;
-  behaviors: Record<string, MutableBehavior>;
-  idCounters: Partial<Record<IdKind, number>>;
-  calls: CommandCall[];
-  saves: Record<string, SavedMockState>;
-}
 
 declare global {
   interface Window {
@@ -115,7 +85,7 @@ declare global {
   }
 }
 
-let state = createInitialState();
+let state = createInitialMockState();
 
 mockIPC((cmd, args = {}) => {
   state.calls.push({ cmd, args: clone(args) });
@@ -172,7 +142,7 @@ mockIPC((cmd, args = {}) => {
 window.__XAC_TEST_STATE__ = {
   calls: state.calls,
   reset: () => {
-    state = createInitialState();
+    state = createInitialMockState();
     window.__XAC_TEST_STATE__!.calls = state.calls;
   },
   snapshot,
@@ -182,54 +152,6 @@ window.__XAC_TEST_STATE__ = {
   forceOverBudget,
   forceRuntimeError
 };
-
-function createInitialState(): MockState {
-  const core = makeBlock("core", { x: 30, y: 30 }, "east", "core_1");
-  core.inventory.items = {
-    ore: 40,
-    plate: 20,
-    ammo: 60
-  };
-  core.status = "core online";
-  core.network_id = 1;
-
-  return {
-    tick: 0,
-    running: false,
-    blocks: [core],
-    enemies: [
-      {
-        id: "enemy_1",
-        kind: "runner",
-        pos: { x: 28.5, y: 28.5 },
-        hp: enemyMaxHp("runner"),
-        max_hp: enemyMaxHp("runner"),
-        move_speed: enemyMoveSpeed("runner"),
-        attack_cooldown: 0,
-        target_id: core.id
-      }
-    ],
-    drones: [],
-    pendingJobs: [],
-    itemFlows: [],
-    logs: [
-      {
-        tick: 0,
-        level: "info",
-        source: "system",
-        message: "XaC MVP world initialized"
-      }
-    ],
-    selectedId: core.id,
-    behaviors: builtinBehaviors(),
-    idCounters: {
-      core: 1,
-      enemy: 1
-    },
-    calls: [],
-    saves: {}
-  };
-}
 
 function snapshot(): GameSnapshot {
   const blocks = state.blocks.map((block) => ({ ...block, inventory: clone(block.inventory) }));
@@ -310,7 +232,7 @@ function placeBlockInternal(kind: BlockKind, pos: Pos, dir: Direction) {
     throw new Error("tile is not buildable or is already occupied");
   }
 
-  const block = makeBlock(kind, pos, dir);
+  const block = createMockBlock(kind, pos, dir, makeId(kind));
   state.blocks.push(block);
   state.selectedId = block.id;
   log("info", block.id, `placed ${displayBlockKind(kind)} at ${pos.x},${pos.y}`);
@@ -536,50 +458,6 @@ function saveSlotName(slot: string) {
     throw new Error("save slot can only contain letters, numbers, '-' and '_'");
   }
   return trimmed;
-}
-
-function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind)): Block {
-  return {
-    id,
-    kind,
-    pos,
-    dir,
-    hp: blockMaxHp(kind),
-    inventory: { items: {}, capacity: blockInventoryCapacity(kind) },
-    recipe: null,
-    behavior_ref: blockDefaultBehaviorId(kind),
-    tags: kind === "turret" ? ["frontline"] : [],
-    active: isProgrammableBlock(kind),
-    network_id: isNetworkNode(kind) ? 1 : null,
-    effective_cpu_rate: blockLocalCpuRate(kind),
-    fuel_bank: 0,
-    behavior_runtime: null,
-    progress: 0,
-    target_id: null,
-    status: "idle"
-  };
-}
-
-function builtinBehaviors(): Record<string, MutableBehavior> {
-  return Object.fromEntries(
-    BUILTIN_BEHAVIOR_PRESETS.map((preset) => [
-      preset.id,
-      {
-        summary: {
-          id: preset.id,
-          display_name: preset.displayName,
-          base_kind: preset.baseKind,
-          world: preset.world,
-          source_language: detectBehaviorSourceLanguage(preset.source),
-          builtin: true,
-          used_by: 0,
-          source_path: preset.sourcePath,
-          build_status: "builtin"
-        },
-        source: preset.source
-      }
-    ])
-  );
 }
 
 function behaviorSummaries(): BehaviorSummary[] {
@@ -890,8 +768,4 @@ function log(level: LogLevel, source: string, message: string) {
   while (state.logs.length > 160) {
     state.logs.shift();
   }
-}
-
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
 }
