@@ -58,6 +58,15 @@ impl Simulation {
         self.create_delivery_job_from_port(port_id, ItemKind::Ammo, 10, "frontline", 50);
     }
 
+    pub(crate) fn docked_drone_count_at_port(&self, port_id: &str) -> i32 {
+        let count = self
+            .drones
+            .values()
+            .filter(|drone| drone.home_port == port_id && self.drone_at_home(&drone.id))
+            .count();
+        i32::try_from(count).unwrap_or(i32::MAX)
+    }
+
     fn ensure_carrier_drone(&mut self, port_id: &str) {
         let Some(port) = self.blocks.get(port_id).cloned() else {
             return;

@@ -221,6 +221,12 @@ impl Parser {
                     ident_arg(line, &name, &args, 0)?
                 ))
             }
+            "docked_drone_count" | "pending_job_count" => {
+                require_arg_count(line, &name, &args, 0)?;
+                let comparison = self.expect_comparison()?;
+                let value = self.expect_number_any()?;
+                Ok(format!("{name} {comparison} {value}"))
+            }
             "scan_enemies" => {
                 require_arg_count(line, &name, &args, 0)?;
                 let comparison = self.expect_comparison()?;

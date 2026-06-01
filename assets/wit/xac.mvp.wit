@@ -112,6 +112,8 @@ interface drone-api {
 interface drone-port-api {
   stock-count: func(item-kind: string) -> s32;
   charge-docked-drones: func() -> bool;
+  docked-drone-count: func() -> s32;
+  pending-job-count: func() -> s32;
   create-delivery-job: func(item-kind: string, amount: s32, dropoff-tag: string) -> bool;
   dispatch-idle-drones: func() -> bool;
   dispatch: func() -> bool;

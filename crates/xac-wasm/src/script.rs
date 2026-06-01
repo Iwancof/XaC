@@ -88,6 +88,8 @@ enum HostImport {
     TurretAttackBest,
     DronePortDispatch,
     DronePortChargeDockedDrones,
+    DronePortDockedDroneCount,
+    DronePortPendingJobCount,
     DronePortCreateDeliveryJob,
     DronePortDispatchIdleDrones,
     DroneBatteryPercent,
@@ -183,6 +185,12 @@ impl HostImport {
             }
             HostImport::DronePortChargeDockedDrones => {
                 r#"  (import "xac:drone_port" "charge_docked_drones" (func $charge_docked_drones (result i32)))"#
+            }
+            HostImport::DronePortDockedDroneCount => {
+                r#"  (import "xac:drone_port" "docked_drone_count" (func $docked_drone_count (result i32)))"#
+            }
+            HostImport::DronePortPendingJobCount => {
+                r#"  (import "xac:drone_port" "pending_job_count" (func $pending_job_count (result i32)))"#
             }
             HostImport::DronePortCreateDeliveryJob => {
                 r#"  (import "xac:drone_port" "create_delivery_job" (func $create_delivery_job (param i32 i32 i32) (result i32)))"#
@@ -295,6 +303,14 @@ enum Condition {
     HasSpace {
         item: ItemKind,
         amount: i32,
+    },
+    DronePortDockedDroneCount {
+        comparison: CountComparison,
+        value: i32,
+    },
+    DronePortPendingJobCount {
+        comparison: CountComparison,
+        value: i32,
     },
     BatteryPercentLt {
         value: i32,
@@ -515,6 +531,20 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
             Condition::HasSpace {
                 item: parse_item_or_err(line_no, item)?,
                 amount: parse_i32(line_no, "space amount", amount)?,
+            },
+            rest,
+        )),
+        ["if", "docked_drone_count", comparison, value, rest @ ..] => Ok((
+            Condition::DronePortDockedDroneCount {
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "docked drone count threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "pending_job_count", comparison, value, rest @ ..] => Ok((
+            Condition::DronePortPendingJobCount {
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "pending job count threshold", value)?,
             },
             rest,
         )),
@@ -807,6 +837,14 @@ fn add_condition_import(
         Condition::HasSpace { .. } => {
             imports.insert(HostImport::CommonHasSpace);
         }
+        Condition::DronePortDockedDroneCount { .. } => {
+            ensure_kind(kind, BehaviorKind::DronePort, line_no, "docked_drone_count")?;
+            imports.insert(HostImport::DronePortDockedDroneCount);
+        }
+        Condition::DronePortPendingJobCount { .. } => {
+            ensure_kind(kind, BehaviorKind::DronePort, line_no, "pending_job_count")?;
+            imports.insert(HostImport::DronePortPendingJobCount);
+        }
         Condition::BatteryPercentLt { .. } => {
             ensure_kind(kind, BehaviorKind::CarrierDrone, line_no, "battery_percent")?;
             imports.insert(HostImport::DroneBatteryPercent);
@@ -1044,6 +1082,12 @@ fn render_condition(condition: Condition) -> String {
                 "(call $has_space (i32.const {}) (i32.const {amount}))",
                 item_code(&item)
             )
+        }
+        Condition::DronePortDockedDroneCount { comparison, value } => {
+            render_scalar_count_condition("docked_drone_count", comparison, value)
+        }
+        Condition::DronePortPendingJobCount { comparison, value } => {
+            render_scalar_count_condition("pending_job_count", comparison, value)
         }
         Condition::BatteryPercentLt { value } => {
             format!("(i32.lt_s (call $battery_percent) (i32.const {value}))")

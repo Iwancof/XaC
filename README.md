@@ -180,12 +180,13 @@ if cargo_count ammo > 0 move_to 42 30
 
 Drone ports are also code-driven. The default port charges docked drones, checks
 network ammo stock, creates a frontline delivery job, and dispatches an idle
-carrier:
+carrier. Custom port code can also branch on `docked_drone_count` and
+`pending_job_count`:
 
 ```text
-charge_docked_drones
-if stock_count ammo > 50 create_delivery_job ammo 10 frontline
-dispatch_idle_drones
+if docked_drone_count > 0 charge_docked_drones
+if pending_job_count == 0 create_delivery_job ammo 10 frontline
+if pending_job_count > 0 dispatch_idle_drones
 ```
 
 Routers can make availability checks before moving items:

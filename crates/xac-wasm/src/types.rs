@@ -110,6 +110,8 @@ pub struct BehaviorHostInput {
     pub network_stock_capacity: BTreeMap<ItemKind, i32>,
     pub network_stock_space: BTreeMap<ItemKind, i32>,
     pub drone_port_stock_counts: BTreeMap<ItemKind, i32>,
+    pub drone_port_docked_drone_count: i32,
+    pub drone_port_pending_job_count: i32,
     pub drone_battery_percent: i32,
     pub drone_logic_fuel: u64,
     pub drone_has_job: bool,

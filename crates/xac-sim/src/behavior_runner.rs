@@ -121,6 +121,9 @@ impl Simulation {
             network_stock_capacity,
             network_stock_space,
             drone_port_stock_counts: network_stock_counts,
+            drone_port_docked_drone_count: self.docked_drone_count_at_port(block_id),
+            drone_port_pending_job_count: i32::try_from(self.pending_jobs.len())
+                .unwrap_or(i32::MAX),
             net_i32: self.network_i32_values(block.network_id),
             net_writable: block
                 .network_id

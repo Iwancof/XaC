@@ -1015,6 +1015,117 @@ fn xac_script_can_drive_drone_port_stock_delivery_api() {
 }
 
 #[test]
+fn drone_port_script_can_read_docked_and_pending_job_counts() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = "\
+if docked_drone_count > 0 charge_docked_drones
+if pending_job_count == 0 create_delivery_job ammo 10 frontline
+if pending_job_count > 0 dispatch_idle_drones";
+    let wat = compile_source_to_wat(BehaviorKind::DronePort, source).unwrap();
+    assert!(wat.contains(r#""docked_drone_count""#));
+    assert!(wat.contains(r#""pending_job_count""#));
+
+    let compiled = runtime
+        .compile_wat(BehaviorKind::DronePort, source)
+        .unwrap();
+    let mut stock = BTreeMap::new();
+    stock.insert(ItemKind::Ammo, 60);
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                drone_port_stock_counts: stock.clone(),
+                drone_port_docked_drone_count: 1,
+                drone_port_pending_job_count: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::DronePort { ref commands }
+            if commands == &vec![
+                DronePortCommand::ChargeDockedDrones,
+                DronePortCommand::CreateDeliveryJob {
+                    item: ItemKind::Ammo,
+                    amount: 10,
+                    dropoff_tag: "frontline".to_string()
+                },
+            ]
+    ));
+
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                drone_port_stock_counts: stock,
+                drone_port_docked_drone_count: 1,
+                drone_port_pending_job_count: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::DronePort { ref commands }
+            if commands == &vec![
+                DronePortCommand::ChargeDockedDrones,
+                DronePortCommand::DispatchIdleDrones
+            ]
+    ));
+}
+
+#[test]
+fn tiny_source_can_read_drone_port_counts() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = r#"
+        fn tick() {
+            if (docked_drone_count() > 0) {
+                charge_docked_drones();
+            }
+            if (pending_job_count() == 0) {
+                create_delivery_job(ammo, 10, frontline);
+            }
+        }
+    "#;
+    let wat = compile_source_to_wat(BehaviorKind::DronePort, source).unwrap();
+    assert!(wat.contains(r#""docked_drone_count""#));
+    assert!(wat.contains(r#""pending_job_count""#));
+
+    let compiled = runtime
+        .compile_wat(BehaviorKind::DronePort, source)
+        .unwrap();
+    let mut stock = BTreeMap::new();
+    stock.insert(ItemKind::Ammo, 60);
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                drone_port_stock_counts: stock,
+                drone_port_docked_drone_count: 1,
+                drone_port_pending_job_count: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::DronePort { ref commands }
+            if commands == &vec![
+                DronePortCommand::ChargeDockedDrones,
+                DronePortCommand::CreateDeliveryJob {
+                    item: ItemKind::Ammo,
+                    amount: 10,
+                    dropoff_tag: "frontline".to_string()
+                },
+            ]
+    ));
+}
+
+#[test]
 fn xac_script_can_branch_on_remaining_fuel() {
     let runtime = BehaviorRuntime::new().unwrap();
     let compiled = runtime

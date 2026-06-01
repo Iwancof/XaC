@@ -70,6 +70,8 @@ mod host_cost {
     pub const DISPATCH: u64 = 5;
     pub const DRONE_PORT_STOCK: u64 = 2;
     pub const DRONE_PORT_CHARGE: u64 = 2;
+    pub const DRONE_PORT_DOCKED_COUNT: u64 = 1;
+    pub const DRONE_PORT_PENDING_JOB_COUNT: u64 = 1;
     pub const DRONE_PORT_CREATE_JOB: u64 = 6;
     pub const DRONE_PORT_DISPATCH_IDLE: u64 = 5;
     pub const DRONE_SENSOR: u64 = 1;
@@ -295,6 +297,8 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
                     "dispatch"
                         | "stock_count"
                         | "charge_docked_drones"
+                        | "docked_drone_count"
+                        | "pending_job_count"
                         | "create_delivery_job"
                         | "dispatch_idle_drones"
                 )
@@ -832,6 +836,26 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             }
             push_drone_port_command(caller.data_mut(), DronePortCommand::ChargeDockedDrones);
             1
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "docked_drone_count",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_PORT_DOCKED_COUNT) {
+                return 0;
+            }
+            caller.data().input.drone_port_docked_drone_count
+        },
+    )?;
+    linker.func_wrap(
+        "xac:drone_port",
+        "pending_job_count",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::DRONE_PORT_PENDING_JOB_COUNT) {
+                return 0;
+            }
+            caller.data().input.drone_port_pending_job_count
         },
     )?;
     linker.func_wrap(

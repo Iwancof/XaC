@@ -1035,6 +1035,47 @@ fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
 }
 
 #[test]
+fn drone_port_script_uses_docked_and_pending_counts_to_dispatch() {
+    let mut sim = test_sim("sim");
+
+    sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let port_id = sim.selected_id.clone().unwrap();
+    assign_script(
+        &mut sim,
+        &port_id,
+        "\
+if docked_drone_count > 0 charge_docked_drones
+if pending_job_count > 0 dispatch_idle_drones",
+    );
+    sim.place_block(BlockKind::Turret, Pos { x: 42, y: 30 }, Direction::East)
+        .unwrap();
+
+    sim.ensure_drone_and_job(&port_id);
+    assert_eq!(sim.docked_drone_count_at_port(&port_id), 1);
+    assert_eq!(sim.pending_jobs.len(), 1);
+    let drone_id = sim.drones.values().next().unwrap().id.clone();
+    sim.drones.get_mut(&drone_id).unwrap().battery = 50.0;
+    sim.fuel_banks.insert(port_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    let drone = sim.drones.get(&drone_id).unwrap();
+    assert!(
+        drone.battery > 50.0,
+        "docked_drone_count should let the script charge its docked carrier"
+    );
+    assert!(
+        drone.job.is_some(),
+        "pending_job_count should let the script dispatch the idle carrier"
+    );
+    assert!(
+        sim.pending_jobs.is_empty(),
+        "dispatch should consume the queued delivery job"
+    );
+}
+
+#[test]
 fn docked_carrier_drone_banks_wasm_fuel_from_home_network_cpu() {
     fn setup(port_pos: Pos, turret_pos: Pos) -> (Simulation, EntityId) {
         let mut sim = test_sim("sim");
