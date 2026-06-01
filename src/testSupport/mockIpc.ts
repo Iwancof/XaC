@@ -287,7 +287,7 @@ function runTicks(count: number) {
       if (block.active && block.behavior_ref) {
         runMockBehavior(block);
       }
-      if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch") continue;
+      if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(block)) continue;
       block.progress += 1;
       if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
         block.progress = 0;
@@ -588,6 +588,11 @@ function transferFrom(block: Block) {
   dst.status = `received ${kind}`;
   recordItemFlow(block.id, dst.id, kind, 1, blockCenter(block), blockCenter(dst));
   return true;
+}
+
+function outputBlocked(block: Block) {
+  const dst = blockAt(state.blocks, step(block.pos, block.dir));
+  return !dst || !canAcceptItem(dst.kind, "ore") || inventoryTotal(dst.inventory) >= dst.inventory.capacity;
 }
 
 function inventoryTotal(inventory: Inventory) {
