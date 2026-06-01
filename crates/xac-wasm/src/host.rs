@@ -1,15 +1,20 @@
 use anyhow::Result;
-use wasmtime::{Caller, Extern, Linker};
-use xac_core::{Direction, ItemKind, Pos};
+use wasmtime::{Caller, Linker};
+use xac_core::{Direction, Pos};
 
 use super::abi_codes::{
-    direction_from_code, direction_index, dropoff_tag_from_code, enemy_kind_code, item_code,
-    item_from_code, recipe_code, recipe_from_code, recipe_index,
+    direction_from_code, dropoff_tag_from_code, enemy_kind_code, item_code, item_from_code,
+    recipe_code, recipe_from_code, recipe_index,
+};
+use super::host_helpers::{
+    charge_host, drone_loadable_amount, drone_unloadable_amount, push_assembler_command,
+    push_drill_command, push_drone_port_command, push_net_store_delete, push_net_store_set,
+    read_guest_string, router_any_output_available, router_item_output_available,
+    router_output_available, turret_can_attack_scan_index,
 };
 use super::{
     attack_policy_to_rules, host_cost, AssemblerCommand, BehaviorHostState, BehaviorIntent,
-    BehaviorLog, DrillCommand, DroneCommand, DronePortCommand, NetStoreDelete, NetStoreOp,
-    NetStoreWrite, TargetRule,
+    BehaviorLog, DrillCommand, DroneCommand, DronePortCommand, TargetRule,
 };
 
 const MAX_LOG_MESSAGE_BYTES: usize = 256;
@@ -910,9 +915,7 @@ pub(super) fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Res
             if !data.input.net_writable {
                 return 0;
             }
-            data.input.net_i32.insert(key, value);
-            data.net_ops
-                .push(NetStoreOp::Set(NetStoreWrite { key, value }));
+            push_net_store_set(data, key, value);
             1
         },
     )?;
@@ -927,142 +930,9 @@ pub(super) fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Res
             if !data.input.net_writable {
                 return 0;
             }
-            data.input.net_i32.remove(&key);
-            data.net_ops
-                .push(NetStoreOp::Delete(NetStoreDelete { key }));
+            push_net_store_delete(data, key);
             1
         },
     )?;
     Ok(())
-}
-
-fn turret_can_attack_scan_index(state: &BehaviorHostState, index: i32) -> bool {
-    state.input.ammo_count > 0 && index >= 0 && index < state.input.turret_visible_enemy_count
-}
-
-fn drone_loadable_amount(state: &BehaviorHostState, item: &ItemKind, requested: u32) -> u32 {
-    if !state.input.drone_can_work {
-        return 0;
-    }
-    let cargo_free = u32::try_from(state.input.drone_cargo_free.max(0)).unwrap_or(u32::MAX);
-    let available = state
-        .input
-        .drone_contact_inventory_counts
-        .get(item)
-        .copied()
-        .unwrap_or(0)
-        .max(0);
-    let available = u32::try_from(available).unwrap_or(u32::MAX);
-    requested.min(cargo_free).min(available)
-}
-
-fn drone_unloadable_amount(state: &BehaviorHostState, item: &ItemKind, requested: u32) -> u32 {
-    if !state.input.drone_can_work {
-        return 0;
-    }
-    let cargo_count = state
-        .input
-        .drone_cargo_counts
-        .get(item)
-        .copied()
-        .unwrap_or(0)
-        .max(0);
-    let cargo_count = u32::try_from(cargo_count).unwrap_or(u32::MAX);
-    let contact_space = state
-        .input
-        .drone_contact_space_counts
-        .get(item)
-        .copied()
-        .unwrap_or(0)
-        .max(0);
-    let contact_space = u32::try_from(contact_space).unwrap_or(u32::MAX);
-    requested.min(cargo_count).min(contact_space)
-}
-
-fn router_any_output_available(state: &BehaviorHostState) -> bool {
-    state
-        .input
-        .router_output_available
-        .iter()
-        .any(|available| *available)
-}
-
-fn router_output_available(state: &BehaviorHostState, dir: Direction) -> bool {
-    state.input.router_output_available[direction_index(dir)]
-}
-
-fn router_item_output_available(
-    state: &BehaviorHostState,
-    item: &ItemKind,
-    dir: Direction,
-) -> bool {
-    state
-        .input
-        .router_item_output_available
-        .get(item)
-        .map(|by_dir| by_dir[direction_index(dir)])
-        .unwrap_or(false)
-}
-
-fn push_drill_command(state: &mut BehaviorHostState, command: DrillCommand) {
-    match &mut state.intent {
-        BehaviorIntent::Drill { commands } => commands.push(command),
-        _ => {
-            state.intent = BehaviorIntent::Drill {
-                commands: vec![command],
-            };
-        }
-    }
-}
-
-fn push_assembler_command(state: &mut BehaviorHostState, command: AssemblerCommand) {
-    match &mut state.intent {
-        BehaviorIntent::Assembler { commands } => commands.push(command),
-        _ => {
-            state.intent = BehaviorIntent::Assembler {
-                commands: vec![command],
-            };
-        }
-    }
-}
-
-fn push_drone_port_command(state: &mut BehaviorHostState, command: DronePortCommand) {
-    match &mut state.intent {
-        BehaviorIntent::DronePort { commands } => commands.push(command),
-        _ => {
-            state.intent = BehaviorIntent::DronePort {
-                commands: vec![command],
-            };
-        }
-    }
-}
-
-fn read_guest_string(
-    caller: &mut Caller<'_, BehaviorHostState>,
-    ptr: usize,
-    len: usize,
-) -> Option<String> {
-    let memory = match caller.get_export("memory")? {
-        Extern::Memory(memory) => memory,
-        _ => return None,
-    };
-    let mut bytes = vec![0_u8; len];
-    memory.read(caller, ptr, &mut bytes).ok()?;
-    String::from_utf8(bytes).ok()
-}
-
-fn charge_host(caller: &mut Caller<'_, BehaviorHostState>, cost: u64) -> bool {
-    let Ok(fuel) = caller.get_fuel() else {
-        caller.data_mut().host_over_budget = true;
-        return false;
-    };
-    if fuel < cost {
-        caller.data_mut().host_over_budget = true;
-        return false;
-    }
-    if caller.set_fuel(fuel - cost).is_err() {
-        caller.data_mut().host_over_budget = true;
-        return false;
-    }
-    true
 }

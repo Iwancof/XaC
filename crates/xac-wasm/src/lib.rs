@@ -9,6 +9,7 @@ mod abi_codes;
 mod host;
 use host::define_host_imports;
 mod host_cost;
+mod host_helpers;
 
 mod imports;
 use imports::{allowed_host_import, allowed_worlds};
