@@ -21,6 +21,7 @@ import {
   deconstructBlock,
   editBuiltinCopy,
   forkBehavior,
+  getCommonTemplates,
   getSnapshot,
   loadWorld,
   openBehavior,
@@ -43,6 +44,7 @@ import type {
   Block,
   BlockKind,
   BuildResult,
+  CommonTemplate,
   Direction,
   Drone,
   Enemy,
@@ -77,6 +79,7 @@ export function App() {
   const [editorValue, setEditorValue] = useState("");
   const [savedValue, setSavedValue] = useState("");
   const [buildResult, setBuildResult] = useState<BuildResult | null>(null);
+  const [templates, setTemplates] = useState<CommonTemplate[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -91,6 +94,12 @@ export function App() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    getCommonTemplates()
+      .then(setTemplates)
+      .catch((err) => setError(String(err)));
+  }, []);
 
   const cancelPlacement = useCallback(() => {
     setBuildKind(null);
@@ -427,6 +436,7 @@ export function App() {
           <section className="editor-panel">
             <div className="panel-heading">
               <span>Code Editor</span>
+              <strong>{templates.length} templates</strong>
               {selectedBehaviorId && !behavior && (
                 <button onClick={() => loadBehavior(selectedBehaviorId)}>Open Selected Behavior</button>
               )}
@@ -434,7 +444,17 @@ export function App() {
             {behavior ? (
               <CodeEditor value={editorValue} onChange={setEditorValue} />
             ) : (
-              <div className="empty-editor">Open a behavior from the inspector.</div>
+              <div className="empty-editor">
+                <div className="template-list" data-testid="template-list">
+                  {templates.map((template) => (
+                    <div className="template-row" key={template.id}>
+                      <strong>{template.display_name}</strong>
+                      <span>{template.language}</span>
+                      <small>{template.source_path}</small>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </section>
         </aside>

@@ -20,6 +20,7 @@ mod network;
 mod production;
 mod recipes;
 mod save;
+mod user_config;
 mod wave;
 
 use behavior::{load_behaviors, BehaviorPackage};
@@ -55,6 +56,7 @@ pub struct Simulation {
 
 impl Simulation {
     pub fn new(config_root: impl AsRef<Path>) -> Result<Self> {
+        user_config::ensure_user_config(config_root.as_ref())?;
         let mut sim = Self {
             tick: 0,
             running: false,

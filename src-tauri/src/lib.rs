@@ -3,7 +3,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::Manager;
-use xac_core::{BehaviorSource, BlockKind, BuildResult, Direction, GameSnapshot, Pos};
+use xac_core::{
+    BehaviorSource, BlockKind, BuildResult, CommonTemplate, Direction, GameSnapshot, Pos,
+};
 use xac_sim::Simulation;
 
 struct AppState {
@@ -148,6 +150,12 @@ fn load_world(state: tauri::State<'_, AppState>, slot: String) -> Result<GameSna
     sim.load_world(&slot).map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn common_templates(state: tauri::State<'_, AppState>) -> Result<Vec<CommonTemplate>, String> {
+    let sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.common_templates().map_err(|err| err.to_string())
+}
+
 pub fn run() {
     let config_root = config_root();
     fs::create_dir_all(config_root.join("projects/default_project/saves")).ok();
@@ -182,7 +190,8 @@ pub fn run() {
             save_behavior,
             build_behavior,
             save_world,
-            load_world
+            load_world,
+            common_templates
         ])
         .run(tauri::generate_context!())
         .expect("error while running XaC");

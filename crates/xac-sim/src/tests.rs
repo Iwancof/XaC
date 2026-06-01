@@ -544,6 +544,38 @@ fn world_save_round_trips_state_under_config_root() {
 }
 
 #[test]
+fn user_config_initializes_common_templates_under_config_root() {
+    let config_root = test_config_root("user-config");
+    let sim = Simulation::new(&config_root).unwrap();
+
+    assert!(config_root.join("settings.toml").exists());
+    assert!(config_root.join("keybindings.toml").exists());
+    assert!(config_root.join("common/README.md").exists());
+    assert!(config_root.join("common/lib/targeting").is_dir());
+    assert!(config_root.join("common/lib/logistics").is_dir());
+    assert!(config_root.join("common/lib/pathing").is_dir());
+
+    let templates = sim.common_templates().unwrap();
+    assert_eq!(templates.len(), 2);
+    assert!(templates.iter().any(|template| {
+        template.id == "rust_basic_drill"
+            && template.language == "Rust"
+            && template
+                .source_path
+                .starts_with(&config_root.to_string_lossy().to_string())
+            && template.source.contains("mine")
+    }));
+    assert!(templates.iter().any(|template| {
+        template.id == "assemblyscript_basic_router"
+            && template.language == "AssemblyScript"
+            && template
+                .source_path
+                .starts_with(&config_root.to_string_lossy().to_string())
+            && template.source.contains("push")
+    }));
+}
+
+#[test]
 fn behavior_summary_tracks_source_language() {
     let mut sim = test_sim("sim");
     let builtin = sim.open_behavior("builtin.drill.basic").unwrap();

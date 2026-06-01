@@ -3,6 +3,7 @@ import type {
   BehaviorSource,
   BlockKind,
   BuildResult,
+  CommonTemplate,
   Direction,
   GameSnapshot
 } from "./types";
@@ -69,4 +70,8 @@ export function saveWorld(slot = "quick") {
 
 export function loadWorld(slot = "quick") {
   return invoke<GameSnapshot>("load_world", { slot });
+}
+
+export function getCommonTemplates() {
+  return invoke<CommonTemplate[]>("common_templates");
 }

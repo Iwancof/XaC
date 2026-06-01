@@ -142,6 +142,14 @@ export interface BehaviorSource {
   source: string;
 }
 
+export interface CommonTemplate {
+  id: string;
+  display_name: string;
+  language: string;
+  source_path: string;
+  source: string;
+}
+
 export interface BuildResult {
   behavior_id: string;
   success: boolean;

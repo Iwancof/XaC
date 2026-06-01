@@ -67,6 +67,8 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.getByRole("button", { name: /Ore Drill/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Belt Conveyor/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Storage/ })).toBeVisible();
+  await expect(page.getByTestId("template-list")).toContainText("Rust Basic Drill");
+  await expect(page.getByTestId("template-list")).toContainText("AssemblyScript Basic Router");
   const builtinBehaviorIds = await page.evaluate(() =>
     window.__XAC_TEST_STATE__?.snapshot().behaviors.map((behavior) => behavior.id)
   );

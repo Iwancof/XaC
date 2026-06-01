@@ -803,6 +803,15 @@ pub struct BehaviorSource {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct CommonTemplate {
+    pub id: String,
+    pub display_name: String,
+    pub language: String,
+    pub source_path: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BuildResult {
     pub behavior_id: BehaviorId,
     pub success: bool,

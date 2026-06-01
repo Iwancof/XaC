@@ -139,6 +139,8 @@ mockIPC((cmd, args = {}) => {
       return saveWorld((args as { slot?: string }).slot ?? "quick");
     case "load_world":
       return loadWorld((args as { slot?: string }).slot ?? "quick");
+    case "common_templates":
+      return commonTemplates();
     default:
       throw new Error(`Unhandled mock IPC command: ${cmd}`);
   }
@@ -495,6 +497,25 @@ function saveSlotName(slot: string) {
     throw new Error("save slot can only contain letters, numbers, '-' and '_'");
   }
   return trimmed;
+}
+
+function commonTemplates() {
+  return [
+    {
+      id: "rust_basic_drill",
+      display_name: "Rust Basic Drill",
+      language: "Rust",
+      source_path: "mock://common/templates/rust/basic_drill.rs",
+      source: "extern \"C\" { fn mine() -> i32; }\n"
+    },
+    {
+      id: "assemblyscript_basic_router",
+      display_name: "AssemblyScript Basic Router",
+      language: "AssemblyScript",
+      source_path: "mock://common/templates/assemblyscript/basic_router.ts",
+      source: "declare function push(direction: i32): i32;\n"
+    }
+  ];
 }
 
 function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind)): Block {
