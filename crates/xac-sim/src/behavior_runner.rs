@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
-use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel, TerrainKind};
+use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind, LogLevel, TerrainKind};
 use xac_wasm::{
     AssemblerCommand, BehaviorHostInput, BehaviorIntent, BehaviorLog, CompiledBehavior,
     DrillCommand, NetStoreOp,
@@ -94,6 +94,11 @@ impl Simulation {
             .collect();
         let (network_stock_counts, network_stock_capacity, network_stock_space) =
             self.network_stock_profile(block_id);
+        let turret_scan = if block.kind == xac_core::BlockKind::Turret {
+            self.turret_visible_enemy_scan(block_id)
+        } else {
+            Vec::new()
+        };
         BehaviorHostInput {
             output_blocked: self.output_blocked(block_id),
             drill_ore_kind: self.drill_ore_kind(block_id),
@@ -106,7 +111,16 @@ impl Simulation {
             assembler_input_counts: block_inventory_counts.clone(),
             assembler_output_counts: block_inventory_counts,
             ammo_count: block.inventory.count(&ItemKind::Ammo) as i32,
-            turret_visible_enemy_count: self.turret_visible_enemy_count(block_id),
+            turret_visible_enemy_count: i32::try_from(turret_scan.len()).unwrap_or(i32::MAX),
+            turret_visible_enemy_kinds: turret_scan
+                .iter()
+                .map(|(kind, _, _)| *kind)
+                .collect::<Vec<EnemyKind>>(),
+            turret_visible_enemy_hp: turret_scan.iter().map(|(_, hp, _)| *hp).collect(),
+            turret_visible_enemy_distance: turret_scan
+                .iter()
+                .map(|(_, _, distance)| *distance)
+                .collect(),
             router_output_available: Direction::all()
                 .map(|dir| self.output_available(block_id, dir)),
             router_item_output_available: ItemKind::all()

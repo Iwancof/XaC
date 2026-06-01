@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
-use xac_core::{BehaviorKind, Direction, ItemKind};
+use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
 
 const MAX_LOG_MESSAGE_BYTES: usize = 256;
 
@@ -81,6 +81,9 @@ enum HostImport {
     AssemblerOutputCount,
     AssemblerProduce,
     TurretScanEnemies,
+    TurretEnemyKind,
+    TurretEnemyHp,
+    TurretEnemyDistance,
     TurretCanAttack,
     TurretAttack,
     TurretAmmoCount,
@@ -165,6 +168,15 @@ impl HostImport {
             }
             HostImport::TurretScanEnemies => {
                 r#"  (import "xac:turret" "scan_enemies" (func $scan_enemies (result i32)))"#
+            }
+            HostImport::TurretEnemyKind => {
+                r#"  (import "xac:turret" "enemy_kind" (func $enemy_kind (param i32) (result i32)))"#
+            }
+            HostImport::TurretEnemyHp => {
+                r#"  (import "xac:turret" "enemy_hp" (func $enemy_hp (param i32) (result i32)))"#
+            }
+            HostImport::TurretEnemyDistance => {
+                r#"  (import "xac:turret" "enemy_distance" (func $enemy_distance (param i32) (result f32)))"#
             }
             HostImport::TurretCanAttack => {
                 r#"  (import "xac:turret" "can_attack" (func $can_attack (param i32) (result i32)))"#
@@ -290,6 +302,20 @@ enum Condition {
     ScanEnemies {
         comparison: CountComparison,
         value: i32,
+    },
+    EnemyKindEq {
+        index: i32,
+        kind: EnemyKind,
+    },
+    EnemyHp {
+        index: i32,
+        comparison: CountComparison,
+        value: i32,
+    },
+    EnemyDistance {
+        index: i32,
+        comparison: CountComparison,
+        value: f32,
     },
     CanAttack {
         index: i32,
@@ -509,6 +535,29 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
             Condition::ScanEnemies {
                 comparison: parse_count_comparison(line_no, comparison)?,
                 value: parse_i32(line_no, "scan enemy count threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "enemy_kind", index, "==", kind, rest @ ..] => Ok((
+            Condition::EnemyKindEq {
+                index: parse_i32(line_no, "scan enemy index", index)?,
+                kind: parse_enemy_kind(line_no, kind)?,
+            },
+            rest,
+        )),
+        ["if", "enemy_hp", index, comparison, value, rest @ ..] => Ok((
+            Condition::EnemyHp {
+                index: parse_i32(line_no, "scan enemy index", index)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "enemy hp threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "enemy_distance", index, comparison, value, rest @ ..] => Ok((
+            Condition::EnemyDistance {
+                index: parse_i32(line_no, "scan enemy index", index)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_f32(line_no, "enemy distance threshold", value)?,
             },
             rest,
         )),
@@ -837,6 +886,18 @@ fn add_condition_import(
             ensure_kind(kind, BehaviorKind::Turret, line_no, "scan_enemies")?;
             imports.insert(HostImport::TurretScanEnemies);
         }
+        Condition::EnemyKindEq { .. } => {
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "enemy_kind")?;
+            imports.insert(HostImport::TurretEnemyKind);
+        }
+        Condition::EnemyHp { .. } => {
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "enemy_hp")?;
+            imports.insert(HostImport::TurretEnemyHp);
+        }
+        Condition::EnemyDistance { .. } => {
+            ensure_kind(kind, BehaviorKind::Turret, line_no, "enemy_distance")?;
+            imports.insert(HostImport::TurretEnemyDistance);
+        }
         Condition::CanAttack { .. } => {
             ensure_kind(kind, BehaviorKind::Turret, line_no, "can_attack")?;
             imports.insert(HostImport::TurretCanAttack);
@@ -991,6 +1052,16 @@ fn parse_attack_policy(line_no: usize, policies: &[&str]) -> Result<i32> {
     encode_attack_policy(line_no, &codes)
 }
 
+fn parse_enemy_kind(line_no: usize, kind: &str) -> Result<EnemyKind> {
+    match kind {
+        "grunt" => Ok(EnemyKind::Grunt),
+        "runner" => Ok(EnemyKind::Runner),
+        "armored" => Ok(EnemyKind::Armored),
+        "wire_cutter" | "wire-cutter" => Ok(EnemyKind::WireCutter),
+        _ => Err(anyhow!("line {line_no}: unknown enemy kind {kind}")),
+    }
+}
+
 fn encode_attack_policy(line_no: usize, codes: &[i32]) -> Result<i32> {
     let mut encoded = 0_i32;
     for (index, code) in codes.iter().enumerate() {
@@ -1077,6 +1148,22 @@ fn render_condition(condition: Condition) -> String {
         Condition::ScanEnemies { comparison, value } => {
             render_scalar_count_condition("scan_enemies", comparison, value)
         }
+        Condition::EnemyKindEq { index, kind } => {
+            format!(
+                "(i32.eq (call $enemy_kind (i32.const {index})) (i32.const {}))",
+                enemy_kind_code(kind)
+            )
+        }
+        Condition::EnemyHp {
+            index,
+            comparison,
+            value,
+        } => render_indexed_count_condition("enemy_hp", index, comparison, value),
+        Condition::EnemyDistance {
+            index,
+            comparison,
+            value,
+        } => render_indexed_f32_condition("enemy_distance", index, comparison, value),
         Condition::CanAttack { index } => {
             format!("(call $can_attack (i32.const {index}))")
         }
@@ -1162,6 +1249,38 @@ fn render_count_condition(
         "({op} (call ${function_name} (i32.const {})) (i32.const {value}))",
         item_code(item)
     )
+}
+
+fn render_indexed_count_condition(
+    function_name: &str,
+    index: i32,
+    comparison: CountComparison,
+    value: i32,
+) -> String {
+    let op = match comparison {
+        CountComparison::Lt => "i32.lt_s",
+        CountComparison::Le => "i32.le_s",
+        CountComparison::Eq => "i32.eq",
+        CountComparison::Ge => "i32.ge_s",
+        CountComparison::Gt => "i32.gt_s",
+    };
+    format!("({op} (call ${function_name} (i32.const {index})) (i32.const {value}))")
+}
+
+fn render_indexed_f32_condition(
+    function_name: &str,
+    index: i32,
+    comparison: CountComparison,
+    value: f32,
+) -> String {
+    let op = match comparison {
+        CountComparison::Lt => "f32.lt",
+        CountComparison::Le => "f32.le",
+        CountComparison::Eq => "f32.eq",
+        CountComparison::Ge => "f32.ge",
+        CountComparison::Gt => "f32.gt",
+    };
+    format!("({op} (call ${function_name} (i32.const {index})) (f32.const {value}))")
 }
 
 fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
@@ -1307,5 +1426,14 @@ fn item_code(item: &ItemKind) -> i32 {
         ItemKind::Ammo => 2,
         ItemKind::CpuPart => 3,
         ItemKind::DronePart => 4,
+    }
+}
+
+fn enemy_kind_code(kind: EnemyKind) -> i32 {
+    match kind {
+        EnemyKind::Grunt => 0,
+        EnemyKind::Runner => 1,
+        EnemyKind::Armored => 2,
+        EnemyKind::WireCutter => 3,
     }
 }

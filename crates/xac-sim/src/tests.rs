@@ -1011,6 +1011,49 @@ fn turret_scan_script_attacks_requested_visible_enemy_index() {
 }
 
 #[test]
+fn turret_scan_info_script_targets_runner_by_kind() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+    assign_script(&mut sim, &turret_id, "if enemy_kind 1 == runner attack 1");
+    sim.blocks
+        .get_mut(&turret_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ammo, 2);
+    sim.fuel_banks.insert(turret_id.clone(), 100.0);
+
+    let nearest_id = sim.make_id("enemy");
+    let mut nearest = combat::enemy_at(
+        nearest_id.clone(),
+        EnemyKind::Grunt,
+        WorldPos { x: 35.5, y: 32.5 },
+    );
+    nearest.move_speed = 0.0;
+    sim.enemies.insert(nearest_id.clone(), nearest);
+    let runner_id = sim.make_id("enemy");
+    let mut runner = combat::enemy_at(
+        runner_id.clone(),
+        EnemyKind::Runner,
+        WorldPos { x: 36.5, y: 32.5 },
+    );
+    runner.move_speed = 0.0;
+    sim.enemies.insert(runner_id.clone(), runner);
+
+    sim.step_ticks(1);
+
+    assert_eq!(
+        sim.enemies[&nearest_id].hp, 30,
+        "scan index 0 should not be attacked when enemy_kind(1) matches runner"
+    );
+    assert_eq!(
+        sim.enemies[&runner_id].hp, 8,
+        "script should read scan metadata and attack the runner at index 1"
+    );
+}
+
+#[test]
 fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
     let mut sim = test_sim("sim");
     let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();

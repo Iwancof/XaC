@@ -233,6 +233,24 @@ impl Parser {
                 let value = self.expect_number_any()?;
                 Ok(format!("scan_enemies {comparison} {value}"))
             }
+            "enemy_kind" => {
+                require_arg_count(line, &name, &args, 1)?;
+                self.expect(TokenKind::EqEq)?;
+                Ok(format!(
+                    "enemy_kind {} == {}",
+                    number_arg(line, &name, &args, 0)?,
+                    self.expect_ident_any()?
+                ))
+            }
+            "enemy_hp" | "enemy_distance" => {
+                require_arg_count(line, &name, &args, 1)?;
+                let comparison = self.expect_comparison()?;
+                let value = self.expect_number_any()?;
+                Ok(format!(
+                    "{name} {} {comparison} {value}",
+                    number_arg(line, &name, &args, 0)?
+                ))
+            }
             "ammo_count" => {
                 require_arg_count(line, &name, &args, 0)?;
                 let comparison = self.expect_comparison()?;

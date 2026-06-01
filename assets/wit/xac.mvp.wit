@@ -79,6 +79,10 @@ interface turret-api {
   use types.{enemy-info};
 
   scan-enemies: func() -> list<enemy-info>;
+  enemy-kind: func(index: s32) -> enemy-kind;
+  enemy-hp: func(index: s32) -> s32;
+  enemy-distance: func(index: s32) -> f32;
+  can-attack: func(index: s32) -> bool;
   attack: func(enemy-id: string) -> bool;
   attack-nearest: func() -> bool;
   attack-best: func(policy: string) -> bool;

@@ -542,6 +542,75 @@ fn xac_script_can_scan_and_attack_by_index() {
 }
 
 #[test]
+fn xac_script_can_branch_on_scanned_enemy_info() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = "\
+if enemy_kind 1 == runner attack 1
+if enemy_hp 0 < 15 attack 0
+if enemy_distance 0 < 2.5 attack 0";
+    let wat = compile_source_to_wat(BehaviorKind::Turret, source).unwrap();
+    assert!(wat.contains(r#""enemy_kind""#));
+    assert!(wat.contains(r#""enemy_hp""#));
+    assert!(wat.contains(r#""enemy_distance""#));
+
+    let compiled = runtime.compile_wat(BehaviorKind::Turret, source).unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                ammo_count: 3,
+                turret_visible_enemy_count: 2,
+                turret_visible_enemy_kinds: vec![EnemyKind::Grunt, EnemyKind::Runner],
+                turret_visible_enemy_hp: vec![30, 20],
+                turret_visible_enemy_distance: vec![3.0, 4.0],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::TurretScanIndex { index } if index == 1
+    ));
+}
+
+#[test]
+fn tiny_source_can_branch_on_scanned_enemy_info() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = r#"
+        fn tick() {
+            if (enemy_kind(1) == runner) { attack(1); }
+            if (enemy_hp(0) < 15) { attack(0); }
+            if (enemy_distance(0) < 2.5) { attack(0); }
+        }
+    "#;
+    let wat = compile_source_to_wat(BehaviorKind::Turret, source).unwrap();
+    assert!(wat.contains(r#""enemy_kind""#));
+    assert!(wat.contains(r#""enemy_hp""#));
+    assert!(wat.contains(r#""enemy_distance""#));
+
+    let compiled = runtime.compile_wat(BehaviorKind::Turret, source).unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            120,
+            BehaviorHostInput {
+                ammo_count: 3,
+                turret_visible_enemy_count: 2,
+                turret_visible_enemy_kinds: vec![EnemyKind::Grunt, EnemyKind::Runner],
+                turret_visible_enemy_hp: vec![30, 20],
+                turret_visible_enemy_distance: vec![3.0, 4.0],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::TurretScanIndex { index } if index == 1
+    ));
+}
+
+#[test]
 fn xac_script_can_gate_router_push_on_output_availability() {
     let runtime = BehaviorRuntime::new().unwrap();
     let compiled = runtime

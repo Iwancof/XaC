@@ -143,6 +143,9 @@ entry from nearest-first scan order:
 
 ```text
 if scan_enemies > 1 attack 1
+if enemy_kind 1 == runner attack 1
+if enemy_hp 0 < 12 attack 0
+if enemy_distance 0 < 4.5 attack 0
 if can_attack 0 attack 0
 ```
 

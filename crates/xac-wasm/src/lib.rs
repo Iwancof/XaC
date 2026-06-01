@@ -63,6 +63,7 @@ mod host_cost {
     pub const ASSEMBLER_COUNT: u64 = 1;
     pub const AMMO_COUNT: u64 = 1;
     pub const SCAN_ENEMIES_BASE: u64 = 5;
+    pub const ENEMY_INFO: u64 = 1;
     pub const CAN_ATTACK: u64 = 1;
     pub const ATTACK: u64 = 2;
     pub const ATTACK_NEAREST: u64 = 4;
@@ -284,6 +285,9 @@ fn allowed_kind_import(kind: BehaviorKind, module: &str, name: &str) -> bool {
                 && matches!(
                     name,
                     "scan_enemies"
+                        | "enemy_kind"
+                        | "enemy_hp"
+                        | "enemy_distance"
                         | "can_attack"
                         | "attack"
                         | "ammo_count"
@@ -721,6 +725,63 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
                 return 0;
             }
             count
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "enemy_kind",
+        |mut caller: Caller<'_, BehaviorHostState>, index: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::ENEMY_INFO) {
+                return -1;
+            }
+            let Ok(index) = usize::try_from(index) else {
+                return -1;
+            };
+            caller
+                .data()
+                .input
+                .turret_visible_enemy_kinds
+                .get(index)
+                .map(enemy_kind_code)
+                .unwrap_or(-1)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "enemy_hp",
+        |mut caller: Caller<'_, BehaviorHostState>, index: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::ENEMY_INFO) {
+                return -1;
+            }
+            let Ok(index) = usize::try_from(index) else {
+                return -1;
+            };
+            caller
+                .data()
+                .input
+                .turret_visible_enemy_hp
+                .get(index)
+                .copied()
+                .unwrap_or(-1)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:turret",
+        "enemy_distance",
+        |mut caller: Caller<'_, BehaviorHostState>, index: i32| -> f32 {
+            if !charge_host(&mut caller, host_cost::ENEMY_INFO) {
+                return -1.0;
+            }
+            let Ok(index) = usize::try_from(index) else {
+                return -1.0;
+            };
+            caller
+                .data()
+                .input
+                .turret_visible_enemy_distance
+                .get(index)
+                .copied()
+                .unwrap_or(-1.0)
         },
     )?;
     linker.func_wrap(
@@ -1409,6 +1470,15 @@ fn item_code(item: &ItemKind) -> i32 {
         ItemKind::Ammo => 2,
         ItemKind::CpuPart => 3,
         ItemKind::DronePart => 4,
+    }
+}
+
+fn enemy_kind_code(kind: &EnemyKind) -> i32 {
+    match kind {
+        EnemyKind::Grunt => 0,
+        EnemyKind::Runner => 1,
+        EnemyKind::Armored => 2,
+        EnemyKind::WireCutter => 3,
     }
 }
 

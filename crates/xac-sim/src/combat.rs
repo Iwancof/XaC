@@ -48,14 +48,24 @@ impl Simulation {
         }
     }
 
-    pub(crate) fn turret_visible_enemy_count(&self, turret_id: &str) -> i32 {
+    pub(crate) fn turret_visible_enemy_scan(&self, turret_id: &str) -> Vec<(EnemyKind, i32, f32)> {
         let Some(turret) = self.blocks.get(turret_id) else {
-            return 0;
+            return Vec::new();
         };
         if turret.kind != BlockKind::Turret {
-            return 0;
+            return Vec::new();
         }
-        i32::try_from(self.visible_turret_target_ids(turret.pos).len()).unwrap_or(i32::MAX)
+        let origin = WorldPos::from_tile_center(turret.pos);
+        let mut in_range: Vec<_> = self
+            .enemies
+            .values()
+            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= 8.0)
+            .collect();
+        in_range.sort_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)));
+        in_range
+            .into_iter()
+            .map(|enemy| (enemy.kind, enemy.hp, origin.distance(enemy.pos)))
+            .collect()
     }
 
     pub(crate) fn run_enemies(&mut self) {
