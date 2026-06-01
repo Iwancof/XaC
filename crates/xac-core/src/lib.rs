@@ -501,39 +501,76 @@ pub enum EnemyKind {
     WireCutter,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct EnemyMetadata {
+    pub id: &'static str,
+    pub max_hp: i32,
+    pub attack_cooldown_ticks: u32,
+    pub move_speed: f32,
+    pub attack_damage: i32,
+}
+
 impl EnemyKind {
-    pub fn max_hp(self) -> i32 {
+    pub fn all() -> [Self; 4] {
+        [
+            EnemyKind::Grunt,
+            EnemyKind::Runner,
+            EnemyKind::Armored,
+            EnemyKind::WireCutter,
+        ]
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.metadata().id
+    }
+
+    pub fn metadata(self) -> EnemyMetadata {
         match self {
-            EnemyKind::Grunt => 30,
-            EnemyKind::Runner => 20,
-            EnemyKind::Armored => 90,
-            EnemyKind::WireCutter => 38,
+            EnemyKind::Grunt => EnemyMetadata {
+                id: "grunt",
+                max_hp: 30,
+                attack_cooldown_ticks: 20,
+                move_speed: 0.07,
+                attack_damage: 5,
+            },
+            EnemyKind::Runner => EnemyMetadata {
+                id: "runner",
+                max_hp: 20,
+                attack_cooldown_ticks: 12,
+                move_speed: 0.14,
+                attack_damage: 5,
+            },
+            EnemyKind::Armored => EnemyMetadata {
+                id: "armored",
+                max_hp: 90,
+                attack_cooldown_ticks: 28,
+                move_speed: 0.045,
+                attack_damage: 8,
+            },
+            EnemyKind::WireCutter => EnemyMetadata {
+                id: "wire_cutter",
+                max_hp: 38,
+                attack_cooldown_ticks: 16,
+                move_speed: 0.10,
+                attack_damage: 5,
+            },
         }
+    }
+
+    pub fn max_hp(self) -> i32 {
+        self.metadata().max_hp
     }
 
     pub fn attack_cooldown_ticks(self) -> u32 {
-        match self {
-            EnemyKind::Grunt => 20,
-            EnemyKind::Runner => 12,
-            EnemyKind::Armored => 28,
-            EnemyKind::WireCutter => 16,
-        }
+        self.metadata().attack_cooldown_ticks
     }
 
     pub fn move_speed(self) -> f32 {
-        match self {
-            EnemyKind::Grunt => 0.07,
-            EnemyKind::Runner => 0.14,
-            EnemyKind::Armored => 0.045,
-            EnemyKind::WireCutter => 0.10,
-        }
+        self.metadata().move_speed
     }
 
     pub fn attack_damage(self) -> i32 {
-        match self {
-            EnemyKind::Armored => 8,
-            _ => 5,
-        }
+        self.metadata().attack_damage
     }
 }
 
@@ -852,6 +889,15 @@ mod tests {
         stack_size: u32,
     }
 
+    #[derive(Debug, Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct SharedEnemyMetadata {
+        max_hp: i32,
+        move_speed: f32,
+        attack_damage: i32,
+        attack_cooldown_ticks: u32,
+    }
+
     #[test]
     fn cpu_scaled_ticks_uses_core_speed_contract() {
         assert_eq!(cpu_scaled_ticks(8.0, 30), 30);
@@ -881,6 +927,34 @@ mod tests {
             assert_eq!(shared.stack_size, metadata.stack_size);
             assert_eq!(kind.display_name(), metadata.display_name);
             assert_eq!(kind.stack_size(), metadata.stack_size);
+        }
+    }
+
+    #[test]
+    fn shared_enemy_metadata_asset_matches_core_contract() {
+        let shared: std::collections::BTreeMap<String, SharedEnemyMetadata> =
+            serde_json::from_str(include_str!("../../../assets/enemy_metadata.json")).unwrap();
+        assert_eq!(shared.len(), EnemyKind::all().len());
+
+        for kind in EnemyKind::all() {
+            let metadata = kind.metadata();
+            let shared = shared
+                .get(kind.as_str())
+                .unwrap_or_else(|| panic!("missing enemy metadata for {}", kind.as_str()));
+            assert_eq!(shared.max_hp, metadata.max_hp, "{}", kind.as_str());
+            assert_eq!(shared.move_speed, metadata.move_speed, "{}", kind.as_str());
+            assert_eq!(
+                shared.attack_damage,
+                metadata.attack_damage,
+                "{}",
+                kind.as_str()
+            );
+            assert_eq!(
+                shared.attack_cooldown_ticks,
+                metadata.attack_cooldown_ticks,
+                "{}",
+                kind.as_str()
+            );
         }
     }
 

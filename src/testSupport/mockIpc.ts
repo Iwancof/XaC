@@ -15,6 +15,7 @@ import {
 } from "../gameMetadata";
 import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
+import { enemyAttackCooldownTicks, enemyAttackDamage, enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
 import type {
   BehaviorRuntimeStats,
   BehaviorSource,
@@ -42,30 +43,6 @@ import type {
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
 const ENEMY_ATTACK_RANGE = 0.2;
-const ENEMY_ATTACK_DAMAGE: Record<EnemyKind, number> = {
-  grunt: 5,
-  runner: 5,
-  armored: 8,
-  wire_cutter: 5
-};
-const ENEMY_ATTACK_COOLDOWN_TICKS: Record<EnemyKind, number> = {
-  grunt: 20,
-  runner: 12,
-  armored: 28,
-  wire_cutter: 16
-};
-const ENEMY_MAX_HP: Record<EnemyKind, number> = {
-  grunt: 30,
-  runner: 20,
-  armored: 90,
-  wire_cutter: 38
-};
-const ENEMY_MOVE_SPEED: Record<EnemyKind, number> = {
-  grunt: 0.07,
-  runner: 0.14,
-  armored: 0.045,
-  wire_cutter: 0.1
-};
 
 type CommandCall = {
   cmd: string;
@@ -183,9 +160,9 @@ function createInitialState(): MockState {
         id: "enemy_1",
         kind: "runner",
         pos: { x: 28.5, y: 28.5 },
-        hp: 20,
-        max_hp: 20,
-        move_speed: 0.14,
+        hp: enemyMaxHp("runner"),
+        max_hp: enemyMaxHp("runner"),
+        move_speed: enemyMoveSpeed("runner"),
         attack_cooldown: 0,
         target_id: core.id
       }
@@ -541,9 +518,9 @@ function spawnEnemy(kind: EnemyKind, pos: Pos) {
     id,
     kind,
     pos: { ...pos },
-    hp: ENEMY_MAX_HP[kind],
-    max_hp: ENEMY_MAX_HP[kind],
-    move_speed: ENEMY_MOVE_SPEED[kind],
+    hp: enemyMaxHp(kind),
+    max_hp: enemyMaxHp(kind),
+    move_speed: enemyMoveSpeed(kind),
     attack_cooldown: 0,
     target_id: null
   });
@@ -683,8 +660,8 @@ function runEnemies() {
 
     if (distance(enemy.pos, target.pos) <= ENEMY_ATTACK_RANGE) {
       if (enemy.attack_cooldown === 0) {
-        target.block.hp = Math.max(0, target.block.hp - ENEMY_ATTACK_DAMAGE[enemy.kind]);
-        enemy.attack_cooldown = ENEMY_ATTACK_COOLDOWN_TICKS[enemy.kind];
+        target.block.hp = Math.max(0, target.block.hp - enemyAttackDamage(enemy.kind));
+        enemy.attack_cooldown = enemyAttackCooldownTicks(enemy.kind);
       } else {
         target.block.status = `under attack by ${enemy.id}`;
       }

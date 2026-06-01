@@ -1,5 +1,6 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { useEffect, useRef } from "react";
+import { enemyColor } from "./enemyMetadata";
 import { blockAttackRangeTiles, blockFootprintSize } from "./gameMetadata";
 import { itemColor } from "./itemMetadata";
 import type { Block, BlockKind, Direction, Enemy, GameSnapshot, Pos } from "./types";
@@ -28,13 +29,6 @@ const COLORS: Record<BlockKind, number> = {
   assembler: 0xa78bfa,
   turret: 0xf43f5e,
   drone_port: 0x38bdf8
-};
-
-const ENEMY_COLORS = {
-  grunt: 0xef4444,
-  runner: 0xf97316,
-  armored: 0x7f1d1d,
-  wire_cutter: 0xeab308
 };
 
 export function GridWorld({
@@ -306,7 +300,7 @@ function drawEnemies(g: Graphics, enemies: Enemy[], selectedId: string | null) {
   for (const enemy of enemies) {
     const x = enemy.pos.x * TILE;
     const y = enemy.pos.y * TILE;
-    g.circle(x, y, 6).fill(ENEMY_COLORS[enemy.kind]);
+    g.circle(x, y, 6).fill(enemyColor(enemy.kind));
     g.rect(x - 6, y - 9, 12, 2).fill(0x1f2937);
     g.rect(x - 6, y - 9, Math.max(1, 12 * (enemy.hp / enemy.max_hp)), 2).fill(0x22c55e);
     if (selectedId === enemy.id) {

@@ -1,4 +1,5 @@
 import type { Direction, EnemyKind, ItemKind } from "./types";
+import { ENEMY_KINDS } from "./enemyMetadata";
 
 const SCRIPT_CONTROL_KEYWORDS = ["if", "return", "stop", "noop", "log"] as const;
 
@@ -79,12 +80,7 @@ const ITEM_ALIAS_KEYWORDS = ["cpu-part", "drone-part"] as const;
 const DIRECTION_KEYWORDS = ["north", "east", "south", "west"] as const satisfies readonly Direction[];
 const ROUTER_TARGET_KEYWORDS = ["any"] as const;
 const ATTACK_POLICY_KEYWORDS = ["nearest", "lowest_hp", "weakest"] as const;
-const ENEMY_KIND_KEYWORDS = [
-  "grunt",
-  "runner",
-  "armored",
-  "wire_cutter"
-] as const satisfies readonly EnemyKind[];
+const ENEMY_KIND_KEYWORDS = ENEMY_KINDS;
 const ENEMY_KIND_ALIAS_KEYWORDS = ["wire-cutter"] as const;
 const DROPOFF_TAG_KEYWORDS = ["frontline"] as const;
 
