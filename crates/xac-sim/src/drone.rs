@@ -197,8 +197,9 @@ impl Simulation {
     }
 
     fn run_carrier_drone_behavior(&mut self, drone_id: &str) -> Option<DroneCommand> {
-        let (behavior_ref, battery, logic_fuel, has_job, cargo_counts) = {
+        let (behavior_ref, battery, logic_fuel, has_job, cargo_counts, cargo_free) = {
             let drone = self.drones.get(drone_id)?;
+            let cargo_free = drone.cargo.capacity.saturating_sub(drone.cargo.total());
             let cargo_counts = drone
                 .cargo
                 .items
@@ -211,6 +212,7 @@ impl Simulation {
                 drone.logic_fuel,
                 drone.job.is_some(),
                 cargo_counts,
+                i32::try_from(cargo_free).unwrap_or(i32::MAX),
             )
         };
         if logic_fuel == 0 {
@@ -218,6 +220,8 @@ impl Simulation {
         }
 
         let at_home = self.drone_at_home(drone_id);
+        let (contact_inventory_counts, contact_space_counts) =
+            self.drone_physical_host_counts(drone_id);
         let cpu_rate = self.carrier_drone_cpu_rate(drone_id, at_home);
         let available_fuel = self.grant_drone_behavior_fuel(drone_id, cpu_rate);
         if available_fuel == 0 {
@@ -240,7 +244,14 @@ impl Simulation {
             drone_logic_fuel: logic_fuel,
             drone_has_job: has_job,
             drone_has_pending_job: !self.pending_jobs.is_empty(),
+            drone_can_move: battery >= DRONE_MOVE_BATTERY_COST,
+            drone_can_return_to_port: at_home || battery >= DRONE_MOVE_BATTERY_COST,
+            drone_can_work: battery >= DRONE_WORK_BATTERY_COST,
+            drone_can_idle: at_home || battery >= DRONE_MOVE_BATTERY_COST,
+            drone_cargo_free: cargo_free,
             drone_cargo_counts: cargo_counts,
+            drone_contact_inventory_counts: contact_inventory_counts,
+            drone_contact_space_counts: contact_space_counts,
             ..Default::default()
         };
         let eval = match self.runtime.evaluate_compiled(&compiled, fuel, input) {
@@ -271,6 +282,38 @@ impl Simulation {
             BehaviorIntent::CarrierDrone { command } => Some(command),
             _ => None,
         }
+    }
+
+    fn drone_physical_host_counts(
+        &self,
+        drone_id: &str,
+    ) -> (
+        std::collections::BTreeMap<ItemKind, i32>,
+        std::collections::BTreeMap<ItemKind, i32>,
+    ) {
+        let Some(block_id) = self.drone_contact_block_id(drone_id) else {
+            return Default::default();
+        };
+        let Some(block) = self.blocks.get(&block_id) else {
+            return Default::default();
+        };
+        let inventory_counts = block
+            .inventory
+            .items
+            .iter()
+            .map(|(item, amount)| (item.clone(), i32::try_from(*amount).unwrap_or(i32::MAX)))
+            .collect();
+        let free = block
+            .inventory
+            .capacity
+            .saturating_sub(block.inventory.total());
+        let free = i32::try_from(free).unwrap_or(i32::MAX);
+        let space_counts = ItemKind::all()
+            .into_iter()
+            .filter(|item| can_accept_item(block.kind, item))
+            .map(|item| (item, free))
+            .collect();
+        (inventory_counts, space_counts)
     }
 
     fn carrier_drone_cpu_rate(&self, drone_id: &str, at_home: bool) -> f32 {

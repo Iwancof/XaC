@@ -182,6 +182,10 @@ if cargo_count ammo == 0 load ammo 5
 if cargo_count ammo > 0 move_to 42 30
 ```
 
+The low-level `load` and `unload` imports return the amount that can be moved
+from the current physical state. They return `0` and do not queue a command when
+the drone lacks battery, cargo space, contact inventory, or destination space.
+
 Drone ports are also code-driven. The default port charges docked drones, checks
 network ammo stock, creates a frontline delivery job, and dispatches an idle
 carrier. Custom port code can also branch on `docked_drone_count` and

@@ -1042,6 +1042,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
                 return 0;
             }
+            if !caller.data().input.drone_can_return_to_port {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::CarrierDrone {
                 command: DroneCommand::ReturnToPort,
             };
@@ -1074,6 +1077,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !caller.data().input.drone_has_job {
                 return 0;
             }
+            if !caller.data().input.drone_can_work {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::CarrierDrone {
                 command: DroneCommand::Deliver,
             };
@@ -1085,6 +1091,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "move_to",
         |mut caller: Caller<'_, BehaviorHostState>, x: i32, y: i32| -> i32 {
             if !charge_host(&mut caller, host_cost::DRONE_MOVE_TO) {
+                return 0;
+            }
+            if !caller.data().input.drone_can_move {
                 return 0;
             }
             caller.data_mut().intent = BehaviorIntent::CarrierDrone {
@@ -1109,10 +1118,14 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if amount == 0 {
                 return 0;
             }
+            let loaded = drone_loadable_amount(caller.data(), &item, amount);
+            if loaded == 0 {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::CarrierDrone {
                 command: DroneCommand::Load { item, amount },
             };
-            1
+            i32::try_from(loaded).unwrap_or(i32::MAX)
         },
     )?;
     linker.func_wrap(
@@ -1131,10 +1144,14 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if amount == 0 {
                 return 0;
             }
+            let unloaded = drone_unloadable_amount(caller.data(), &item, amount);
+            if unloaded == 0 {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::CarrierDrone {
                 command: DroneCommand::Unload { item, amount },
             };
-            1
+            i32::try_from(unloaded).unwrap_or(i32::MAX)
         },
     )?;
     linker.func_wrap(
@@ -1161,6 +1178,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
         "idle",
         |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
             if !charge_host(&mut caller, host_cost::DRONE_ACTION) {
+                return 0;
+            }
+            if !caller.data().input.drone_can_idle {
                 return 0;
             }
             caller.data_mut().intent = BehaviorIntent::CarrierDrone {
@@ -1218,6 +1238,45 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
 
 fn turret_can_attack_scan_index(state: &BehaviorHostState, index: i32) -> bool {
     state.input.ammo_count > 0 && index >= 0 && index < state.input.turret_visible_enemy_count
+}
+
+fn drone_loadable_amount(state: &BehaviorHostState, item: &ItemKind, requested: u32) -> u32 {
+    if !state.input.drone_can_work {
+        return 0;
+    }
+    let cargo_free = u32::try_from(state.input.drone_cargo_free.max(0)).unwrap_or(u32::MAX);
+    let available = state
+        .input
+        .drone_contact_inventory_counts
+        .get(item)
+        .copied()
+        .unwrap_or(0)
+        .max(0);
+    let available = u32::try_from(available).unwrap_or(u32::MAX);
+    requested.min(cargo_free).min(available)
+}
+
+fn drone_unloadable_amount(state: &BehaviorHostState, item: &ItemKind, requested: u32) -> u32 {
+    if !state.input.drone_can_work {
+        return 0;
+    }
+    let cargo_count = state
+        .input
+        .drone_cargo_counts
+        .get(item)
+        .copied()
+        .unwrap_or(0)
+        .max(0);
+    let cargo_count = u32::try_from(cargo_count).unwrap_or(u32::MAX);
+    let contact_space = state
+        .input
+        .drone_contact_space_counts
+        .get(item)
+        .copied()
+        .unwrap_or(0)
+        .max(0);
+    let contact_space = u32::try_from(contact_space).unwrap_or(u32::MAX);
+    requested.min(cargo_count).min(contact_space)
 }
 
 fn push_drill_command(state: &mut BehaviorHostState, command: DrillCommand) {

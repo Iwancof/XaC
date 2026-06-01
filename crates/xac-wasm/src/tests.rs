@@ -1,6 +1,10 @@
 use super::*;
 use std::collections::BTreeMap;
 
+fn item_counts(item: ItemKind, amount: i32) -> BTreeMap<ItemKind, i32> {
+    BTreeMap::from([(item, amount)])
+}
+
 #[test]
 fn compiles_wat_and_evaluates_action_code() {
     let runtime = BehaviorRuntime::new().unwrap();
@@ -876,6 +880,7 @@ fn xac_script_can_drive_carrier_drone_commands() {
                 drone_battery_percent: 10,
                 drone_logic_fuel: 1000,
                 drone_has_pending_job: true,
+                drone_can_return_to_port: true,
                 ..Default::default()
             },
         )
@@ -895,6 +900,7 @@ fn xac_script_can_drive_carrier_drone_commands() {
                 drone_battery_percent: 100,
                 drone_logic_fuel: 1000,
                 drone_has_job: true,
+                drone_can_work: true,
                 ..Default::default()
             },
         )
@@ -948,6 +954,7 @@ fn carrier_drone_wat_can_read_battery_ratio() {
             40,
             BehaviorHostInput {
                 drone_battery_percent: 20,
+                drone_can_return_to_port: true,
                 ..Default::default()
             },
         )
@@ -989,6 +996,7 @@ fn xac_script_can_branch_on_battery_ratio() {
             40,
             BehaviorHostInput {
                 drone_battery_percent: 24,
+                drone_can_return_to_port: true,
                 ..Default::default()
             },
         )
@@ -1023,7 +1031,16 @@ fn carrier_drone_wat_can_use_low_level_physical_apis() {
         .unwrap();
 
     let eval = runtime
-        .evaluate_compiled(&compiled, 80, BehaviorHostInput::default())
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                drone_can_work: true,
+                drone_cargo_free: 20,
+                drone_contact_inventory_counts: item_counts(ItemKind::Ammo, 5),
+                ..Default::default()
+            },
+        )
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -1043,10 +1060,109 @@ fn carrier_drone_wat_can_use_low_level_physical_apis() {
             80,
             BehaviorHostInput {
                 drone_cargo_counts: cargo,
+                drone_can_move: true,
+                drone_can_work: true,
+                drone_contact_space_counts: item_counts(ItemKind::Ammo, 5),
                 ..Default::default()
             },
         )
         .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::CarrierDrone {
+            command: DroneCommand::Unload {
+                item: ItemKind::Ammo,
+                amount: 5
+            }
+        }
+    ));
+}
+
+#[test]
+fn drone_physical_imports_return_available_transfer_amounts() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let compiled_load = runtime
+        .compile_wat(
+            BehaviorKind::CarrierDrone,
+            r#"(module
+                  (import "xac:drone" "load" (func $load (param i32 i32) (result i32)))
+                  (import "xac:net" "store_set_i32" (func $net_set (param i32 i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $net_set (i32.const 1) (call $load (i32.const 2) (i32.const 5))))))"#,
+        )
+        .unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_load,
+            80,
+            BehaviorHostInput {
+                drone_can_work: true,
+                drone_cargo_free: 3,
+                drone_contact_inventory_counts: item_counts(ItemKind::Ammo, 5),
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 1, value: 3 })]
+    );
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::CarrierDrone {
+            command: DroneCommand::Load {
+                item: ItemKind::Ammo,
+                amount: 5
+            }
+        }
+    ));
+
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_load,
+            80,
+            BehaviorHostInput {
+                drone_cargo_free: 3,
+                drone_contact_inventory_counts: item_counts(ItemKind::Ammo, 5),
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 1, value: 0 })]
+    );
+    assert!(matches!(eval.intent, BehaviorIntent::Noop));
+
+    let compiled_unload = runtime
+        .compile_wat(
+            BehaviorKind::CarrierDrone,
+            r#"(module
+                  (import "xac:drone" "unload" (func $unload (param i32 i32) (result i32)))
+                  (import "xac:net" "store_set_i32" (func $net_set (param i32 i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $net_set (i32.const 2) (call $unload (i32.const 2) (i32.const 5))))))"#,
+        )
+        .unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_unload,
+            80,
+            BehaviorHostInput {
+                drone_can_work: true,
+                drone_cargo_counts: item_counts(ItemKind::Ammo, 5),
+                drone_contact_space_counts: item_counts(ItemKind::Ammo, 2),
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 2, value: 2 })]
+    );
     assert!(matches!(
         eval.intent,
         BehaviorIntent::CarrierDrone {
@@ -1071,7 +1187,16 @@ fn xac_script_can_drive_carrier_drone_low_level_apis() {
         .compile_wat(BehaviorKind::CarrierDrone, source)
         .unwrap();
     let eval = runtime
-        .evaluate_compiled(&compiled, 80, BehaviorHostInput::default())
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                drone_can_work: true,
+                drone_cargo_free: 20,
+                drone_contact_inventory_counts: item_counts(ItemKind::Ammo, 5),
+                ..Default::default()
+            },
+        )
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -1091,6 +1216,7 @@ fn xac_script_can_drive_carrier_drone_low_level_apis() {
             80,
             BehaviorHostInput {
                 drone_cargo_counts: cargo,
+                drone_can_move: true,
                 ..Default::default()
             },
         )
