@@ -763,6 +763,44 @@ mod tests {
     }
 
     #[test]
+    fn behavior_build_compiles_tiny_source_and_hot_reloads_it() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+        let block_id = sim.selected_id.clone().unwrap();
+        let source = sim.edit_builtin_copy(&block_id).unwrap();
+        let behavior_id = source.summary.id;
+
+        sim.save_behavior(
+            &behavior_id,
+            r#"
+            fn tick() {
+              log("tiny ok");
+              mine();
+            }
+            "#
+            .to_string(),
+        )
+        .unwrap();
+        let result = sim.build_behavior(&behavior_id).unwrap();
+        assert!(result.success);
+        assert!(result.wasm_hash.is_some());
+        assert!(sim.compiled_behaviors.contains_key(&behavior_id));
+
+        sim.fuel_banks.insert(block_id.clone(), 100.0);
+        sim.step_ticks(1);
+
+        assert!(
+            sim.logs.iter().any(|entry| {
+                entry.level == LogLevel::Info
+                    && entry.source == block_id
+                    && entry.message == "tiny ok"
+            }),
+            "Tiny behavior should hot-reload into the same Wasm runtime"
+        );
+    }
+
+    #[test]
     fn xac_script_writes_network_store_and_recompute_preserves_it() {
         let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)

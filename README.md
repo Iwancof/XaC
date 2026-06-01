@@ -74,6 +74,18 @@ charge explicit fuel costs, and XaC Script can branch on remaining fuel:
 if fuel_remaining > 12 mine
 ```
 
+For a more code-like authoring path, the same backend also accepts a small
+C/Rust-style "XaC Tiny" source form. It is detected by `fn tick()` or an
+`xac-lang: tiny` comment, lowered through the same host API compiler, and then
+run as Wasm under the same fuel budget:
+
+```text
+fn tick() {
+  if (output_blocked()) { return; }
+  if (fuel_remaining() > 12) { mine(); }
+}
+```
+
 Assembler production reads `assets/recipes.toml`; `set_recipe ammo` records an
 explicit recipe goal on the block and can build missing intermediate plate from
 the same recipe table. Assembler scripts can branch on local inventory before

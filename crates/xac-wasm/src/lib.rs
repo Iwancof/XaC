@@ -11,6 +11,8 @@ use script::{
     ATTACK_POLICY_LOWEST_HP, ATTACK_POLICY_NEAREST, ATTACK_POLICY_RUNNER,
     ATTACK_POLICY_WIRE_CUTTER,
 };
+mod tiny;
+use tiny::{compile_tiny_source, is_tiny_source};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum BehaviorIntent {
@@ -1293,6 +1295,8 @@ fn charge_host(caller: &mut Caller<'_, BehaviorHostState>, cost: u64) -> bool {
 pub fn compile_source_to_wat(kind: BehaviorKind, source: &str) -> Result<String> {
     if is_wat_source(source) {
         Ok(source.to_string())
+    } else if is_tiny_source(source) {
+        compile_tiny_source(kind, source).map_err(|error| anyhow!("compile XaC Tiny: {error}"))
     } else {
         compile_xac_script(kind, source).map_err(|error| anyhow!("compile XaC script: {error}"))
     }
@@ -1755,6 +1759,73 @@ mod tests {
             )
             .unwrap();
         assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn compiles_tiny_source_to_host_imported_wasm() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = r#"
+            fn tick() {
+              if (output_blocked()) { return; }
+              mine();
+            }
+        "#;
+        let wat = compile_source_to_wat(BehaviorKind::Drill, source).unwrap();
+        assert!(wat.contains(r#"(import "xac:drill" "mine""#));
+        assert!(wat.contains("(call $output_blocked)"));
+
+        let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
+
+        let eval = runtime
+            .evaluate_compiled(
+                &compiled,
+                40,
+                BehaviorHostInput {
+                    output_blocked: true,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+    }
+
+    #[test]
+    fn tiny_source_uses_same_fuel_budget_as_wasm_behaviors() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::Drill,
+                r#"
+                fn tick() {
+                  if (fuel_remaining() > 12) { mine(); }
+                }
+                "#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 8, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(eval.intent, BehaviorIntent::Noop));
+        assert!(!eval.over_budget);
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+            .unwrap();
+        assert!(matches!(
+            eval.intent,
+            BehaviorIntent::Drill { ref commands }
+                if commands == &vec![DrillCommand::Mine]
+        ));
+        assert!(eval.fuel_spent >= host_cost::MINE);
     }
 
     #[test]
@@ -2601,6 +2672,12 @@ mod tests {
     #[test]
     fn xac_script_rejects_wrong_block_capability() {
         let err = compile_source_to_wat(BehaviorKind::Turret, "mine").unwrap_err();
+        assert!(err.to_string().contains("only available to Drill"));
+    }
+
+    #[test]
+    fn tiny_source_rejects_wrong_block_capability() {
+        let err = compile_source_to_wat(BehaviorKind::Turret, "fn tick() { mine(); }").unwrap_err();
         assert!(err.to_string().contains("only available to Drill"));
     }
 
