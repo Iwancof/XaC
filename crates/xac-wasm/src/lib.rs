@@ -7,8 +7,7 @@ use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
 
 mod host;
 use host::define_host_imports;
-#[cfg(test)]
-use host::host_cost;
+mod host_cost;
 
 mod imports;
 use imports::{allowed_host_import, allowed_worlds};
