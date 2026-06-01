@@ -4,8 +4,8 @@ use xac_core::{
 };
 
 use crate::behavior::{
-    persist_project_behavior_index, persist_project_behavior_source, project_behavior_source_path,
-    BehaviorPackage,
+    persist_compiled_behavior_cache, persist_project_behavior_index,
+    persist_project_behavior_source, project_behavior_source_path, BehaviorPackage,
 };
 use crate::Simulation;
 
@@ -175,6 +175,14 @@ impl Simulation {
         match self.runtime.compile_wat(kind, &source) {
             Ok(compiled) => {
                 let wasm_hash = Some(compiled.wasm_hash().to_string());
+                let display_name = {
+                    let package = self
+                        .behaviors
+                        .get(behavior_id)
+                        .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
+                    persist_compiled_behavior_cache(&self.config_root, package, &compiled)?;
+                    package.summary.display_name.clone()
+                };
                 self.compiled_behaviors
                     .insert(behavior_id.to_string(), compiled);
                 if let Some(package) = self.behaviors.get_mut(behavior_id) {
@@ -185,7 +193,10 @@ impl Simulation {
                 self.log(
                     LogLevel::Info,
                     behavior_id.to_string(),
-                    "build ok; behavior source compiled to wasm".to_string(),
+                    format!(
+                        "build ok; behavior source compiled to cached wasm for {}",
+                        display_name
+                    ),
                 );
                 Ok(BuildResult {
                     behavior_id: behavior_id.to_string(),

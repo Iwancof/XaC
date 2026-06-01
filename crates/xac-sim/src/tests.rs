@@ -431,6 +431,27 @@ fn project_behavior_source_persists_under_config_root() {
 
     let result = sim.build_behavior(&behavior_id).unwrap();
     assert!(result.success);
+    let wasm_hash = result
+        .wasm_hash
+        .clone()
+        .expect("build should return a wasm hash");
+    let cached_wasm_path = config_root
+        .join("cache/wasm")
+        .join(format!("{wasm_hash}.wasm"));
+    let cached_wasm = fs::read(&cached_wasm_path).unwrap();
+    assert_eq!(
+        cached_wasm.get(0..4),
+        Some(&b"\0asm"[..]),
+        "build should persist the compiled wasm artifact under cache/wasm"
+    );
+    let metadata_source = fs::read_to_string(
+        config_root
+            .join("cache/wasm")
+            .join(format!("{wasm_hash}.metadata.toml")),
+    )
+    .unwrap();
+    assert!(metadata_source.contains(&behavior_id));
+    assert!(metadata_source.contains(&wasm_hash));
 
     let index_source =
         fs::read_to_string(config_root.join("projects/default_project/behaviors.toml")).unwrap();

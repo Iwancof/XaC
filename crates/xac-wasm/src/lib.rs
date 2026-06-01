@@ -68,6 +68,7 @@ pub struct CompiledBehavior {
     kind: BehaviorKind,
     module: Module,
     wasm_hash: String,
+    wasm_bytes: Vec<u8>,
     tick_abi: TickAbi,
 }
 
@@ -78,6 +79,10 @@ impl CompiledBehavior {
 
     pub fn wasm_hash(&self) -> &str {
         &self.wasm_hash
+    }
+
+    pub fn wasm_bytes(&self) -> &[u8] {
+        &self.wasm_bytes
     }
 }
 
@@ -115,6 +120,7 @@ impl BehaviorRuntime {
             kind,
             module,
             wasm_hash,
+            wasm_bytes: wasm,
             tick_abi,
         })
     }

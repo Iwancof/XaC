@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use xac_core::{BehaviorId, BehaviorKind, BehaviorSummary};
-use xac_wasm::hash_behavior_source;
+use xac_wasm::{hash_behavior_source, CompiledBehavior};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct BehaviorPackage {
@@ -28,6 +28,15 @@ struct ProjectBehaviorRecord {
     source_path: String,
     build_status: String,
     wasm_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+struct WasmCacheMetadata {
+    behavior_id: BehaviorId,
+    base_kind: BehaviorKind,
+    world: String,
+    source_path: String,
+    wasm_hash: String,
 }
 
 const PROJECT_INDEX_PATH: &str = "projects/default_project/behaviors.toml";
@@ -120,6 +129,36 @@ pub fn persist_project_behavior_index(
         toml::to_string_pretty(&index).context("serialize project behavior index")?;
     fs::write(&index_path, index_source)
         .with_context(|| format!("write project behavior index {}", index_path.display()))?;
+    Ok(())
+}
+
+pub fn persist_compiled_behavior_cache(
+    config_root: &Path,
+    package: &BehaviorPackage,
+    compiled: &CompiledBehavior,
+) -> Result<()> {
+    let cache_dir = config_root.join("cache/wasm");
+    fs::create_dir_all(&cache_dir)
+        .with_context(|| format!("create wasm cache dir {}", cache_dir.display()))?;
+
+    let wasm_hash = compiled.wasm_hash();
+    let wasm_path = cache_dir.join(format!("{wasm_hash}.wasm"));
+    fs::write(&wasm_path, compiled.wasm_bytes())
+        .with_context(|| format!("write cached behavior wasm {}", wasm_path.display()))?;
+
+    let metadata = WasmCacheMetadata {
+        behavior_id: package.summary.id.clone(),
+        base_kind: package.summary.base_kind,
+        world: package.summary.world.clone(),
+        source_path: package.summary.source_path.clone(),
+        wasm_hash: wasm_hash.to_string(),
+    };
+    let metadata_path = cache_dir.join(format!("{wasm_hash}.metadata.toml"));
+    let metadata_source =
+        toml::to_string_pretty(&metadata).context("serialize wasm cache metadata")?;
+    fs::write(&metadata_path, metadata_source)
+        .with_context(|| format!("write cached behavior metadata {}", metadata_path.display()))?;
+
     Ok(())
 }
 
