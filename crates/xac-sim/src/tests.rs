@@ -322,6 +322,47 @@ fn behavior_assignment_rejects_wrong_block_kind() {
 }
 
 #[test]
+fn carrier_drone_builtin_behavior_can_be_copied_for_editing() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let port_id = sim.selected_id.clone().unwrap();
+    sim.ensure_drone_and_job(&port_id);
+    let drone_id = sim.drones.values().next().unwrap().id.clone();
+
+    let source = sim.edit_builtin_copy(&drone_id).unwrap();
+
+    assert_eq!(source.summary.base_kind, BehaviorKind::CarrierDrone);
+    assert!(!source.summary.builtin);
+    assert_eq!(source.summary.used_by, 1);
+    assert_eq!(
+        sim.drones[&drone_id].behavior_ref.as_deref(),
+        Some(source.summary.id.as_str())
+    );
+    assert!(source.source.contains("claim_delivery_job"));
+}
+
+#[test]
+fn carrier_drone_behavior_assignment_rejects_block_behavior() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let port_id = sim.selected_id.clone().unwrap();
+    sim.ensure_drone_and_job(&port_id);
+    let drone_id = sim.drones.values().next().unwrap().id.clone();
+
+    let err = sim
+        .assign_behavior(&drone_id, "builtin.turret.priority")
+        .unwrap_err();
+
+    assert!(err.to_string().contains("targets Turret"));
+    assert_eq!(
+        sim.drones[&drone_id].behavior_ref.as_deref(),
+        Some("builtin.carrier_drone.basic")
+    );
+}
+
+#[test]
 fn project_behavior_source_persists_under_config_root() {
     let config_root = test_config_root("behavior-persistence");
     let mut sim = Simulation::new(&config_root).unwrap();

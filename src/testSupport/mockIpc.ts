@@ -43,12 +43,16 @@ type CommandCall = {
 };
 
 type MutableBehavior = BehaviorSource;
+type BehaviorOwner =
+  | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
+  | { kind: "drone"; entity: Drone; behaviorKind: "carrier_drone" };
 
 interface MockState {
   tick: number;
   running: boolean;
   blocks: Block[];
   enemies: Enemy[];
+  drones: Drone[];
   logs: LogEntry[];
   selectedId: string | null;
   behaviors: Record<string, MutableBehavior>;
@@ -147,6 +151,7 @@ function createInitialState(): MockState {
         target_id: core.id
       }
     ],
+    drones: [],
     logs: [
       {
         tick: 0,
@@ -169,7 +174,12 @@ function snapshot(): GameSnapshot {
   const networks = recomputeNetworks(blocks);
   const tiles = buildTiles(blocks);
   const enemies = state.enemies.map((enemy) => ({ ...enemy, pos: { ...enemy.pos } }));
-  const drones: Drone[] = [];
+  const drones = state.drones.map((drone) => ({
+    ...drone,
+    pos: { ...drone.pos },
+    cargo: clone(drone.cargo),
+    job: drone.job ? clone(drone.job) : null
+  }));
   const pendingJobs: DeliveryJob[] = [];
 
   return clone({
@@ -301,13 +311,12 @@ function openBehavior(behaviorId: string): BehaviorSource {
   });
 }
 
-function copyBehavior(blockId: string, fork: boolean): BehaviorSource {
-  const block = state.blocks.find((item) => item.id === blockId);
-  if (!block?.behavior_ref) {
-    throw new Error("selected block has no behavior");
-  }
+function copyBehavior(entityId: string, fork: boolean): BehaviorSource {
+  const owner = behaviorOwner(entityId);
+  const behaviorRef = owner.entity.behavior_ref;
+  if (!behaviorRef) throw new Error(`selected ${owner.kind} has no behavior`);
 
-  const original = openBehavior(block.behavior_ref);
+  const original = openBehavior(behaviorRef);
   if (!original.summary.builtin && !fork) {
     return original;
   }
@@ -326,27 +335,46 @@ function copyBehavior(blockId: string, fork: boolean): BehaviorSource {
     },
     source: original.source
   };
-  block.behavior_ref = id;
-  log("info", block.id, `${fork ? "forked" : "created editable copy"} ${id}`);
+  owner.entity.behavior_ref = id;
+  log("info", owner.entity.id, `${fork ? "forked" : "created editable copy"} ${id}`);
   return openBehavior(id);
 }
 
 function assignBehavior({ blockId = "", behaviorId = "" }: { blockId?: string; behaviorId?: string }) {
-  const block = state.blocks.find((item) => item.id === blockId);
-  if (!block) {
-    throw new Error(`unknown block: ${blockId}`);
-  }
+  const owner = behaviorOwner(blockId);
   const behavior = state.behaviors[behaviorId];
   if (!behavior) {
     throw new Error(`unknown behavior: ${behaviorId}`);
   }
-  if (behavior.summary.base_kind !== block.kind) {
-    throw new Error(`behavior ${behaviorId} targets ${behavior.summary.base_kind}, but block is ${block.kind}`);
+  if (behavior.summary.base_kind !== owner.behaviorKind) {
+    throw new Error(`behavior ${behaviorId} targets ${behavior.summary.base_kind}, but entity is ${owner.behaviorKind}`);
   }
-  block.behavior_ref = behaviorId;
-  block.status = `behavior: ${behavior.summary.display_name}`;
+  owner.entity.behavior_ref = behaviorId;
+  if (owner.kind === "block") {
+    owner.entity.status = `behavior: ${behavior.summary.display_name}`;
+  }
   log("info", blockId, `assigned ${behavior.summary.display_name}`);
   return snapshot();
+}
+
+function behaviorOwner(entityId: string): BehaviorOwner {
+  const block = state.blocks.find((item) => item.id === entityId);
+  if (block) {
+    const behaviorKind = block.kind;
+    if (
+      behaviorKind === "drill" ||
+      behaviorKind === "router" ||
+      behaviorKind === "assembler" ||
+      behaviorKind === "turret" ||
+      behaviorKind === "drone_port"
+    ) {
+      return { kind: "block", entity: block, behaviorKind };
+    }
+    throw new Error("selected block cannot run behavior");
+  }
+  const drone = state.drones.find((item) => item.id === entityId);
+  if (drone) return { kind: "drone", entity: drone, behaviorKind: "carrier_drone" };
+  throw new Error(`unknown behavior owner: ${entityId}`);
 }
 
 function saveBehavior({ behaviorId = "", source = "" }: { behaviorId?: string; source?: string }): BehaviorSource {

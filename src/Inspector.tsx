@@ -41,6 +41,7 @@ export function Inspector({
   const selectedNetwork = selectedBlock?.network_id
     ? snapshot?.networks.find((network) => network.id === selectedBlock.network_id)
     : null;
+  const droneBehaviorRef = selectedDrone?.behavior_ref ?? null;
 
   return (
     <section className="inspector">
@@ -181,6 +182,38 @@ export function Inspector({
             ))}
             {Object.keys(selectedDrone.cargo.items).length === 0 && <span>empty cargo</span>}
           </div>
+          {droneBehaviorRef && (
+            <>
+              <label className="behavior-picker">
+                <span>Behavior</span>
+                <select
+                  aria-label="Assign behavior preset"
+                  value={droneBehaviorRef}
+                  onChange={(event) => onAssignBehavior(event.target.value)}
+                >
+                  {compatibleBehaviors.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="behavior-actions">
+                <button onClick={() => onOpenBehavior(droneBehaviorRef)} title="Open behavior">
+                  <Code2 size={16} />
+                  Open
+                </button>
+                <button onClick={onEditCopy} title="Copy built-in preset and edit">
+                  <Copy size={16} />
+                  Edit Copy
+                </button>
+                <button onClick={onFork} title="Fork behavior for this drone">
+                  <GitBranch size={16} />
+                  Fork
+                </button>
+              </div>
+            </>
+          )}
         </>
       ) : (
         <p className="muted">Select a block, enemy, or drone to inspect its state.</p>

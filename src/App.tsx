@@ -124,9 +124,10 @@ export function App() {
     return snapshot.drones.find((drone) => drone.id === snapshot.selected_id) ?? null;
   }, [snapshot]);
   const compatibleBehaviors = useMemo(() => {
-    if (!selectedBlock) return [];
-    return snapshot?.behaviors.filter((item) => item.base_kind === selectedBlock.kind) ?? [];
-  }, [selectedBlock, snapshot]);
+    const behaviorKind = selectedBlock?.kind ?? (selectedDrone ? "carrier_drone" : null);
+    if (!behaviorKind) return [];
+    return snapshot?.behaviors.filter((item) => item.base_kind === behaviorKind) ?? [];
+  }, [selectedBlock, selectedDrone, snapshot]);
 
   const dirty = behavior ? editorValue !== savedValue : false;
 
@@ -162,9 +163,10 @@ export function App() {
   };
 
   const handleEditCopy = async () => {
-    if (!selectedBlock) return;
+    const entityId = selectedBlock?.id ?? selectedDrone?.id;
+    if (!entityId) return;
     try {
-      const next = await editBuiltinCopy(selectedBlock.id);
+      const next = await editBuiltinCopy(entityId);
       setBehavior(next);
       setEditorValue(next.source);
       setSavedValue(next.source);
@@ -176,9 +178,10 @@ export function App() {
   };
 
   const handleFork = async () => {
-    if (!selectedBlock) return;
+    const entityId = selectedBlock?.id ?? selectedDrone?.id;
+    if (!entityId) return;
     try {
-      const next = await forkBehavior(selectedBlock.id);
+      const next = await forkBehavior(entityId);
       setBehavior(next);
       setEditorValue(next.source);
       setSavedValue(next.source);
@@ -190,9 +193,10 @@ export function App() {
   };
 
   const handleAssignBehavior = async (behaviorId: string) => {
-    if (!selectedBlock) return;
+    const entityId = selectedBlock?.id ?? selectedDrone?.id;
+    if (!entityId) return;
     try {
-      setSnapshot(await assignBehavior(selectedBlock.id, behaviorId));
+      setSnapshot(await assignBehavior(entityId, behaviorId));
       setError(null);
       if (behavior && !dirty) {
         await loadBehavior(behaviorId);
@@ -260,7 +264,7 @@ export function App() {
 
   const core = snapshot?.blocks.find((block) => block.kind === "core");
   const coreItemCount = (item: ItemKind) => core?.inventory.items[item] ?? 0;
-  const selectedBehaviorId = selectedBlock?.behavior_ref ?? null;
+  const selectedBehaviorId = selectedBlock?.behavior_ref ?? selectedDrone?.behavior_ref ?? null;
 
   return (
     <main className="app-shell">

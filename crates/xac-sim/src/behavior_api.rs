@@ -9,6 +9,12 @@ use crate::behavior::{
 };
 use crate::Simulation;
 
+#[derive(Clone, Copy)]
+enum BehaviorOwner {
+    Block,
+    Drone,
+}
+
 impl Simulation {
     pub fn open_behavior(&self, id: &str) -> Result<BehaviorSource> {
         let package = self
@@ -21,12 +27,8 @@ impl Simulation {
         })
     }
 
-    pub fn edit_builtin_copy(&mut self, block_id: &str) -> Result<BehaviorSource> {
-        let behavior_id = self
-            .blocks
-            .get(block_id)
-            .and_then(|b| b.behavior_ref.clone())
-            .ok_or_else(|| anyhow!("selected block has no behavior"))?;
+    pub fn edit_builtin_copy(&mut self, entity_id: &str) -> Result<BehaviorSource> {
+        let (owner, behavior_id, _) = self.behavior_owner(entity_id)?;
         let original = self
             .behaviors
             .get(&behavior_id)
@@ -60,23 +62,17 @@ impl Simulation {
         persist_project_behavior_source(&package)?;
         self.behaviors.insert(new_id.clone(), package);
         persist_project_behavior_index(&self.config_root, &self.behaviors)?;
-        if let Some(block) = self.blocks.get_mut(block_id) {
-            block.behavior_ref = Some(new_id.clone());
-        }
+        self.set_behavior_ref(owner, entity_id, new_id.clone(), None)?;
         self.log(
             LogLevel::Info,
-            block_id.to_string(),
+            entity_id.to_string(),
             format!("created editable copy {new_id}"),
         );
         self.open_behavior(&new_id)
     }
 
-    pub fn fork_behavior(&mut self, block_id: &str) -> Result<BehaviorSource> {
-        let behavior_id = self
-            .blocks
-            .get(block_id)
-            .and_then(|b| b.behavior_ref.clone())
-            .ok_or_else(|| anyhow!("selected block has no behavior"))?;
+    pub fn fork_behavior(&mut self, entity_id: &str) -> Result<BehaviorSource> {
+        let (owner, behavior_id, _) = self.behavior_owner(entity_id)?;
         let original = self
             .behaviors
             .get(&behavior_id)
@@ -104,25 +100,17 @@ impl Simulation {
         persist_project_behavior_source(&package)?;
         self.behaviors.insert(new_id.clone(), package);
         persist_project_behavior_index(&self.config_root, &self.behaviors)?;
-        if let Some(block) = self.blocks.get_mut(block_id) {
-            block.behavior_ref = Some(new_id.clone());
-        }
+        self.set_behavior_ref(owner, entity_id, new_id.clone(), None)?;
         self.log(
             LogLevel::Info,
-            block_id.to_string(),
+            entity_id.to_string(),
             format!("forked behavior into {new_id}"),
         );
         self.open_behavior(&new_id)
     }
 
-    pub fn assign_behavior(&mut self, block_id: &str, behavior_id: &str) -> Result<GameSnapshot> {
-        let block_kind = self
-            .blocks
-            .get(block_id)
-            .map(|block| block.kind)
-            .ok_or_else(|| anyhow!("unknown block: {block_id}"))?;
-        let expected_kind = BehaviorKind::from_block_kind(block_kind)
-            .ok_or_else(|| anyhow!("selected block cannot run behavior"))?;
+    pub fn assign_behavior(&mut self, entity_id: &str, behavior_id: &str) -> Result<GameSnapshot> {
+        let (owner, _, expected_kind) = self.behavior_owner(entity_id)?;
         let behavior = self
             .behaviors
             .get(behavior_id)
@@ -136,13 +124,15 @@ impl Simulation {
         }
 
         let display_name = behavior.summary.display_name.clone();
-        if let Some(block) = self.blocks.get_mut(block_id) {
-            block.behavior_ref = Some(behavior_id.to_string());
-            block.status = format!("behavior: {display_name}");
-        }
+        self.set_behavior_ref(
+            owner,
+            entity_id,
+            behavior_id.to_string(),
+            Some(&display_name),
+        )?;
         self.log(
             LogLevel::Info,
-            block_id.to_string(),
+            entity_id.to_string(),
             format!("assigned {display_name}"),
         );
         Ok(self.snapshot())
@@ -233,5 +223,58 @@ impl Simulation {
                 .filter(|d| d.behavior_ref.as_ref() == Some(&summary.id))
                 .count() as u32;
         summary
+    }
+
+    fn behavior_owner(&self, entity_id: &str) -> Result<(BehaviorOwner, String, BehaviorKind)> {
+        if let Some(block) = self.blocks.get(entity_id) {
+            let expected_kind = BehaviorKind::from_block_kind(block.kind)
+                .ok_or_else(|| anyhow!("selected block cannot run behavior"))?;
+            let behavior_id = block
+                .behavior_ref
+                .clone()
+                .ok_or_else(|| anyhow!("selected block has no behavior"))?;
+            return Ok((BehaviorOwner::Block, behavior_id, expected_kind));
+        }
+        if let Some(drone) = self.drones.get(entity_id) {
+            let behavior_id = drone
+                .behavior_ref
+                .clone()
+                .ok_or_else(|| anyhow!("selected drone has no behavior"))?;
+            return Ok((
+                BehaviorOwner::Drone,
+                behavior_id,
+                BehaviorKind::CarrierDrone,
+            ));
+        }
+        Err(anyhow!("unknown behavior owner: {entity_id}"))
+    }
+
+    fn set_behavior_ref(
+        &mut self,
+        owner: BehaviorOwner,
+        entity_id: &str,
+        behavior_id: String,
+        display_name: Option<&str>,
+    ) -> Result<()> {
+        match owner {
+            BehaviorOwner::Block => {
+                let block = self
+                    .blocks
+                    .get_mut(entity_id)
+                    .ok_or_else(|| anyhow!("unknown block: {entity_id}"))?;
+                block.behavior_ref = Some(behavior_id);
+                if let Some(display_name) = display_name {
+                    block.status = format!("behavior: {display_name}");
+                }
+            }
+            BehaviorOwner::Drone => {
+                let drone = self
+                    .drones
+                    .get_mut(entity_id)
+                    .ok_or_else(|| anyhow!("unknown drone: {entity_id}"))?;
+                drone.behavior_ref = Some(behavior_id);
+            }
+        }
+        Ok(())
     }
 }

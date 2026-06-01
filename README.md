@@ -61,6 +61,8 @@ Programmable blocks expose a behavior picker in the inspector. It lists only
 compatible presets and project copies for the selected block kind, so a turret
 can switch from `Basic Turret` to `Priority Turret` without entering edit mode,
 while incompatible router/drill behavior cannot be assigned to that turret.
+Carrier drones use the same inspector behavior actions once selected, allowing
+their built-in logic to be opened, copied, forked, and edited like block code.
 
 Drill scripts can also inspect the resource under the drill and explicitly
 push stored ore into the block they face:

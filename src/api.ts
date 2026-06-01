@@ -43,16 +43,16 @@ export function openBehavior(behaviorId: string) {
   return invoke<BehaviorSource>("open_behavior", { behaviorId });
 }
 
-export function editBuiltinCopy(blockId: string) {
-  return invoke<BehaviorSource>("edit_builtin_copy", { blockId });
+export function editBuiltinCopy(entityId: string) {
+  return invoke<BehaviorSource>("edit_builtin_copy", { blockId: entityId });
 }
 
-export function forkBehavior(blockId: string) {
-  return invoke<BehaviorSource>("fork_behavior", { blockId });
+export function forkBehavior(entityId: string) {
+  return invoke<BehaviorSource>("fork_behavior", { blockId: entityId });
 }
 
-export function assignBehavior(blockId: string, behaviorId: string) {
-  return invoke<GameSnapshot>("assign_behavior", { blockId, behaviorId });
+export function assignBehavior(entityId: string, behaviorId: string) {
+  return invoke<GameSnapshot>("assign_behavior", { blockId: entityId, behaviorId });
 }
 
 export function saveBehavior(behaviorId: string, source: string) {
