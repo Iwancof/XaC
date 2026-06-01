@@ -8,8 +8,10 @@ use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
 mod abi_codes;
 mod host;
 use host::define_host_imports;
+mod host_common;
 mod host_cost;
 mod host_helpers;
+mod host_net;
 
 mod imports;
 use imports::{allowed_host_import, allowed_worlds};
