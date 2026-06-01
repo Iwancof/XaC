@@ -7,10 +7,13 @@ use xac_wasm::{
 };
 
 use crate::block_defs::can_accept_item;
-use crate::{Simulation, TICKS_PER_SECOND};
+use crate::cpu::FuelPolicy;
+use crate::Simulation;
 
-const MIN_BEHAVIOR_INVOCATION_FUEL: u64 = 40;
-const BEHAVIOR_FUEL_BANK_SECONDS: f32 = 8.0;
+const BLOCK_BEHAVIOR_FUEL_POLICY: FuelPolicy = FuelPolicy {
+    min_invocation_fuel: 40,
+    max_bank_seconds: 8.0,
+};
 
 impl Simulation {
     pub(crate) fn run_programmable_behaviors(&mut self) {
@@ -34,7 +37,7 @@ impl Simulation {
             let Some(behavior_ref) = behavior_ref else {
                 continue;
             };
-            let fuel = self.grant_behavior_fuel(&id, cpu_rate);
+            let fuel = self.grant_fuel_bank(&id, cpu_rate, BLOCK_BEHAVIOR_FUEL_POLICY);
             if fuel == 0 {
                 continue;
             }
@@ -52,7 +55,7 @@ impl Simulation {
 
             match self.runtime.evaluate_compiled(&compiled, fuel, host_input) {
                 Ok(eval) => {
-                    self.spend_behavior_fuel(&id, eval.fuel_spent);
+                    self.spend_fuel_bank(&id, eval.fuel_spent);
                     if eval.over_budget {
                         if let Some(block) = self.blocks.get_mut(&id) {
                             block.status = "over_budget".to_string();
@@ -72,7 +75,7 @@ impl Simulation {
                     self.apply_behavior_intent(&id, eval.intent);
                 }
                 Err(error) => {
-                    self.spend_behavior_fuel(&id, fuel);
+                    self.spend_fuel_bank(&id, fuel);
                     if let Some(block) = self.blocks.get_mut(&id) {
                         block.status = "runtime error".to_string();
                     }
@@ -205,25 +208,6 @@ impl Simulation {
     pub(crate) fn apply_behavior_logs(&mut self, block_id: &str, logs: Vec<BehaviorLog>) {
         for entry in logs {
             self.log(LogLevel::Info, block_id.to_string(), entry.message);
-        }
-    }
-
-    fn grant_behavior_fuel(&mut self, block_id: &str, cpu_rate: f32) -> u64 {
-        let bank = self.fuel_banks.entry(block_id.to_string()).or_insert(0.0);
-        let max_bank = (cpu_rate.max(1.0) * BEHAVIOR_FUEL_BANK_SECONDS)
-            .max(MIN_BEHAVIOR_INVOCATION_FUEL as f32);
-        *bank = (*bank + cpu_rate / TICKS_PER_SECOND as f32).min(max_bank);
-        let available = bank.floor() as u64;
-        if available >= MIN_BEHAVIOR_INVOCATION_FUEL {
-            available
-        } else {
-            0
-        }
-    }
-
-    fn spend_behavior_fuel(&mut self, block_id: &str, fuel_spent: u64) {
-        if let Some(bank) = self.fuel_banks.get_mut(block_id) {
-            *bank = (*bank - fuel_spent as f32).max(0.0);
         }
     }
 

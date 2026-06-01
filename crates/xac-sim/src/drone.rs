@@ -4,12 +4,15 @@ use xac_core::{
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, DroneCommand, DronePortCommand};
 
 use crate::block_defs::can_accept_item;
+use crate::cpu::FuelPolicy;
 use crate::geometry::{block_center, closest_point_on_block};
-use crate::{Simulation, TICKS_PER_SECOND};
+use crate::Simulation;
 
 const CARRIER_DRONE_LOCAL_CPU_RATE: f32 = 4.0;
-const DRONE_BEHAVIOR_MIN_INVOCATION_FUEL: u64 = 40;
-const DRONE_BEHAVIOR_FUEL_BANK_SECONDS: f32 = 8.0;
+const DRONE_BEHAVIOR_FUEL_POLICY: FuelPolicy = FuelPolicy {
+    min_invocation_fuel: 40,
+    max_bank_seconds: 8.0,
+};
 const DRONE_MOVE_SPEED: f32 = 0.18;
 const DRONE_MOVE_BATTERY_COST: f32 = 0.05;
 const DRONE_WORK_BATTERY_COST: f32 = 0.1;
@@ -223,7 +226,7 @@ impl Simulation {
         let (contact_inventory_counts, contact_space_counts) =
             self.drone_physical_host_counts(drone_id);
         let cpu_rate = self.carrier_drone_cpu_rate(drone_id, at_home);
-        let available_fuel = self.grant_drone_behavior_fuel(drone_id, cpu_rate);
+        let available_fuel = self.grant_fuel_bank(drone_id, cpu_rate, DRONE_BEHAVIOR_FUEL_POLICY);
         if available_fuel == 0 {
             return None;
         }
@@ -257,7 +260,7 @@ impl Simulation {
         let eval = match self.runtime.evaluate_compiled(&compiled, fuel, input) {
             Ok(eval) => eval,
             Err(error) => {
-                self.spend_drone_behavior_fuel(drone_id, fuel);
+                self.spend_fuel_bank(drone_id, fuel);
                 self.spend_drone_logic_fuel(drone_id, fuel);
                 self.log(
                     xac_core::LogLevel::Error,
@@ -267,7 +270,7 @@ impl Simulation {
                 return None;
             }
         };
-        self.spend_drone_behavior_fuel(drone_id, eval.fuel_spent);
+        self.spend_fuel_bank(drone_id, eval.fuel_spent);
         self.spend_drone_logic_fuel(drone_id, eval.fuel_spent);
         if eval.over_budget {
             self.log(
@@ -335,25 +338,6 @@ impl Simulation {
             .map(|network| network.effective_per_device)
             .unwrap_or(0.0);
         rate
-    }
-
-    fn grant_drone_behavior_fuel(&mut self, drone_id: &str, cpu_rate: f32) -> u64 {
-        let bank = self.fuel_banks.entry(drone_id.to_string()).or_insert(0.0);
-        let max_bank = (cpu_rate.max(1.0) * DRONE_BEHAVIOR_FUEL_BANK_SECONDS)
-            .max(DRONE_BEHAVIOR_MIN_INVOCATION_FUEL as f32);
-        *bank = (*bank + cpu_rate / TICKS_PER_SECOND as f32).min(max_bank);
-        let available = bank.floor() as u64;
-        if available >= DRONE_BEHAVIOR_MIN_INVOCATION_FUEL {
-            available
-        } else {
-            0
-        }
-    }
-
-    fn spend_drone_behavior_fuel(&mut self, drone_id: &str, fuel_spent: u64) {
-        if let Some(bank) = self.fuel_banks.get_mut(drone_id) {
-            *bank = (*bank - fuel_spent as f32).max(0.0);
-        }
     }
 
     fn spend_drone_logic_fuel(&mut self, drone_id: &str, fuel_spent: u64) {

@@ -12,6 +12,7 @@ mod behavior_api;
 mod behavior_runner;
 mod block_defs;
 mod combat;
+mod cpu;
 mod drone;
 mod geometry;
 mod logistics;
