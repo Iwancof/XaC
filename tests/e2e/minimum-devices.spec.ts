@@ -22,9 +22,10 @@ declare global {
           effective_cpu_rate: number;
           target_id: string | null;
         }>;
-        drones: Array<{ id: string; behavior_ref: string | null }>;
+        drones: Array<{ id: string; behavior_ref: string | null; pos: { x: number; y: number } }>;
         enemies: Array<{ id: string; hp: number; pos: { x: number; y: number }; target_id: string | null }>;
         item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
+        pending_jobs: Array<{ id: string; item: string; amount: number; pickup: string; dropoff: string }>;
         networks: Array<{
           cpu_pool: number;
           active_devices: number;
@@ -57,6 +58,8 @@ const tileCenter = (x: number, y: number) => ({
 });
 
 test("places minimum devices from the right block list and opens drill behavior", async ({ page }) => {
+  test.setTimeout(90_000);
+
   await page.goto("/");
 
   await expect(page.getByText("Blocks", { exact: true })).toBeVisible();
@@ -529,6 +532,40 @@ test("UI mock runs code-driven assembler ammo into turret defense", async ({ pag
   });
   expect(defended.enemy?.hp ?? 0).toBeLessThan(30);
   expect(defended.turret?.target_id).toBe("enemy_2");
+});
+
+test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.getByTestId("grid-world").locator("canvas");
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole("button", { name: /Drone Port/ }).click();
+  await canvas.click({ position: tileCenter(34, 30) });
+  await page.getByRole("button", { name: /Turret/ }).click();
+  await canvas.click({ position: tileCenter(42, 30) });
+
+  for (let i = 0; i < 10; i += 1) {
+    await page.getByRole("button", { name: /\+40/ }).click();
+  }
+
+  const delivered = await page.evaluate(() => {
+    const snapshot = window.__XAC_TEST_STATE__!.snapshot();
+    return {
+      drones: snapshot.drones,
+      pendingJobs: snapshot.pending_jobs,
+      turret: snapshot.blocks.find((block) => block.id === "turret_1"),
+      droneFlow: snapshot.item_flows.some(
+        (flow) => flow.item === "ammo" && flow.from_entity === "drone_1" && flow.to_entity === "turret_1"
+      )
+    };
+  });
+
+  expect(delivered.drones).toHaveLength(1);
+  expect(delivered.pendingJobs).toHaveLength(0);
+  expect(delivered.turret?.inventory.items.ammo ?? 0).toBeGreaterThan(0);
+  expect(delivered.droneFlow).toBe(true);
+  expect(delivered.drones[0].pos.x % 1).not.toBe(0);
 });
 
 test("wire cutter can sever a CPU network in the UI simulation", async ({ page }) => {

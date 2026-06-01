@@ -57,7 +57,7 @@ type CommandCall = {
 };
 
 type MutableBehavior = BehaviorSource;
-type IdKind = BlockKind | "behavior" | "drone" | "enemy" | "flow";
+type IdKind = BlockKind | "behavior" | "drone" | "enemy" | "flow" | "job";
 type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
@@ -69,6 +69,7 @@ interface MockState {
   blocks: Block[];
   enemies: Enemy[];
   drones: Drone[];
+  pendingJobs: DeliveryJob[];
   itemFlows: ItemFlowEvent[];
   logs: LogEntry[];
   selectedId: string | null;
@@ -177,6 +178,7 @@ function createInitialState(): MockState {
       }
     ],
     drones: [],
+    pendingJobs: [],
     itemFlows: [],
     logs: [
       {
@@ -207,8 +209,6 @@ function snapshot(): GameSnapshot {
     cargo: clone(drone.cargo),
     job: drone.job ? clone(drone.job) : null
   }));
-  const pendingJobs: DeliveryJob[] = [];
-
   return clone({
     tick: state.tick,
     running: state.running,
@@ -222,7 +222,7 @@ function snapshot(): GameSnapshot {
     logs: state.logs.slice(-160),
     selected_id: state.selectedId,
     behaviors: behaviorSummaries(),
-    pending_jobs: pendingJobs,
+    pending_jobs: state.pendingJobs,
     item_flows: state.itemFlows.slice(-160),
     status: gameStatus(blocks, networks, enemies)
   });
@@ -309,6 +309,7 @@ function runTicks(count: number) {
         transferFrom(block);
       }
     }
+    runMockDrones();
     runEnemies();
     cleanupDestroyed();
   }
@@ -506,6 +507,16 @@ function spawnCarrierDrone(homePortId?: string) {
     throw new Error(`block ${port.id} is not a drone port`);
   }
 
+  const id = createCarrierDrone(port);
+  state.selectedId = id;
+  log("info", id, `carrier drone docked at ${port.id}`);
+  return id;
+}
+
+function createCarrierDrone(port: Block) {
+  const existing = state.drones.find((drone) => drone.home_port === port.id);
+  if (existing) return existing.id;
+
   const id = makeId("drone");
   state.drones.push({
     id,
@@ -519,8 +530,6 @@ function spawnCarrierDrone(homePortId?: string) {
     state: "docked",
     job: null
   });
-  state.selectedId = id;
-  log("info", id, `carrier drone docked at ${port.id}`);
   return id;
 }
 
@@ -914,7 +923,10 @@ function runMockBehavior(block: Block) {
     outputAvailable: (dir, item) => outputAvailable(block, dir, item),
     terrainAtSelf: () => terrainAt(block.pos),
     visibleTurretTargetCount: () => visibleTurretTargets(block).length,
-    canAttackTurretIndex: (index) => Boolean(visibleTurretTargets(block)[index])
+    canAttackTurretIndex: (index) => Boolean(visibleTurretTargets(block)[index]),
+    stockCount: (item) => networkStockCount(block, item),
+    dockedDroneCount: () => dockedDroneCountAtPort(block.id),
+    pendingJobCount: () => state.pendingJobs.length
   });
 }
 
@@ -924,6 +936,7 @@ function applyMockBehavior(block: Block, behavior: MockBehaviorResult) {
   if (behavior.router) runMockRouter(block, behavior.router);
   if (behavior.assembler) runMockAssembler(block, behavior.assembler);
   if (behavior.turret) runMockTurret(block, behavior.turret.priority);
+  if (behavior.dronePort) runMockDronePort(block, behavior.dronePort);
 }
 
 function runMockDrill(block: Block) {
@@ -973,6 +986,163 @@ function runMockTurret(block: Block, priority: string[]) {
   removeItem(block.inventory, "ammo", 1);
   block.target_id = target.id;
   block.status = `attacking ${target.id}`;
+}
+
+function runMockDronePort(
+  block: Block,
+  command: NonNullable<MockBehaviorResult["dronePort"]>
+) {
+  if (block.kind !== "drone_port") return;
+  if (command.charge) {
+    for (const drone of state.drones.filter((candidate) => candidate.home_port === block.id && droneAtHome(candidate))) {
+      drone.battery = Math.min(100, drone.battery + 2);
+      drone.logic_fuel = Math.min(1000, drone.logic_fuel + 10);
+      drone.state = "docked";
+    }
+  }
+  for (const job of command.createJobs) {
+    createMockDeliveryJob(block, job.item, job.amount, job.dropoffTag);
+  }
+  if (command.dispatch) {
+    dispatchMockIdleDrones(block);
+  }
+}
+
+function createMockDeliveryJob(port: Block, item: ItemKind, amount: number, dropoffTag: string) {
+  const dropoff = state.blocks.find(
+    (block) =>
+      block.tags.includes(dropoffTag) &&
+      canAcceptItem(block.kind, item) &&
+      inventoryCount(block.inventory, item) < amount &&
+      block.inventory.capacity - inventoryTotal(block.inventory) >= amount
+  );
+  if (!dropoff) return false;
+  if (state.pendingJobs.some((job) => job.dropoff === dropoff.id && job.item === item)) return false;
+  if (state.drones.some((drone) => drone.job?.dropoff === dropoff.id && drone.job.item === item)) return false;
+
+  const pickup = networkBlocks(port).find(
+    (block) =>
+      ["core", "storage", "assembler", "drone_port"].includes(block.kind) &&
+      inventoryCount(block.inventory, item) >= amount
+  );
+  if (!pickup) return false;
+
+  state.pendingJobs.push({
+    id: makeId("job"),
+    item,
+    amount,
+    pickup: pickup.id,
+    dropoff: dropoff.id,
+    priority: 50
+  });
+  port.status = `queued ${item} delivery`;
+  return true;
+}
+
+function dispatchMockIdleDrones(port: Block) {
+  createCarrierDrone(port);
+  for (const drone of state.drones.filter((candidate) => candidate.home_port === port.id && !candidate.job && droneAtHome(candidate))) {
+    const job = state.pendingJobs.shift();
+    if (!job) return;
+    drone.job = job;
+    drone.state = "delivering";
+    drone.behavior_ref ??= "builtin.carrier_drone.basic";
+    log("info", drone.id, `claimed ${job.item} delivery`);
+  }
+}
+
+function runMockDrones() {
+  for (const drone of state.drones) {
+    if (drone.job) {
+      continueMockDroneDelivery(drone);
+    } else if (!droneAtHome(drone)) {
+      moveDroneTowardHome(drone);
+    } else {
+      drone.state = "docked";
+    }
+  }
+}
+
+function continueMockDroneDelivery(drone: Drone) {
+  const job = drone.job;
+  if (!job) return;
+  const carrying = inventoryCount(drone.cargo, job.item);
+  if (carrying === 0) {
+    const pickup = state.blocks.find((block) => block.id === job.pickup);
+    if (!pickup) {
+      drone.job = null;
+      drone.state = "returning";
+      return;
+    }
+    if (moveDroneTowardBlock(drone, pickup)) {
+      const loaded = Math.min(job.amount, inventoryCount(pickup.inventory, job.item), drone.cargo.capacity - inventoryTotal(drone.cargo));
+      if (loaded > 0) {
+        removeItem(pickup.inventory, job.item, loaded);
+        addItem(drone.cargo, job.item, loaded);
+        pickup.status = `loaded ${job.item}`;
+      }
+    }
+    return;
+  }
+
+  const dropoff = state.blocks.find((block) => block.id === job.dropoff);
+  if (!dropoff) {
+    drone.job = null;
+    drone.state = "returning";
+    return;
+  }
+  if (moveDroneTowardBlock(drone, dropoff)) {
+    const unloaded = Math.min(carrying, dropoff.inventory.capacity - inventoryTotal(dropoff.inventory));
+    if (unloaded > 0) {
+      removeItem(drone.cargo, job.item, unloaded);
+      addItem(dropoff.inventory, job.item, unloaded);
+      recordItemFlow(drone.id, dropoff.id, job.item, unloaded, { ...drone.pos }, blockCenter(dropoff));
+      dropoff.status = `received ${job.item}`;
+    }
+    if (inventoryCount(drone.cargo, job.item) === 0) {
+      drone.job = null;
+      drone.state = "returning";
+    }
+  }
+}
+
+function moveDroneTowardBlock(drone: Drone, block: Block) {
+  const target = blockCenter(block);
+  drone.state = "delivering";
+  drone.pos = moveToward(drone.pos, target, 0.18);
+  drone.battery = Math.max(0, drone.battery - 0.02);
+  return distance(drone.pos, target) <= 0.2;
+}
+
+function moveDroneTowardHome(drone: Drone) {
+  const home = state.blocks.find((block) => block.id === drone.home_port);
+  if (!home) {
+    drone.state = "offline";
+    return;
+  }
+  drone.state = "returning";
+  drone.pos = moveToward(drone.pos, blockCenter(home), 0.18);
+  if (droneAtHome(drone)) {
+    drone.state = "docked";
+  }
+}
+
+function droneAtHome(drone: Drone) {
+  const home = state.blocks.find((block) => block.id === drone.home_port);
+  return Boolean(home && distance(drone.pos, blockCenter(home)) <= 0.2);
+}
+
+function dockedDroneCountAtPort(portId: string) {
+  return state.drones.filter((drone) => drone.home_port === portId && droneAtHome(drone)).length;
+}
+
+function networkStockCount(block: Block, item: ItemKind) {
+  return networkBlocks(block).reduce((sum, candidate) => sum + inventoryCount(candidate.inventory, item), 0);
+}
+
+function networkBlocks(block: Block) {
+  if (block.network_id === null) return [block];
+  return state.blocks.filter((candidate) => candidate.network_id === block.network_id);
 }
 
 function canMockProduce(block: Block, recipe: string | null) {

@@ -7,6 +7,11 @@ export type MockBehaviorResult = {
   router: { item: ItemKind | null; dirs: Direction[] } | null;
   assembler: { recipe: ItemKind | null; produce: boolean } | null;
   turret: { priority: string[] } | null;
+  dronePort: {
+    charge: boolean;
+    createJobs: Array<{ item: ItemKind; amount: number; dropoffTag: string }>;
+    dispatch: boolean;
+  } | null;
 };
 
 export type MockBehaviorEnvironment = {
@@ -15,6 +20,9 @@ export type MockBehaviorEnvironment = {
   terrainAtSelf: () => TerrainKind;
   visibleTurretTargetCount: () => number;
   canAttackTurretIndex: (index: number) => boolean;
+  stockCount: (item: ItemKind) => number;
+  dockedDroneCount: () => number;
+  pendingJobCount: () => number;
 };
 
 type MockBehaviorContext = {
@@ -22,7 +30,7 @@ type MockBehaviorContext = {
 };
 
 export function emptyMockBehaviorResult(): MockBehaviorResult {
-  return { mine: false, output: null, router: null, assembler: null, turret: null };
+  return { mine: false, output: null, router: null, assembler: null, turret: null, dronePort: null };
 }
 
 export function evaluateMockBehaviorScript(
@@ -89,6 +97,17 @@ function mockCondition(
     }
     if (tokens[0] === "can_attack") return environment.canAttackTurretIndex(Number(tokens[1]));
   }
+  if (block.kind === "drone_port") {
+    if (tokens[0] === "docked_drone_count") {
+      return compareNumber(environment.dockedDroneCount(), tokens[1], Number(tokens[2]));
+    }
+    if (tokens[0] === "pending_job_count") {
+      return compareNumber(environment.pendingJobCount(), tokens[1], Number(tokens[2]));
+    }
+  }
+  if (tokens[0] === "stock_count" && isItem(tokens[1])) {
+    return compareNumber(environment.stockCount(tokens[1]), tokens[2], Number(tokens[3]));
+  }
   if (tokens[0] === "inventory_count" && isItem(tokens[1])) {
     return compareNumber(inventoryCount(block, tokens[1]), tokens[2], Number(tokens[3]));
   }
@@ -111,6 +130,8 @@ function mockConditionTokenLength(block: Block, tokens: string[]) {
   if (block.kind === "assembler" && (tokens[0] === "input_count" || tokens[0] === "output_count")) return 4;
   if (block.kind === "turret" && (tokens[0] === "ammo_count" || tokens[0] === "scan_enemies")) return 3;
   if (block.kind === "turret" && tokens[0] === "can_attack") return 2;
+  if (block.kind === "drone_port" && (tokens[0] === "docked_drone_count" || tokens[0] === "pending_job_count")) return 3;
+  if (tokens[0] === "stock_count") return 4;
   if (tokens[0] === "inventory_count") return 4;
   if (tokens[0] === "inventory_free" || tokens[0] === "fuel_remaining") return 3;
   return tokens.length;
@@ -144,7 +165,23 @@ function applyMockAction(
     result.turret = { priority: tokens.slice(1) };
   } else if (tokens[0] === "attack" && block.kind === "turret") {
     result.turret = { priority: [`index:${tokens[1]}`] };
+  } else if (tokens[0] === "charge_docked_drones" && block.kind === "drone_port") {
+    dronePortResult(result).charge = true;
+  } else if (tokens[0] === "dispatch_idle_drones" && block.kind === "drone_port") {
+    dronePortResult(result).dispatch = true;
+  } else if (tokens[0] === "dispatch" && block.kind === "drone_port") {
+    dronePortResult(result).dispatch = true;
+  } else if (tokens[0] === "create_delivery_job" && block.kind === "drone_port" && isItem(tokens[1])) {
+    const amount = Number(tokens[2]);
+    if (Number.isInteger(amount) && amount > 0 && tokens[3]) {
+      dronePortResult(result).createJobs.push({ item: tokens[1], amount, dropoffTag: tokens[3] });
+    }
   }
+}
+
+function dronePortResult(result: MockBehaviorResult) {
+  result.dronePort ??= { charge: false, createJobs: [], dispatch: false };
+  return result.dronePort;
 }
 
 function canMockProduce(block: Block, recipe: string | null) {
