@@ -50,6 +50,18 @@ fn place_block(
 }
 
 #[tauri::command]
+fn place_blocks(
+    state: tauri::State<'_, AppState>,
+    kind: BlockKind,
+    positions: Vec<Pos>,
+    dir: Direction,
+) -> Result<GameSnapshot, String> {
+    let mut sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.place_blocks(kind, positions, dir)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn deconstruct_block(
     state: tauri::State<'_, AppState>,
     block_id: String,
@@ -180,6 +192,7 @@ pub fn run() {
             step_ticks,
             advance,
             place_block,
+            place_blocks,
             deconstruct_block,
             rotate_block,
             select_entity,

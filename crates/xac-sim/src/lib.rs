@@ -111,6 +111,35 @@ impl Simulation {
         pos: Pos,
         dir: Direction,
     ) -> Result<GameSnapshot> {
+        self.place_block_unchecked(kind, pos, dir)?;
+        self.recompute_networks();
+        Ok(self.snapshot())
+    }
+
+    pub fn place_blocks(
+        &mut self,
+        kind: BlockKind,
+        positions: Vec<Pos>,
+        dir: Direction,
+    ) -> Result<GameSnapshot> {
+        let mut placed = 0usize;
+        let mut last_error = None;
+        for pos in positions {
+            match self.place_block_unchecked(kind, pos, dir) {
+                Ok(()) => placed += 1,
+                Err(error) => last_error = Some(error),
+            }
+        }
+        self.recompute_networks();
+        if placed == 0 {
+            if let Some(error) = last_error {
+                return Err(error);
+            }
+        }
+        Ok(self.snapshot())
+    }
+
+    fn place_block_unchecked(&mut self, kind: BlockKind, pos: Pos, dir: Direction) -> Result<()> {
         if kind == BlockKind::Core {
             return Err(anyhow!(
                 "core is the initial 4x4 objective and cannot be placed"
@@ -144,8 +173,7 @@ impl Simulation {
             id,
             format!("placed {kind:?} at {},{}", pos.x, pos.y),
         );
-        self.recompute_networks();
-        Ok(self.snapshot())
+        Ok(())
     }
 
     pub fn deconstruct_block(&mut self, block_id: &str) -> Result<GameSnapshot> {

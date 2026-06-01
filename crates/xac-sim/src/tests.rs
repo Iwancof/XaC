@@ -60,6 +60,41 @@ fn deconstructing_wire_removes_footprint_and_recomputes_network() {
 }
 
 #[test]
+fn batch_placing_blocks_supports_dragged_lines_and_skips_occupied_tiles() {
+    let mut sim = test_sim("sim");
+    let snapshot = sim
+        .place_blocks(
+            BlockKind::Wire,
+            vec![
+                Pos { x: 30, y: 30 },
+                Pos { x: 34, y: 32 },
+                Pos { x: 35, y: 32 },
+                Pos { x: 35, y: 32 },
+                Pos { x: 36, y: 32 },
+            ],
+            Direction::East,
+        )
+        .unwrap();
+
+    assert_eq!(
+        snapshot
+            .blocks
+            .iter()
+            .filter(|block| block.kind == BlockKind::Wire)
+            .count(),
+        3,
+        "drag placement should skip occupied and duplicate tiles while placing the valid path"
+    );
+    assert_eq!(
+        sim.block_id_at(Pos { x: 30, y: 30 }),
+        Some("core_1".to_string())
+    );
+    assert!(sim.block_id_at(Pos { x: 34, y: 32 }).is_some());
+    assert!(sim.block_id_at(Pos { x: 35, y: 32 }).is_some());
+    assert!(sim.block_id_at(Pos { x: 36, y: 32 }).is_some());
+}
+
+#[test]
 fn core_cannot_be_deconstructed() {
     let mut sim = test_sim("sim");
     let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();

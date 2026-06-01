@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, type Locator, type Page, test } from "@playwright/test";
 
 type IpcCall = {
   cmd: string;
@@ -57,6 +57,17 @@ const tileCenter = (x: number, y: number) => ({
   x: x * 16 + 8,
   y: y * 16 + 8
 });
+
+async function dragTiles(page: Page, canvas: Locator, from: { x: number; y: number }, to: { x: number; y: number }) {
+  const box = await canvas.boundingBox();
+  if (!box) {
+    throw new Error("grid canvas should have a bounding box");
+  }
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + to.x, box.y + to.y, { steps: 2 });
+  await page.mouse.up();
+}
 
 test("places minimum devices from the right block list and opens drill behavior", async ({ page }) => {
   test.setTimeout(90_000);
@@ -560,6 +571,58 @@ test("UI mock runs code-driven assembler ammo into turret defense", async ({ pag
   expect(defended.enemy?.hp ?? 0).toBeLessThan(30);
   expect(defended.turret?.target_id).toBe("enemy_2");
   await expect(page.getByTestId("tutorial-defense")).toHaveAttribute("data-state", "complete");
+});
+
+test("drag placement paints wire and conveyor mining lines", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.getByTestId("grid-world").locator("canvas");
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole("button", { name: /CPU Node/ }).click();
+  await canvas.click({ position: tileCenter(19, 29) });
+  await page.getByRole("button", { name: /Wire/ }).click();
+  await dragTiles(page, canvas, tileCenter(20, 29), tileCenter(30, 29));
+  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await dragTiles(page, canvas, tileCenter(21, 30), tileCenter(29, 30));
+  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await canvas.click({ position: tileCenter(20, 30) });
+
+  await page.getByRole("button", { name: /\+40/ }).click();
+
+  const dragged = await page.evaluate(() => {
+    const snapshot = window.__XAC_TEST_STATE__!.snapshot();
+    return {
+      drill: snapshot.blocks.find((block) => block.id === "drill_1"),
+      wireCount: snapshot.blocks.filter((block) => block.kind === "wire").length,
+      conveyorCount: snapshot.blocks.filter((block) => block.kind === "conveyor").length,
+      coreOre: snapshot.blocks.find((block) => block.id === "core_1")?.inventory.items.ore ?? 0,
+      placeBlocksCalls: window.__XAC_TEST_STATE__!.calls.filter((call) => call.cmd === "place_blocks")
+    };
+  });
+
+  expect(dragged.wireCount).toBe(11);
+  expect(dragged.conveyorCount).toBe(9);
+  expect(dragged.drill).toEqual(expect.objectContaining({ network_id: 1, effective_cpu_rate: 201 }));
+  expect(dragged.coreOre).toBeGreaterThan(40);
+  expect(dragged.placeBlocksCalls).toEqual([
+    {
+      cmd: "place_blocks",
+      args: {
+        kind: "wire",
+        positions: expect.arrayContaining([expect.objectContaining({ x: 20, y: 29 }), expect.objectContaining({ x: 30, y: 29 })]),
+        dir: "east"
+      }
+    },
+    {
+      cmd: "place_blocks",
+      args: {
+        kind: "conveyor",
+        positions: expect.arrayContaining([expect.objectContaining({ x: 21, y: 30 }), expect.objectContaining({ x: 29, y: 30 })]),
+        dir: "east"
+      }
+    }
+  ]);
 });
 
 test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {

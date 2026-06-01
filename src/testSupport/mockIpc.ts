@@ -117,6 +117,8 @@ mockIPC((cmd, args = {}) => {
     }
     case "place_block":
       return placeBlock(args as { kind: BlockKind; x: number; y: number; dir: Direction });
+    case "place_blocks":
+      return placeBlocks(args as { kind: BlockKind; positions?: Pos[]; dir: Direction });
     case "deconstruct_block":
       return deconstructBlock((args as { blockId?: string }).blockId ?? "");
     case "rotate_block":
@@ -255,10 +257,31 @@ function gameStatus(blocks: Block[], networks: Network[], enemies: Enemy[]) {
 }
 
 function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number; dir: Direction }) {
+  placeBlockInternal(kind, { x, y }, dir);
+  return snapshot();
+}
+
+function placeBlocks({ kind, positions = [], dir }: { kind: BlockKind; positions?: Pos[]; dir: Direction }) {
+  let placed = 0;
+  let lastError: Error | null = null;
+  for (const pos of positions) {
+    try {
+      placeBlockInternal(kind, pos, dir);
+      placed += 1;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+    }
+  }
+  if (placed === 0 && lastError) {
+    throw lastError;
+  }
+  return snapshot();
+}
+
+function placeBlockInternal(kind: BlockKind, pos: Pos, dir: Direction) {
   if (kind === "core") {
     throw new Error("core is the initial 4x4 objective and cannot be placed");
   }
-  const pos = { x, y };
   const footprint = footprintPositions(kind, pos);
   if (footprint.some((tile) => !inBounds(tile))) {
     throw new Error("position is outside the map");
@@ -270,8 +293,7 @@ function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number
   const block = makeBlock(kind, pos, dir);
   state.blocks.push(block);
   state.selectedId = block.id;
-  log("info", block.id, `placed ${displayBlockKind(kind)} at ${x},${y}`);
-  return snapshot();
+  log("info", block.id, `placed ${displayBlockKind(kind)} at ${pos.x},${pos.y}`);
 }
 
 function deconstructBlock(blockId: string) {

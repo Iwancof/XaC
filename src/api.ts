@@ -5,7 +5,8 @@ import type {
   BuildResult,
   CommonTemplate,
   Direction,
-  GameSnapshot
+  GameSnapshot,
+  Pos
 } from "./types";
 
 export function getSnapshot() {
@@ -26,6 +27,10 @@ export function advance(maxTicks: number) {
 
 export function placeBlock(kind: BlockKind, x: number, y: number, dir: Direction) {
   return invoke<GameSnapshot>("place_block", { kind, x, y, dir });
+}
+
+export function placeBlocks(kind: BlockKind, positions: Pos[], dir: Direction) {
+  return invoke<GameSnapshot>("place_blocks", { kind, positions, dir });
 }
 
 export function deconstructBlock(blockId: string) {

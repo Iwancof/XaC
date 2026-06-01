@@ -21,6 +21,7 @@ import {
   loadWorld,
   openBehavior,
   placeBlock,
+  placeBlocks,
   rotateBlock,
   saveBehavior,
   saveWorld,
@@ -158,6 +159,15 @@ export function App() {
   const handleTileClick = (pos: Pos) => {
     if (!buildKind) return;
     runCommand(() => placeBlock(buildKind, pos.x, pos.y, direction));
+  };
+
+  const handleTilesPaint = (positions: Pos[]) => {
+    if (!buildKind || positions.length === 0) return;
+    if (positions.length === 1) {
+      runCommand(() => placeBlock(buildKind, positions[0].x, positions[0].y, direction));
+      return;
+    }
+    runCommand(() => placeBlocks(buildKind, positions, direction));
   };
 
   const handleEntityClick = (id: string | null) => {
@@ -348,6 +358,7 @@ export function App() {
             direction={direction}
             overlay={overlay}
             onTileClick={handleTileClick}
+            onTilesPaint={handleTilesPaint}
             onEntityClick={handleEntityClick}
           />
         </div>

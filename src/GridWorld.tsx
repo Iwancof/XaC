@@ -13,6 +13,7 @@ interface GridWorldProps {
   direction: Direction;
   overlay: Overlay;
   onTileClick: (pos: Pos) => void;
+  onTilesPaint: (positions: Pos[]) => void;
   onEntityClick: (id: string | null) => void;
 }
 
@@ -37,6 +38,7 @@ export function GridWorld({
   direction,
   overlay,
   onTileClick,
+  onTilesPaint,
   onEntityClick
 }: GridWorldProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -45,13 +47,16 @@ export function GridWorld({
   const snapshotRef = useRef<GameSnapshot | null>(null);
   const buildKindRef = useRef<BlockKind | null>(buildKind);
   const onTileClickRef = useRef(onTileClick);
+  const onTilesPaintRef = useRef(onTilesPaint);
   const onEntityClickRef = useRef(onEntityClick);
+  const paintRef = useRef<PaintState | null>(null);
 
   useEffect(() => {
     buildKindRef.current = buildKind;
     onTileClickRef.current = onTileClick;
+    onTilesPaintRef.current = onTilesPaint;
     onEntityClickRef.current = onEntityClick;
-  }, [buildKind, onTileClick, onEntityClick]);
+  }, [buildKind, onTileClick, onTilesPaint, onEntityClick]);
 
   useEffect(() => {
     let disposed = false;
@@ -80,27 +85,26 @@ export function GridWorld({
         app.stage.eventMode = "static";
         app.stage.hitArea = app.screen;
         app.stage.on("pointerdown", (event) => {
-          const world = event.global;
-          const pos = {
-            x: Math.floor(world.x / TILE),
-            y: Math.floor(world.y / TILE)
-          };
-          const worldTile = {
-            x: world.x / TILE,
-            y: world.y / TILE
-          };
           const current = snapshotRef.current;
-          if (!current || pos.x < 0 || pos.y < 0 || pos.x >= current.width || pos.y >= current.height) {
+          const pointer = pointerWorld(event);
+          const pos = tileFromWorld(pointer);
+          if (!current || !inSnapshotBounds(current, pos)) {
             onEntityClickRef.current(null);
             return;
           }
+          if (buildKindRef.current) {
+            paintRef.current = makePaintState(pos);
+            return;
+          }
+          const worldTile = {
+            x: pointer.x / TILE,
+            y: pointer.y / TILE
+          };
           const tile = current.tiles.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
           const block = current.blocks.find((item) => item.id === tile?.block_id);
           const enemy = current.enemies.find((item) => distance(item.pos, worldTile) <= 0.55);
           const drone = current.drones.find((item) => distance(item.pos, worldTile) <= 0.6);
-          if (buildKindRef.current) {
-            onTileClickRef.current(pos);
-          } else if (enemy) {
+          if (enemy) {
             onEntityClickRef.current(enemy.id);
           } else if (drone) {
             onEntityClickRef.current(drone.id);
@@ -110,6 +114,27 @@ export function GridWorld({
             onEntityClickRef.current(null);
           }
         });
+        app.stage.on("pointermove", (event) => {
+          const paint = paintRef.current;
+          const current = snapshotRef.current;
+          if (!paint || !current || !buildKindRef.current) return;
+          const pos = tileFromWorld(pointerWorld(event));
+          if (!inSnapshotBounds(current, pos)) return;
+          addPaintTiles(paint, pos);
+        });
+        const finishPaint = () => {
+          const paint = paintRef.current;
+          paintRef.current = null;
+          if (!paint || !buildKindRef.current) return;
+          if (paint.positions.length === 1) {
+            onTileClickRef.current(paint.positions[0]);
+          } else {
+            onTilesPaintRef.current(paint.positions);
+          }
+        };
+        app.stage.on("pointerup", finishPaint);
+        app.stage.on("pointerupoutside", finishPaint);
+        app.stage.on("pointercancel", finishPaint);
         renderWorld(stage, snapshotRef.current, selectedId, buildKind, direction, overlay);
       });
 
@@ -130,6 +155,63 @@ export function GridWorld({
   }, [snapshot, selectedId, buildKind, direction, overlay]);
 
   return <div ref={hostRef} className="grid-world" data-testid="grid-world" />;
+}
+
+interface PaintState {
+  positions: Pos[];
+  seen: Set<string>;
+  last: Pos;
+}
+
+function pointerWorld(event: { global: { x: number; y: number } }) {
+  return event.global;
+}
+
+function tileFromWorld(world: Pos) {
+  return {
+    x: Math.floor(world.x / TILE),
+    y: Math.floor(world.y / TILE)
+  };
+}
+
+function inSnapshotBounds(snapshot: GameSnapshot, pos: Pos) {
+  return pos.x >= 0 && pos.y >= 0 && pos.x < snapshot.width && pos.y < snapshot.height;
+}
+
+function makePaintState(pos: Pos): PaintState {
+  return {
+    positions: [pos],
+    seen: new Set([posKey(pos)]),
+    last: pos
+  };
+}
+
+function addPaintTiles(paint: PaintState, pos: Pos) {
+  for (const tile of tileLine(paint.last, pos)) {
+    const key = posKey(tile);
+    if (!paint.seen.has(key)) {
+      paint.positions.push(tile);
+      paint.seen.add(key);
+    }
+  }
+  paint.last = pos;
+}
+
+function tileLine(from: Pos, to: Pos) {
+  const steps = Math.max(Math.abs(to.x - from.x), Math.abs(to.y - from.y));
+  if (steps === 0) return [to];
+  const tiles: Pos[] = [];
+  for (let i = 1; i <= steps; i += 1) {
+    tiles.push({
+      x: Math.round(from.x + ((to.x - from.x) * i) / steps),
+      y: Math.round(from.y + ((to.y - from.y) * i) / steps)
+    });
+  }
+  return tiles;
+}
+
+function posKey(pos: Pos) {
+  return `${pos.x},${pos.y}`;
 }
 
 function renderWorld(
