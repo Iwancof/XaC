@@ -970,6 +970,27 @@ fn xac_script_can_read_common_network_stock() {
     let capacity_script = "if stock_capacity ore >= 100 push ore east";
     let wat = compile_source_to_wat(BehaviorKind::Router, capacity_script).unwrap();
     assert!(wat.contains(r#""xac:common" "stock_capacity""#));
+    let compiled = runtime
+        .compile_wat(BehaviorKind::Router, capacity_script)
+        .unwrap();
+    let mut capacity = BTreeMap::new();
+    capacity.insert(ItemKind::Ore, 120);
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                network_stock_capacity: capacity,
+                router_item_output_available: router_item_available(ItemKind::Ore, Direction::East),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Router { item, preferred }
+            if item == Some(ItemKind::Ore) && preferred == vec![Direction::East]
+    ));
 }
 
 #[test]

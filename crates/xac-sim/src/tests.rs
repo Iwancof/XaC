@@ -988,6 +988,58 @@ fn router_script_can_read_core_network_stock() {
 }
 
 #[test]
+fn router_script_can_read_connected_storage_stock_capacity() {
+    let mut sim = router_stock_guard_setup("if stock_capacity ore >= 1300 push ore east");
+    let (router_id, conveyor_id) = router_and_conveyor_ids(&sim);
+
+    sim.step_ticks(1);
+    assert_eq!(
+        sim.blocks[&router_id].inventory.count(&ItemKind::Ore),
+        1,
+        "core plus router capacity is below the storage-gated threshold"
+    );
+    assert_eq!(sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore), 0);
+
+    sim.place_block(BlockKind::Storage, Pos { x: 34, y: 31 }, Direction::East)
+        .unwrap();
+    sim.fuel_banks.insert(router_id.clone(), 100.0);
+    sim.step_ticks(1);
+
+    assert_eq!(sim.blocks[&router_id].inventory.count(&ItemKind::Ore), 0);
+    assert_eq!(
+        sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore),
+        1,
+        "connected storage capacity should make the stock_capacity guard true"
+    );
+}
+
+#[test]
+fn router_script_can_read_connected_storage_free_space() {
+    let mut sim = router_stock_guard_setup("if has_space ore 1000 push ore east");
+    let (router_id, conveyor_id) = router_and_conveyor_ids(&sim);
+
+    sim.step_ticks(1);
+    assert_eq!(
+        sim.blocks[&router_id].inventory.count(&ItemKind::Ore),
+        1,
+        "core free space alone is below the storage-gated threshold"
+    );
+    assert_eq!(sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore), 0);
+
+    sim.place_block(BlockKind::Storage, Pos { x: 34, y: 31 }, Direction::East)
+        .unwrap();
+    sim.fuel_banks.insert(router_id.clone(), 100.0);
+    sim.step_ticks(1);
+
+    assert_eq!(sim.blocks[&router_id].inventory.count(&ItemKind::Ore), 0);
+    assert_eq!(
+        sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore),
+        1,
+        "connected storage free space should make the has_space guard true"
+    );
+}
+
+#[test]
 fn scripted_mining_factory_feeds_turret_and_defends_core() {
     let mut sim = test_sim("sim");
 
@@ -1928,6 +1980,41 @@ fn assign_script(sim: &mut Simulation, block_id: &str, source: &str) {
         .build_behavior(&behavior.summary.id)
         .expect("custom XaC script should build");
     assert!(result.success);
+}
+
+fn router_stock_guard_setup(source: &str) -> Simulation {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let router_id = sim.selected_id.clone().unwrap();
+    assign_script(&mut sim, &router_id, source);
+    sim.place_block(BlockKind::Conveyor, Pos { x: 35, y: 30 }, Direction::East)
+        .unwrap();
+    sim.blocks
+        .get_mut(&router_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ore, 1);
+    sim.fuel_banks.insert(router_id, 100.0);
+    sim
+}
+
+fn router_and_conveyor_ids(sim: &Simulation) -> (EntityId, EntityId) {
+    let router_id = sim
+        .blocks
+        .values()
+        .find(|block| block.kind == BlockKind::Router)
+        .expect("test setup should contain a router")
+        .id
+        .clone();
+    let conveyor_id = sim
+        .blocks
+        .values()
+        .find(|block| block.kind == BlockKind::Conveyor)
+        .expect("test setup should contain a conveyor")
+        .id
+        .clone();
+    (router_id, conveyor_id)
 }
 
 fn set_block_behavior_source(sim: &mut Simulation, block_id: &str, source: &str) {
