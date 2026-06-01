@@ -7,16 +7,19 @@ use crate::recipes::{
 use crate::Simulation;
 
 impl Simulation {
+    pub(crate) fn drill_can_mine(&self, block_id: &str) -> bool {
+        let Some(block) = self.blocks.get(block_id) else {
+            return false;
+        };
+        block.kind == BlockKind::Drill
+            && block.inventory.has_space(1)
+            && self
+                .tile_at(block.pos)
+                .is_some_and(|tile| tile.terrain == TerrainKind::OrePatch)
+    }
+
     pub(crate) fn run_drill(&mut self, block_id: &str) {
-        let mine_ready = self
-            .blocks
-            .get(block_id)
-            .map(|b| {
-                self.tile_at(b.pos)
-                    .is_some_and(|t| t.terrain == TerrainKind::OrePatch)
-            })
-            .unwrap_or(false);
-        if !mine_ready {
+        if !self.drill_can_mine(block_id) {
             return;
         }
         if let Some(block) = self.blocks.get_mut(block_id) {

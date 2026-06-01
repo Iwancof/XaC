@@ -63,6 +63,10 @@ push stored ore into the block they face:
 if ore_kind == ore output ore
 ```
 
+The drill `mine` and `output` imports return `0` when the physical action is not
+available, such as a drill off an ore patch, a full drill inventory, no stored
+item to output, or a blocked/non-accepting destination.
+
 The backend lowers that source to WebAssembly Text, compiles it to Wasm with
 Wasmtime, links a small host API surface such as `xac:drill/mine`, and runs
 each `tick()` with fuel derived from the block's effective network CPU rate.

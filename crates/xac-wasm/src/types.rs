@@ -108,6 +108,8 @@ pub enum NetStoreOp {
 pub struct BehaviorHostInput {
     pub output_blocked: bool,
     pub drill_ore_kind: Option<ItemKind>,
+    pub drill_can_mine: bool,
+    pub drill_output_available: BTreeMap<ItemKind, bool>,
     pub can_produce: bool,
     pub assembler_can_produce: [bool; 2],
     pub assembler_current_recipe: Option<ItemKind>,

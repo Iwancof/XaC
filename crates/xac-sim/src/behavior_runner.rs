@@ -102,6 +102,14 @@ impl Simulation {
         BehaviorHostInput {
             output_blocked: self.output_blocked(block_id),
             drill_ore_kind: self.drill_ore_kind(block_id),
+            drill_can_mine: self.drill_can_mine(block_id),
+            drill_output_available: ItemKind::all()
+                .into_iter()
+                .map(|item| {
+                    let available = self.output_item_available(block_id, &item, block.dir);
+                    (item, available)
+                })
+                .collect(),
             can_produce: self.can_produce(block_id),
             assembler_can_produce: [
                 self.can_progress_recipe(block_id, ItemKind::Plate.as_str()),

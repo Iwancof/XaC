@@ -5,6 +5,21 @@ fn item_counts(item: ItemKind, amount: i32) -> BTreeMap<ItemKind, i32> {
     BTreeMap::from([(item, amount)])
 }
 
+fn drill_can_mine_input() -> BehaviorHostInput {
+    BehaviorHostInput {
+        drill_can_mine: true,
+        ..Default::default()
+    }
+}
+
+fn drill_output_input(item: ItemKind) -> BehaviorHostInput {
+    BehaviorHostInput {
+        drill_ore_kind: Some(item.clone()),
+        drill_output_available: BTreeMap::from([(item, true)]),
+        ..Default::default()
+    }
+}
+
 #[test]
 fn compiles_wat_and_evaluates_action_code() {
     let runtime = BehaviorRuntime::new().unwrap();
@@ -96,7 +111,7 @@ fn host_imports_allow_drill_code_to_call_game_api() {
         .compile_wat(BehaviorKind::Drill, &wat_drill_mine())
         .unwrap();
     let eval = runtime
-        .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+        .evaluate_compiled(&compiled, 30, drill_can_mine_input())
         .unwrap();
 
     assert!(matches!(
@@ -112,6 +127,7 @@ fn host_imports_allow_drill_code_to_call_game_api() {
             30,
             BehaviorHostInput {
                 output_blocked: true,
+                drill_can_mine: true,
                 ..Default::default()
             },
         )
@@ -139,14 +155,7 @@ fn drill_wat_can_query_ore_kind_and_output_item() {
         .unwrap();
 
     let eval = runtime
-        .evaluate_compiled(
-            &compiled,
-            40,
-            BehaviorHostInput {
-                drill_ore_kind: Some(ItemKind::Ore),
-                ..Default::default()
-            },
-        )
+        .evaluate_compiled(&compiled, 40, drill_output_input(ItemKind::Ore))
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -155,13 +164,110 @@ fn drill_wat_can_query_ore_kind_and_output_item() {
     ));
 
     let eval = runtime
-        .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+        .evaluate_compiled(&compiled, 40, drill_can_mine_input())
         .unwrap();
     assert!(matches!(
         eval.intent,
         BehaviorIntent::Drill { ref commands }
             if commands == &vec![DrillCommand::Mine]
     ));
+}
+
+#[test]
+fn drill_physical_imports_return_availability() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let compiled_mine = runtime
+        .compile_wat(
+            BehaviorKind::Drill,
+            r#"(module
+                  (import "xac:drill" "mine" (func $mine (result i32)))
+                  (import "xac:net" "store_set_i32" (func $net_set (param i32 i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $net_set (i32.const 1) (call $mine)))))"#,
+        )
+        .unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_mine,
+            40,
+            BehaviorHostInput {
+                drill_can_mine: true,
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 1, value: 1 })]
+    );
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Drill { ref commands } if commands == &vec![DrillCommand::Mine]
+    ));
+
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_mine,
+            40,
+            BehaviorHostInput {
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 1, value: 0 })]
+    );
+    assert!(matches!(eval.intent, BehaviorIntent::Noop));
+
+    let compiled_output = runtime
+        .compile_wat(
+            BehaviorKind::Drill,
+            r#"(module
+                  (import "xac:drill" "output" (func $output (param i32) (result i32)))
+                  (import "xac:net" "store_set_i32" (func $net_set (param i32 i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $net_set (i32.const 2) (call $output (i32.const 0))))))"#,
+        )
+        .unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_output,
+            40,
+            BehaviorHostInput {
+                drill_output_available: BTreeMap::from([(ItemKind::Ore, true)]),
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 2, value: 1 })]
+    );
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Drill { ref commands }
+            if commands == &vec![DrillCommand::Output { item: ItemKind::Ore }]
+    ));
+
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled_output,
+            40,
+            BehaviorHostInput {
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![NetStoreOp::Set(NetStoreWrite { key: 2, value: 0 })]
+    );
+    assert!(matches!(eval.intent, BehaviorIntent::Noop));
 }
 
 #[test]
@@ -216,7 +322,7 @@ fn compiles_xac_script_to_host_imported_wasm() {
 
     let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
     let eval = runtime
-        .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+        .evaluate_compiled(&compiled, 30, drill_can_mine_input())
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -230,6 +336,7 @@ fn compiles_xac_script_to_host_imported_wasm() {
             30,
             BehaviorHostInput {
                 output_blocked: true,
+                drill_can_mine: true,
                 ..Default::default()
             },
         )
@@ -252,7 +359,7 @@ fn compiles_tiny_source_to_host_imported_wasm() {
 
     let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
     let eval = runtime
-        .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+        .evaluate_compiled(&compiled, 40, drill_can_mine_input())
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -266,6 +373,7 @@ fn compiles_tiny_source_to_host_imported_wasm() {
             40,
             BehaviorHostInput {
                 output_blocked: true,
+                drill_can_mine: true,
                 ..Default::default()
             },
         )
@@ -294,7 +402,7 @@ fn tiny_source_uses_same_fuel_budget_as_wasm_behaviors() {
     assert!(!eval.over_budget);
 
     let eval = runtime
-        .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+        .evaluate_compiled(&compiled, 40, drill_can_mine_input())
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -314,14 +422,7 @@ fn xac_script_can_use_drill_output_and_ore_kind() {
 
     let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
     let eval = runtime
-        .evaluate_compiled(
-            &compiled,
-            40,
-            BehaviorHostInput {
-                drill_ore_kind: Some(ItemKind::Ore),
-                ..Default::default()
-            },
-        )
+        .evaluate_compiled(&compiled, 40, drill_output_input(ItemKind::Ore))
         .unwrap();
     assert!(matches!(
         eval.intent,
@@ -1406,7 +1507,7 @@ fn xac_script_can_branch_on_remaining_fuel() {
     assert!(!eval.over_budget);
 
     let eval = runtime
-        .evaluate_compiled(&compiled, 30, BehaviorHostInput::default())
+        .evaluate_compiled(&compiled, 30, drill_can_mine_input())
         .unwrap();
     assert!(matches!(
         eval.intent,

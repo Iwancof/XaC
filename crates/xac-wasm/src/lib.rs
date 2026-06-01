@@ -483,6 +483,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !charge_host(&mut caller, host_cost::MINE) {
                 return 0;
             }
+            if !caller.data().input.drill_can_mine {
+                return 0;
+            }
             push_drill_command(caller.data_mut(), DrillCommand::Mine);
             1
         },
@@ -497,6 +500,16 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             let Some(item) = item_from_code(item) else {
                 return 0;
             };
+            if !caller
+                .data()
+                .input
+                .drill_output_available
+                .get(&item)
+                .copied()
+                .unwrap_or(false)
+            {
+                return 0;
+            }
             push_drill_command(caller.data_mut(), DrillCommand::Output { item });
             1
         },
