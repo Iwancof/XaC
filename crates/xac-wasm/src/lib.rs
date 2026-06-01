@@ -22,6 +22,7 @@ use script::{
     ATTACK_POLICY_LOWEST_HP, ATTACK_POLICY_NEAREST, ATTACK_POLICY_RUNNER,
     ATTACK_POLICY_WIRE_CUTTER,
 };
+mod script_imports;
 mod tiny;
 use tiny::{compile_tiny_source, is_tiny_source};
 
