@@ -6,6 +6,7 @@ pub type BehaviorId = String;
 
 pub const CPU_SPEED_REFERENCE_RATE: f32 = 8.0;
 pub const MIN_CPU_SCALED_TICKS: u32 = 3;
+pub const TURRET_RANGE_TILES: f32 = 8.0;
 
 pub fn cpu_scaled_ticks(effective_cpu_rate: f32, base_ticks: u32) -> u32 {
     let speedup = (effective_cpu_rate / CPU_SPEED_REFERENCE_RATE).clamp(0.1, 10.0);
@@ -243,6 +244,7 @@ pub struct BlockMetadata {
     pub network_connector: bool,
     pub local_cpu_rate: f32,
     pub network_cpu_output: f32,
+    pub attack_range_tiles: Option<f32>,
     pub max_hp: i32,
     pub footprint: (i32, i32),
     pub inventory_capacity: u32,
@@ -302,6 +304,7 @@ impl BlockKind {
                 network_connector: true,
                 local_cpu_rate: 0.0,
                 network_cpu_output: 120.0,
+                attack_range_tiles: None,
                 max_hp: 500,
                 footprint: (4, 4),
                 inventory_capacity: 1000,
@@ -315,6 +318,7 @@ impl BlockKind {
                 network_connector: true,
                 local_cpu_rate: 0.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: None,
                 max_hp: 15,
                 footprint: (1, 1),
                 inventory_capacity: 0,
@@ -328,6 +332,7 @@ impl BlockKind {
                 network_connector: true,
                 local_cpu_rate: 0.0,
                 network_cpu_output: 80.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 0,
@@ -341,6 +346,7 @@ impl BlockKind {
                 network_connector: false,
                 local_cpu_rate: 1.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 10,
@@ -354,6 +360,7 @@ impl BlockKind {
                 network_connector: false,
                 local_cpu_rate: 0.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 1,
@@ -367,6 +374,7 @@ impl BlockKind {
                 network_connector: false,
                 local_cpu_rate: 1.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 1,
@@ -380,6 +388,7 @@ impl BlockKind {
                 network_connector: false,
                 local_cpu_rate: 0.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 300,
@@ -393,6 +402,7 @@ impl BlockKind {
                 network_connector: false,
                 local_cpu_rate: 2.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 100,
@@ -406,6 +416,7 @@ impl BlockKind {
                 network_connector: false,
                 local_cpu_rate: 3.0,
                 network_cpu_output: 0.0,
+                attack_range_tiles: Some(TURRET_RANGE_TILES),
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 80,
@@ -419,6 +430,7 @@ impl BlockKind {
                 network_connector: true,
                 local_cpu_rate: 3.0,
                 network_cpu_output: 20.0,
+                attack_range_tiles: None,
                 max_hp: 90,
                 footprint: (1, 1),
                 inventory_capacity: 120,
@@ -449,6 +461,10 @@ impl BlockKind {
 
     pub fn network_cpu_output(self) -> f32 {
         self.metadata().network_cpu_output
+    }
+
+    pub fn attack_range_tiles(self) -> Option<f32> {
+        self.metadata().attack_range_tiles
     }
 
     pub fn max_hp(self) -> i32 {
@@ -808,6 +824,7 @@ mod tests {
         footprint: [i32; 2],
         local_cpu_rate: f32,
         network_cpu_output: f32,
+        attack_range_tiles: Option<f32>,
         programmable: bool,
         network_node: bool,
         network_connector: bool,
@@ -891,6 +908,11 @@ mod tests {
 
         assert!(BlockKind::Turret.can_accept_item(&ItemKind::Ammo));
         assert!(!BlockKind::Turret.can_accept_item(&ItemKind::Ore));
+        assert_eq!(
+            BlockKind::Turret.attack_range_tiles(),
+            Some(TURRET_RANGE_TILES)
+        );
+        assert_eq!(BlockKind::Drill.attack_range_tiles(), None);
 
         assert!(!BlockKind::Drill.can_accept_item(&ItemKind::Ore));
         assert!(!BlockKind::Wire.can_accept_item(&ItemKind::Ore));
@@ -959,6 +981,7 @@ mod tests {
             );
             assert_eq!(shared.local_cpu_rate, metadata.local_cpu_rate);
             assert_eq!(shared.network_cpu_output, metadata.network_cpu_output);
+            assert_eq!(shared.attack_range_tiles, metadata.attack_range_tiles);
             assert_eq!(shared.programmable, metadata.programmable);
             assert_eq!(shared.network_node, metadata.network_node);
             assert_eq!(shared.network_connector, metadata.network_connector);

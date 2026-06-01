@@ -1,8 +1,8 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { useEffect, useRef } from "react";
-import { blockFootprintSize } from "./gameMetadata";
+import { blockAttackRangeTiles, blockFootprintSize } from "./gameMetadata";
 import { itemColor } from "./itemMetadata";
-import type { Block, BlockKind, Direction, Enemy, GameSnapshot, Pos, Tile } from "./types";
+import type { Block, BlockKind, Direction, Enemy, GameSnapshot, Pos } from "./types";
 
 type Overlay = "none" | "network" | "cpu" | "logistics" | "attack";
 
@@ -151,7 +151,7 @@ function renderWorld(
   if (!snapshot) return;
 
   const graphics = new Graphics();
-  drawTiles(graphics, snapshot.tiles);
+  drawTiles(graphics, snapshot);
   drawOverlays(graphics, snapshot, overlay);
   drawBlocks(graphics, snapshot.blocks, selectedId);
   drawItemFlows(graphics, snapshot);
@@ -174,8 +174,8 @@ function renderWorld(
   }
 }
 
-function drawTiles(g: Graphics, tiles: Tile[]) {
-  for (const tile of tiles) {
+function drawTiles(g: Graphics, snapshot: GameSnapshot) {
+  for (const tile of snapshot.tiles) {
     const x = tile.pos.x * TILE;
     const y = tile.pos.y * TILE;
     const fill = tile.terrain === "ore_patch" ? 0x40351e : 0x151b1f;
@@ -185,13 +185,13 @@ function drawTiles(g: Graphics, tiles: Tile[]) {
     }
   }
   g.stroke({ width: 1, color: 0x253038, alpha: 0.45 });
-  for (let x = 0; x <= 64; x++) {
+  for (let x = 0; x <= snapshot.width; x++) {
     g.moveTo(x * TILE, 0);
-    g.lineTo(x * TILE, 64 * TILE);
+    g.lineTo(x * TILE, snapshot.height * TILE);
   }
-  for (let y = 0; y <= 64; y++) {
+  for (let y = 0; y <= snapshot.height; y++) {
     g.moveTo(0, y * TILE);
-    g.lineTo(64 * TILE, y * TILE);
+    g.lineTo(snapshot.width * TILE, y * TILE);
   }
 }
 
@@ -226,7 +226,9 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
   if (overlay === "attack") {
     for (const block of snapshot.blocks.filter((item) => item.kind === "turret")) {
       const center = blockCenter(block);
-      g.circle(center.x, center.y, TILE * 8).stroke({
+      const range = blockAttackRangeTiles(block.kind);
+      if (range === null) continue;
+      g.circle(center.x, center.y, TILE * range).stroke({
         width: 1,
         color: 0xf43f5e,
         alpha: 0.18

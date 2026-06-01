@@ -101,6 +101,7 @@
     "footprint": [1, 1],
     "localCpuRate": 3,
     "networkCpuOutput": 0,
+    "attackRangeTiles": 8,
     "programmable": true,
     "networkNode": true,
     "networkConnector": false,

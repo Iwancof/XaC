@@ -34,6 +34,8 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "attack_nearest",
         "attack_best",
         "dispatch",
+        "inventory_count",
+        "inventory_free",
         "stock_count",
         "stock_capacity",
         "has_space",

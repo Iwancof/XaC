@@ -72,10 +72,11 @@ impl Simulation {
             return Vec::new();
         }
         let origin = WorldPos::from_tile_center(turret.pos);
+        let range = turret.kind.attack_range_tiles().unwrap_or(0.0);
         let mut in_range: Vec<_> = self
             .enemies
             .values()
-            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= 8.0)
+            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= range)
             .collect();
         in_range.sort_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)));
         in_range
@@ -154,10 +155,11 @@ impl Simulation {
 
     fn choose_target(&self, origin: Pos, priority: &[TargetRule]) -> Option<String> {
         let origin = WorldPos::from_tile_center(origin);
+        let range = BlockKind::Turret.attack_range_tiles().unwrap_or(0.0);
         let in_range: Vec<_> = self
             .enemies
             .values()
-            .filter(|e| e.hp > 0 && origin.distance(e.pos) <= 8.0)
+            .filter(|e| e.hp > 0 && origin.distance(e.pos) <= range)
             .collect();
         if in_range.is_empty() {
             return None;
@@ -193,10 +195,11 @@ impl Simulation {
 
     fn visible_turret_target_ids(&self, origin: Pos) -> Vec<String> {
         let origin = WorldPos::from_tile_center(origin);
+        let range = BlockKind::Turret.attack_range_tiles().unwrap_or(0.0);
         let mut in_range: Vec<_> = self
             .enemies
             .values()
-            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= 8.0)
+            .filter(|enemy| enemy.hp > 0 && origin.distance(enemy.pos) <= range)
             .collect();
         in_range.sort_by(|a, b| origin.distance(a.pos).total_cmp(&origin.distance(b.pos)));
         in_range.into_iter().map(|enemy| enemy.id.clone()).collect()

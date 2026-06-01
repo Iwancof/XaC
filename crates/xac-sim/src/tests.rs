@@ -1549,6 +1549,51 @@ fn turret_builtin_calls_host_api_and_attacks_enemy() {
 }
 
 #[test]
+fn turret_scan_uses_shared_attack_range_metadata() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+    let range = BlockKind::Turret
+        .attack_range_tiles()
+        .expect("turret should define an attack range");
+    let origin = WorldPos::from_tile_center(Pos { x: 34, y: 32 });
+
+    let inside_id = sim.make_id("enemy");
+    sim.enemies.insert(
+        inside_id.clone(),
+        combat::enemy_at(
+            inside_id,
+            EnemyKind::Grunt,
+            WorldPos {
+                x: origin.x + range,
+                y: origin.y,
+            },
+        ),
+    );
+    let outside_id = sim.make_id("enemy");
+    sim.enemies.insert(
+        outside_id.clone(),
+        combat::enemy_at(
+            outside_id,
+            EnemyKind::Runner,
+            WorldPos {
+                x: origin.x + range + 0.1,
+                y: origin.y,
+            },
+        ),
+    );
+
+    let scan = sim.turret_visible_enemy_scan(&turret_id);
+
+    assert_eq!(
+        scan.iter().map(|(kind, _, _)| *kind).collect::<Vec<_>>(),
+        vec![EnemyKind::Grunt],
+        "scan should include enemies at the metadata range and exclude enemies beyond it"
+    );
+}
+
+#[test]
 fn turret_priority_script_targets_wire_cutter_before_nearest_grunt() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)

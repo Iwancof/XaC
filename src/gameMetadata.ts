@@ -7,6 +7,7 @@ type BlockMetadata = {
   footprint: readonly [number, number];
   localCpuRate: number;
   networkCpuOutput: number;
+  attackRangeTiles?: number | null;
   programmable: boolean;
   networkNode: boolean;
   networkConnector: boolean;
@@ -48,6 +49,10 @@ export function blockLocalCpuRate(kind: BlockKind) {
 
 export function blockNetworkCpuOutput(kind: BlockKind) {
   return BLOCK_METADATA[kind].networkCpuOutput;
+}
+
+export function blockAttackRangeTiles(kind: BlockKind) {
+  return BLOCK_METADATA[kind].attackRangeTiles ?? null;
 }
 
 export function canAcceptItem(kind: BlockKind, item: ItemKind) {
