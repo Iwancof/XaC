@@ -208,6 +208,10 @@ if output_available east push east
 if output_available ammo east push ammo east
 ```
 
+Router push imports also report physical availability: `push`, `push_any`, and
+item-specific `push` return `0` and queue no command when no matching output
+path currently exists.
+
 Raw WebAssembly Text (`.wat`) is still accepted for lower-level tests and power
 users. The older `tick() -> i32` action-code ABI remains as a compatibility
 fallback, but raw WAT imports are still checked against the selected block

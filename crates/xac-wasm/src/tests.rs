@@ -20,6 +20,12 @@ fn drill_output_input(item: ItemKind) -> BehaviorHostInput {
     }
 }
 
+fn router_item_available(item: ItemKind, dir: Direction) -> BTreeMap<ItemKind, [bool; 4]> {
+    let mut by_dir = [false; 4];
+    by_dir[direction_index(dir)] = true;
+    BTreeMap::from([(item, by_dir)])
+}
+
 #[test]
 fn compiles_wat_and_evaluates_action_code() {
     let runtime = BehaviorRuntime::new().unwrap();
@@ -777,6 +783,74 @@ fn xac_script_can_push_specific_router_item() {
 }
 
 #[test]
+fn router_push_imports_return_physical_availability() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let compiled = runtime
+        .compile_wat(
+            BehaviorKind::Router,
+            r#"(module
+                  (import "xac:router" "push_any" (func $push_any (result i32)))
+                  (import "xac:router" "push_dir" (func $push_dir (param i32) (result i32)))
+                  (import "xac:router" "push_item_dir" (func $push_item_dir (param i32 i32) (result i32)))
+                  (import "xac:net" "store_set_i32" (func $net_set (param i32 i32) (result i32)))
+                  (func (export "tick")
+                    (drop (call $net_set (i32.const 1) (call $push_any)))
+                    (drop (call $net_set (i32.const 2) (call $push_dir (i32.const 1))))
+                    (drop (call $net_set (i32.const 3) (call $push_item_dir (i32.const 2) (i32.const 1))))))"#,
+        )
+        .unwrap();
+
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![
+            NetStoreOp::Set(NetStoreWrite { key: 1, value: 0 }),
+            NetStoreOp::Set(NetStoreWrite { key: 2, value: 0 }),
+            NetStoreOp::Set(NetStoreWrite { key: 3, value: 0 }),
+        ]
+    );
+    assert!(matches!(eval.intent, BehaviorIntent::Noop));
+
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                router_output_available: [false, true, false, false],
+                router_item_output_available: router_item_available(
+                    ItemKind::Ammo,
+                    Direction::East,
+                ),
+                net_writable: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        eval.net_ops,
+        vec![
+            NetStoreOp::Set(NetStoreWrite { key: 1, value: 1 }),
+            NetStoreOp::Set(NetStoreWrite { key: 2, value: 1 }),
+            NetStoreOp::Set(NetStoreWrite { key: 3, value: 1 }),
+        ]
+    );
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Router { item, preferred }
+            if item == Some(ItemKind::Ammo) && preferred == vec![Direction::East]
+    ));
+}
+
+#[test]
 fn xac_script_can_read_common_network_stock() {
     let runtime = BehaviorRuntime::new().unwrap();
     let stock_script = "if stock_count ammo > 5 push ammo east";
@@ -793,6 +867,10 @@ fn xac_script_can_read_common_network_stock() {
             80,
             BehaviorHostInput {
                 network_stock_counts: counts,
+                router_item_output_available: router_item_available(
+                    ItemKind::Ammo,
+                    Direction::East,
+                ),
                 ..Default::default()
             },
         )
@@ -817,6 +895,7 @@ fn xac_script_can_read_common_network_stock() {
             80,
             BehaviorHostInput {
                 network_stock_space: space,
+                router_item_output_available: router_item_available(ItemKind::Ore, Direction::East),
                 ..Default::default()
             },
         )
@@ -1646,7 +1725,14 @@ fn host_imports_map_logistics_production_and_combat_apis() {
         )
         .unwrap();
     let eval = runtime
-        .evaluate_compiled(&router, 30, BehaviorHostInput::default())
+        .evaluate_compiled(
+            &router,
+            30,
+            BehaviorHostInput {
+                router_output_available: [false, true, false, false],
+                ..Default::default()
+            },
+        )
         .unwrap();
     assert!(matches!(
         eval.intent,

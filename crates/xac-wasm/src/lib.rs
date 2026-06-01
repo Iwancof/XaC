@@ -537,6 +537,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             if !charge_host(&mut caller, host_cost::PUSH) {
                 return 0;
             }
+            if !router_any_output_available(caller.data()) {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::Router {
                 item: None,
                 preferred: Direction::all().to_vec(),
@@ -554,6 +557,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             let Some(dir) = direction_from_code(dir) else {
                 return 0;
             };
+            if !router_output_available(caller.data(), dir) {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::Router {
                 item: None,
                 preferred: vec![dir],
@@ -574,6 +580,9 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             let Some(dir) = direction_from_code(dir) else {
                 return 0;
             };
+            if !router_item_output_available(caller.data(), &item, dir) {
+                return 0;
+            }
             caller.data_mut().intent = BehaviorIntent::Router {
                 item: Some(item),
                 preferred: vec![dir],
@@ -591,7 +600,7 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             let Some(dir) = direction_from_code(dir) else {
                 return 0;
             };
-            if caller.data().input.router_output_available[direction_index(dir)] {
+            if router_output_available(caller.data(), dir) {
                 1
             } else {
                 0
@@ -611,14 +620,7 @@ fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
             let Some(dir) = direction_from_code(dir) else {
                 return 0;
             };
-            let available = caller
-                .data()
-                .input
-                .router_item_output_available
-                .get(&item)
-                .map(|by_dir| by_dir[direction_index(dir)])
-                .unwrap_or(false);
-            if available {
+            if router_item_output_available(caller.data(), &item, dir) {
                 1
             } else {
                 0
@@ -1290,6 +1292,31 @@ fn drone_unloadable_amount(state: &BehaviorHostState, item: &ItemKind, requested
         .max(0);
     let contact_space = u32::try_from(contact_space).unwrap_or(u32::MAX);
     requested.min(cargo_count).min(contact_space)
+}
+
+fn router_any_output_available(state: &BehaviorHostState) -> bool {
+    state
+        .input
+        .router_output_available
+        .iter()
+        .any(|available| *available)
+}
+
+fn router_output_available(state: &BehaviorHostState, dir: Direction) -> bool {
+    state.input.router_output_available[direction_index(dir)]
+}
+
+fn router_item_output_available(
+    state: &BehaviorHostState,
+    item: &ItemKind,
+    dir: Direction,
+) -> bool {
+    state
+        .input
+        .router_item_output_available
+        .get(item)
+        .map(|by_dir| by_dir[direction_index(dir)])
+        .unwrap_or(false)
 }
 
 fn push_drill_command(state: &mut BehaviorHostState, command: DrillCommand) {
