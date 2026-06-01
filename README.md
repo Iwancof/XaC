@@ -57,6 +57,11 @@ if output_blocked return
 mine
 ```
 
+Programmable blocks expose a behavior picker in the inspector. It lists only
+compatible presets and project copies for the selected block kind, so a turret
+can switch from `Basic Turret` to `Priority Turret` without entering edit mode,
+while incompatible router/drill behavior cannot be assigned to that turret.
+
 Drill scripts can also inspect the resource under the drill and explicitly
 push stored ore into the block they face:
 

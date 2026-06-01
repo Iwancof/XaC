@@ -105,6 +105,17 @@ fn fork_behavior(
 }
 
 #[tauri::command]
+fn assign_behavior(
+    state: tauri::State<'_, AppState>,
+    block_id: String,
+    behavior_id: String,
+) -> Result<GameSnapshot, String> {
+    let mut sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.assign_behavior(&block_id, &behavior_id)
+        .map_err(|err| err.to_string())
+}
+
+#[tauri::command]
 fn save_behavior(
     state: tauri::State<'_, AppState>,
     behavior_id: String,
@@ -155,6 +166,7 @@ pub fn run() {
             open_behavior,
             edit_builtin_copy,
             fork_behavior,
+            assign_behavior,
             save_behavior,
             build_behavior
         ])

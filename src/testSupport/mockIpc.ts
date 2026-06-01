@@ -101,6 +101,8 @@ mockIPC((cmd, args = {}) => {
       return copyBehavior((args as { blockId?: string }).blockId ?? "", false);
     case "fork_behavior":
       return copyBehavior((args as { blockId?: string }).blockId ?? "", true);
+    case "assign_behavior":
+      return assignBehavior(args as { blockId?: string; behaviorId?: string });
     case "save_behavior":
       return saveBehavior(args as { behaviorId?: string; source?: string });
     case "build_behavior":
@@ -327,6 +329,24 @@ function copyBehavior(blockId: string, fork: boolean): BehaviorSource {
   block.behavior_ref = id;
   log("info", block.id, `${fork ? "forked" : "created editable copy"} ${id}`);
   return openBehavior(id);
+}
+
+function assignBehavior({ blockId = "", behaviorId = "" }: { blockId?: string; behaviorId?: string }) {
+  const block = state.blocks.find((item) => item.id === blockId);
+  if (!block) {
+    throw new Error(`unknown block: ${blockId}`);
+  }
+  const behavior = state.behaviors[behaviorId];
+  if (!behavior) {
+    throw new Error(`unknown behavior: ${behaviorId}`);
+  }
+  if (behavior.summary.base_kind !== block.kind) {
+    throw new Error(`behavior ${behaviorId} targets ${behavior.summary.base_kind}, but block is ${block.kind}`);
+  }
+  block.behavior_ref = behaviorId;
+  block.status = `behavior: ${behavior.summary.display_name}`;
+  log("info", blockId, `assigned ${behavior.summary.display_name}`);
+  return snapshot();
 }
 
 function saveBehavior({ behaviorId = "", source = "" }: { behaviorId?: string; source?: string }): BehaviorSource {

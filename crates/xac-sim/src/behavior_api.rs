@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
-use xac_core::{BehaviorSource, BehaviorSummary, BuildResult, LogLevel};
+use xac_core::{
+    BehaviorKind, BehaviorSource, BehaviorSummary, BuildResult, GameSnapshot, LogLevel,
+};
 
 use crate::behavior::{
     persist_project_behavior_index, persist_project_behavior_source, project_behavior_source_path,
@@ -111,6 +113,39 @@ impl Simulation {
             format!("forked behavior into {new_id}"),
         );
         self.open_behavior(&new_id)
+    }
+
+    pub fn assign_behavior(&mut self, block_id: &str, behavior_id: &str) -> Result<GameSnapshot> {
+        let block_kind = self
+            .blocks
+            .get(block_id)
+            .map(|block| block.kind)
+            .ok_or_else(|| anyhow!("unknown block: {block_id}"))?;
+        let expected_kind = BehaviorKind::from_block_kind(block_kind)
+            .ok_or_else(|| anyhow!("selected block cannot run behavior"))?;
+        let behavior = self
+            .behaviors
+            .get(behavior_id)
+            .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
+        if behavior.summary.base_kind != expected_kind {
+            return Err(anyhow!(
+                "behavior {behavior_id} targets {:?}, but block is {:?}",
+                behavior.summary.base_kind,
+                expected_kind
+            ));
+        }
+
+        let display_name = behavior.summary.display_name.clone();
+        if let Some(block) = self.blocks.get_mut(block_id) {
+            block.behavior_ref = Some(behavior_id.to_string());
+            block.status = format!("behavior: {display_name}");
+        }
+        self.log(
+            LogLevel::Info,
+            block_id.to_string(),
+            format!("assigned {display_name}"),
+        );
+        Ok(self.snapshot())
     }
 
     pub fn save_behavior(&mut self, behavior_id: &str, source: String) -> Result<BehaviorSource> {

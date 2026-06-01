@@ -1,5 +1,5 @@
 import { Box, Code2, Copy, GitBranch, Hammer, RotateCw, Save, Trash2 } from "lucide-react";
-import type { BehaviorSource, Block, BuildResult, Drone, Enemy, GameSnapshot } from "./types";
+import type { BehaviorSource, BehaviorSummary, Block, BuildResult, Drone, Enemy, GameSnapshot } from "./types";
 
 interface InspectorProps {
   snapshot: GameSnapshot | null;
@@ -9,10 +9,12 @@ interface InspectorProps {
   behavior: BehaviorSource | null;
   buildResult: BuildResult | null;
   dirty: boolean;
+  compatibleBehaviors: BehaviorSummary[];
   onEditCopy: () => void;
   onFork: () => void;
   onSave: () => void;
   onBuild: () => void;
+  onAssignBehavior: (behaviorId: string) => void;
   onOpenBehavior: (behaviorId: string) => void;
   onDeconstruct: () => void;
   onRotate: () => void;
@@ -26,10 +28,12 @@ export function Inspector({
   behavior,
   buildResult,
   dirty,
+  compatibleBehaviors,
   onEditCopy,
   onFork,
   onSave,
   onBuild,
+  onAssignBehavior,
   onOpenBehavior,
   onDeconstruct,
   onRotate
@@ -82,20 +86,36 @@ export function Inspector({
             </div>
           )}
           {selectedBlock.behavior_ref && (
-            <div className="behavior-actions">
-              <button onClick={() => onOpenBehavior(selectedBlock.behavior_ref!)} title="Open behavior">
-                <Code2 size={16} />
-                Open
-              </button>
-              <button onClick={onEditCopy} title="Copy built-in preset and edit">
-                <Copy size={16} />
-                Edit Copy
-              </button>
-              <button onClick={onFork} title="Fork behavior for this block">
-                <GitBranch size={16} />
-                Fork
-              </button>
-            </div>
+            <>
+              <label className="behavior-picker">
+                <span>Behavior</span>
+                <select
+                  aria-label="Assign behavior preset"
+                  value={selectedBlock.behavior_ref}
+                  onChange={(event) => onAssignBehavior(event.target.value)}
+                >
+                  {compatibleBehaviors.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.display_name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="behavior-actions">
+                <button onClick={() => onOpenBehavior(selectedBlock.behavior_ref!)} title="Open behavior">
+                  <Code2 size={16} />
+                  Open
+                </button>
+                <button onClick={onEditCopy} title="Copy built-in preset and edit">
+                  <Copy size={16} />
+                  Edit Copy
+                </button>
+                <button onClick={onFork} title="Fork behavior for this block">
+                  <GitBranch size={16} />
+                  Fork
+                </button>
+              </div>
+            </>
           )}
           {selectedBlock.kind !== "core" && (
             <div className="behavior-actions">

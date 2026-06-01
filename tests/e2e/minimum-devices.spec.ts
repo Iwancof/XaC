@@ -195,4 +195,22 @@ mine
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "deconstruct_block") ?? [];
   });
   expect(deconstructCalls).toEqual([{ cmd: "deconstruct_block", args: { blockId: "drill_1" } }]);
+
+  await page.getByRole("button", { name: /Turret/ }).click();
+  await canvas.click({ position: tileCenter(34, 30) });
+  await expect(page.locator(".inspector")).toContainText("turret");
+  await page.getByLabel("Assign behavior preset").selectOption("builtin.turret.priority");
+  await expect(page.locator(".inspector")).toContainText("behavior: Priority Turret");
+  await expect(page.locator(".log-panel")).toContainText("assigned Priority Turret");
+
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Priority Turret");
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /attack_best runner wire_cutter/);
+
+  const assignCalls = await page.evaluate(() => {
+    return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "assign_behavior") ?? [];
+  });
+  expect(assignCalls).toEqual([
+    { cmd: "assign_behavior", args: { blockId: "turret_1", behaviorId: "builtin.turret.priority" } }
+  ]);
 });

@@ -282,6 +282,46 @@ fn builtin_copy_is_editable_and_reassigned() {
 }
 
 #[test]
+fn compatible_builtin_behavior_can_be_assigned_to_block() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+
+    sim.assign_behavior(&turret_id, "builtin.turret.priority")
+        .unwrap();
+
+    let turret = &sim.blocks[&turret_id];
+    assert_eq!(
+        turret.behavior_ref.as_deref(),
+        Some("builtin.turret.priority")
+    );
+    assert_eq!(turret.status, "behavior: Priority Turret");
+    assert!(sim
+        .logs
+        .iter()
+        .any(|entry| { entry.source == turret_id && entry.message == "assigned Priority Turret" }));
+}
+
+#[test]
+fn behavior_assignment_rejects_wrong_block_kind() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+
+    let err = sim
+        .assign_behavior(&turret_id, "builtin.router.ammo_east")
+        .unwrap_err();
+
+    assert!(err.to_string().contains("targets Router"));
+    assert_eq!(
+        sim.blocks[&turret_id].behavior_ref.as_deref(),
+        Some("builtin.turret.basic")
+    );
+}
+
+#[test]
 fn project_behavior_source_persists_under_config_root() {
     let config_root = test_config_root("behavior-persistence");
     let mut sim = Simulation::new(&config_root).unwrap();

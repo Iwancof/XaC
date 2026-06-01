@@ -14,6 +14,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   advance,
+  assignBehavior,
   buildBehavior,
   deconstructBlock,
   editBuiltinCopy,
@@ -122,6 +123,10 @@ export function App() {
     if (!snapshot?.selected_id) return null;
     return snapshot.drones.find((drone) => drone.id === snapshot.selected_id) ?? null;
   }, [snapshot]);
+  const compatibleBehaviors = useMemo(() => {
+    if (!selectedBlock) return [];
+    return snapshot?.behaviors.filter((item) => item.base_kind === selectedBlock.kind) ?? [];
+  }, [selectedBlock, snapshot]);
 
   const dirty = behavior ? editorValue !== savedValue : false;
 
@@ -179,6 +184,19 @@ export function App() {
       setSavedValue(next.source);
       setBuildResult(null);
       await refresh();
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const handleAssignBehavior = async (behaviorId: string) => {
+    if (!selectedBlock) return;
+    try {
+      setSnapshot(await assignBehavior(selectedBlock.id, behaviorId));
+      setError(null);
+      if (behavior && !dirty) {
+        await loadBehavior(behaviorId);
+      }
     } catch (err) {
       setError(String(err));
     }
@@ -355,10 +373,12 @@ export function App() {
             behavior={behavior}
             buildResult={buildResult}
             dirty={dirty}
+            compatibleBehaviors={compatibleBehaviors}
             onEditCopy={handleEditCopy}
             onFork={handleFork}
             onSave={handleSave}
             onBuild={handleBuild}
+            onAssignBehavior={handleAssignBehavior}
             onOpenBehavior={loadBehavior}
             onDeconstruct={handleDeconstruct}
             onRotate={handleRotateSelected}

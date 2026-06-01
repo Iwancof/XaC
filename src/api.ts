@@ -51,6 +51,10 @@ export function forkBehavior(blockId: string) {
   return invoke<BehaviorSource>("fork_behavior", { blockId });
 }
 
+export function assignBehavior(blockId: string, behaviorId: string) {
+  return invoke<GameSnapshot>("assign_behavior", { blockId, behaviorId });
+}
+
 export function saveBehavior(behaviorId: string, source: string) {
   return invoke<BehaviorSource>("save_behavior", { behaviorId, source });
 }

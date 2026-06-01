@@ -211,6 +211,7 @@ button.danger:hover:not(:disabled) {
 
 .inventory,
 .network-card,
+.behavior-picker,
 .behavior-actions,
 .behavior-meta > div {
   display: flex;
@@ -221,8 +222,22 @@ button.danger:hover:not(:disabled) {
 
 .inventory,
 .network-card,
+.behavior-picker,
 .behavior-meta {
   margin-top: 10px;
+}
+
+.behavior-picker {
+  font-size: 12px;
+}
+
+.behavior-picker span {
+  color: #8da0aa;
+}
+
+.behavior-picker select {
+  min-width: 0;
+  flex: 1 1 150px;
 }
 
 .behavior-meta {
