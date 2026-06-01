@@ -236,7 +236,6 @@ impl Simulation {
         let core_pos = Pos { x: 30, y: 30 };
         let core_id = self.make_id("core");
         let mut core = make_block(core_id.clone(), BlockKind::Core, core_pos, Direction::East);
-        core.inventory.capacity = 1000;
         core.inventory.add(ItemKind::Ore, 40);
         core.inventory.add(ItemKind::Plate, 20);
         core.inventory.add(ItemKind::Ammo, 60);

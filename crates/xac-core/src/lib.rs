@@ -4,6 +4,14 @@ use std::collections::BTreeMap;
 pub type EntityId = String;
 pub type BehaviorId = String;
 
+pub const CPU_SPEED_REFERENCE_RATE: f32 = 8.0;
+pub const MIN_CPU_SCALED_TICKS: u32 = 3;
+
+pub fn cpu_scaled_ticks(effective_cpu_rate: f32, base_ticks: u32) -> u32 {
+    let speedup = (effective_cpu_rate / CPU_SPEED_REFERENCE_RATE).clamp(0.1, 10.0);
+    ((base_ticks as f32 / speedup).ceil() as u32).max(MIN_CPU_SCALED_TICKS)
+}
+
 #[derive(
     Clone, Copy, Debug, Default, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize,
 )]
@@ -608,6 +616,15 @@ pub struct GameSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cpu_scaled_ticks_uses_core_speed_contract() {
+        assert_eq!(cpu_scaled_ticks(8.0, 30), 30);
+        assert_eq!(cpu_scaled_ticks(16.0, 30), 15);
+        assert_eq!(cpu_scaled_ticks(4.0, 30), 60);
+        assert_eq!(cpu_scaled_ticks(800.0, 20), MIN_CPU_SCALED_TICKS);
+        assert_eq!(cpu_scaled_ticks(0.0, 20), 200);
+    }
 
     #[test]
     fn mvp_block_storage_contract_matches_factory_roles() {

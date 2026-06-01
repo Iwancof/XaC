@@ -1,6 +1,5 @@
-use xac_core::{BlockKind, ItemKind, TerrainKind};
+use xac_core::{cpu_scaled_ticks, BlockKind, ItemKind, TerrainKind};
 
-use crate::block_defs::cpu_scaled_threshold;
 use crate::recipes::{
     apply_recipe, can_progress_any_recipe, can_progress_recipe, next_recipe_for_goal,
 };
@@ -24,7 +23,7 @@ impl Simulation {
         }
         if let Some(block) = self.blocks.get_mut(block_id) {
             block.progress += 1;
-            let threshold = cpu_scaled_threshold(block.effective_cpu_rate, 30);
+            let threshold = cpu_scaled_ticks(block.effective_cpu_rate, 30);
             if block.progress >= threshold && block.inventory.has_space(1) {
                 block.progress = 0;
                 block.inventory.add(ItemKind::Ore, 1);
@@ -57,7 +56,7 @@ impl Simulation {
             return;
         };
         block.progress += 1;
-        let threshold = cpu_scaled_threshold(block.effective_cpu_rate, recipe.time_ticks);
+        let threshold = cpu_scaled_ticks(block.effective_cpu_rate, recipe.time_ticks);
         if block.progress < threshold {
             return;
         }

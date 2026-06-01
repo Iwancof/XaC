@@ -47,8 +47,3 @@ pub fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Bl
         status: "idle".to_string(),
     }
 }
-
-pub fn cpu_scaled_threshold(effective_cpu_rate: f32, base: u32) -> u32 {
-    let speedup = (effective_cpu_rate / 8.0).clamp(0.1, 10.0);
-    ((base as f32 / speedup).ceil() as u32).max(3)
-}
