@@ -12,6 +12,8 @@ mod host_assembler;
 mod host_common;
 mod host_cost;
 mod host_drill;
+mod host_drone;
+mod host_drone_port;
 mod host_helpers;
 mod host_net;
 mod host_router;
