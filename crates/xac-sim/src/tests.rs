@@ -3,9 +3,30 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use xac_core::{BehaviorKind, BehaviorSummary, DroneState, WorldPos};
+use xac_core::{BehaviorKind, BehaviorSummary, DroneState, TerrainKind, WorldPos};
 
 static TEST_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+#[test]
+fn shared_map_seed_defines_sim_ore_patches() {
+    block_defs::assert_map_seed_matches_dimensions();
+    assert_eq!(
+        block_defs::terrain_at(Pos { x: 20, y: 30 }),
+        TerrainKind::OrePatch
+    );
+    assert_eq!(
+        block_defs::terrain_at(Pos { x: 42, y: 25 }),
+        TerrainKind::OrePatch
+    );
+    assert_eq!(
+        block_defs::terrain_at(Pos { x: 30, y: 44 }),
+        TerrainKind::OrePatch
+    );
+    assert_eq!(
+        block_defs::terrain_at(Pos { x: 10, y: 10 }),
+        TerrainKind::Ground
+    );
+}
 
 #[test]
 fn placing_wire_and_cpu_node_forms_network() {

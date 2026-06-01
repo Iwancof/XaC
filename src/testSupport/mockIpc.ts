@@ -16,6 +16,7 @@ import {
 import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
 import { enemyAttackCooldownTicks, enemyAttackDamage, enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
+import { MAP_HEIGHT, MAP_WIDTH, terrainAt } from "../mapSeed";
 import type {
   BehaviorRuntimeStats,
   BehaviorSource,
@@ -36,12 +37,9 @@ import type {
   LogLevel,
   Network,
   Pos,
-  TerrainKind,
   Tile
 } from "../types";
 
-const MAP_WIDTH = 64;
-const MAP_HEIGHT = 64;
 const ENEMY_ATTACK_RANGE = 0.2;
 
 type CommandCall = {
@@ -725,14 +723,6 @@ function buildTiles(blocks: Block[]): Tile[] {
     }
   }
   return tiles;
-}
-
-function terrainAt(pos: Pos): TerrainKind {
-  const ore =
-    (pos.x - 20) ** 2 + (pos.y - 30) ** 2 < 42 ||
-    (pos.x - 42) ** 2 + (pos.y - 25) ** 2 < 30 ||
-    (pos.x - 30) ** 2 + (pos.y - 44) ** 2 < 28;
-  return ore ? "ore_patch" : "ground";
 }
 
 function inBounds(pos: Pos) {
