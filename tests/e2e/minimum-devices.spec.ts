@@ -93,6 +93,9 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("core plate 20");
   await expect(page.locator(".metrics")).toContainText("core ammo 60");
   await expect(page.locator(".metrics")).toContainText("enemies 1");
+  await expect(page.getByTestId("tutorial-panel")).toContainText("Objectives");
+  await expect(page.getByTestId("tutorial-progress")).toContainText("0/7");
+  await expect(page.getByTestId("tutorial-mining-loop")).toHaveAttribute("data-state", "pending");
   await expect(page.locator(".inspector")).toContainText("core");
   await canvas.click({ position: tileCenter(28, 28) });
   await expect(page.locator(".inspector")).toContainText("runner");
@@ -153,6 +156,7 @@ test("places minimum devices from the right block list and opens drill behavior"
       read_only_cache: false
     })
   ]);
+  await expect(page.getByTestId("tutorial-cpu-network")).toHaveAttribute("data-state", "complete");
 
   await page.getByRole("button", { name: /Belt Conveyor/ }).click();
   await expect(page.getByText("Placing conveyor")).toBeVisible();
@@ -189,6 +193,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await page.getByRole("button", { name: /\+40/ }).click();
   await expect(page.locator(".metrics")).toContainText("core ore 41");
   await expect(page.locator(".metrics")).toContainText("flows");
+  await expect(page.getByTestId("tutorial-mining-loop")).toHaveAttribute("data-state", "complete");
   await expect(page.locator(".inspector")).toContainText("runtime tick");
   await expect(page.locator(".inspector")).toContainText("wasm mocked-was");
   await expect(page.getByLabel("Logistics")).toContainText("Ore x1");
@@ -230,6 +235,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await page.getByRole("button", { name: "Edit Copy", exact: true }).click();
   await expect(page.locator(".behavior-meta")).toContainText("Basic Drill Copy");
   await expect(page.locator(".behavior-meta")).toContainText("project behavior");
+  await expect(page.getByTestId("tutorial-edit-code")).toHaveAttribute("data-state", "complete");
   await page.waitForFunction(() => Boolean(window.__XAC_EDITOR__));
 
   const saveButton = page.getByRole("button", { name: "Save", exact: true });
@@ -516,6 +522,7 @@ test("UI mock runs code-driven assembler ammo into turret defense", async ({ pag
   });
   expect(supplied.turret?.inventory.items.ammo ?? 0).toBeGreaterThan(0);
   expect(supplied.ammoFlow).toBe(true);
+  await expect(page.getByTestId("tutorial-ammo-production")).toHaveAttribute("data-state", "complete");
 
   const enemyId = await page.evaluate(() => window.__XAC_TEST_STATE__!.spawnEnemy("grunt", { x: 37.5, y: 30.5 }));
   expect(enemyId).toBe("enemy_2");
@@ -532,6 +539,7 @@ test("UI mock runs code-driven assembler ammo into turret defense", async ({ pag
   });
   expect(defended.enemy?.hp ?? 0).toBeLessThan(30);
   expect(defended.turret?.target_id).toBe("enemy_2");
+  await expect(page.getByTestId("tutorial-defense")).toHaveAttribute("data-state", "complete");
 });
 
 test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {
@@ -566,6 +574,7 @@ test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {
   expect(delivered.turret?.inventory.items.ammo ?? 0).toBeGreaterThan(0);
   expect(delivered.droneFlow).toBe(true);
   expect(delivered.drones[0].pos.x % 1).not.toBe(0);
+  await expect(page.getByTestId("tutorial-drone-delivery")).toHaveAttribute("data-state", "complete");
 });
 
 test("wire cutter can sever a CPU network in the UI simulation", async ({ page }) => {
@@ -592,6 +601,7 @@ test("wire cutter can sever a CPU network in the UI simulation", async ({ page }
   expect(cutterId).toBe("enemy_2");
   const threatStatus = await page.evaluate(() => window.__XAC_TEST_STATE__!.snapshot().status);
   expect(threatStatus.wire_threats).toBe(1);
+  await expect(page.getByTestId("tutorial-cpu-network")).toHaveAttribute("data-state", "complete");
 
   await page.getByRole("button", { name: /\+40/ }).click();
 
@@ -616,4 +626,5 @@ test("wire cutter can sever a CPU network in the UI simulation", async ({ page }
   expect(severed.logs).toEqual(
     expect.arrayContaining([expect.objectContaining({ level: "warn", source: "wire_1", message: "block destroyed" })])
   );
+  await expect(page.getByTestId("tutorial-wire-cutter")).toHaveAttribute("data-state", "complete");
 });

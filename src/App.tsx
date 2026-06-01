@@ -33,6 +33,7 @@ import { GridWorld } from "./GridWorld";
 import { Inspector } from "./Inspector";
 import { LogisticsPanel } from "./LogisticsPanel";
 import { PALETTE } from "./palette";
+import { TutorialPanel } from "./TutorialPanel";
 import type {
   BehaviorSource,
   Block,
@@ -411,14 +412,17 @@ export function App() {
       </section>
 
       <footer className="bottom-bar">
-        <section className="overlay-controls">
-          {OVERLAYS.map(({ id, label, icon: Icon }) => (
-            <button key={id} className={overlay === id ? "selected" : ""} onClick={() => setOverlay(id)}>
-              <Icon size={15} />
-              {label}
-            </button>
-          ))}
-        </section>
+        <div className="bottom-tools">
+          <section className="overlay-controls">
+            {OVERLAYS.map(({ id, label, icon: Icon }) => (
+              <button key={id} className={overlay === id ? "selected" : ""} onClick={() => setOverlay(id)}>
+                <Icon size={15} />
+                {label}
+              </button>
+            ))}
+          </section>
+          <TutorialPanel snapshot={snapshot} />
+        </div>
 
         <LogisticsPanel snapshot={snapshot} />
 

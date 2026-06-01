@@ -368,6 +368,14 @@ button.danger:hover:not(:disabled) {
   border-top: 1px solid #253038;
 }
 
+.bottom-tools {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
 .overlay-controls {
   align-content: start;
   align-items: start;
@@ -381,6 +389,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .logistics-panel,
+.tutorial-panel,
 .log-panel {
   min-width: 0;
   min-height: 0;
@@ -458,6 +467,101 @@ button.danger:hover:not(:disabled) {
   font-size: 12px;
 }
 
+.tutorial-panel {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 5px;
+}
+
+.tutorial-heading,
+.tutorial-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.tutorial-heading {
+  color: #f3f7f9;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.tutorial-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tutorial-heading strong,
+.tutorial-next span {
+  color: #8da0aa;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.tutorial-next {
+  border: 1px solid #283943;
+  border-radius: 5px;
+  padding: 3px 6px;
+  background: #121b20;
+  color: #dce8ed;
+  font-size: 11px;
+}
+
+.tutorial-next strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tutorial-list {
+  min-height: 0;
+  display: grid;
+  gap: 3px;
+  overflow: auto;
+}
+
+.tutorial-step {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  color: #8da0aa;
+  font-size: 11px;
+}
+
+.tutorial-step.complete {
+  color: #95e2a8;
+}
+
+.tutorial-step div,
+.tutorial-step strong,
+.tutorial-step span {
+  min-width: 0;
+}
+
+.tutorial-step div {
+  display: grid;
+  grid-template-columns: minmax(96px, 1fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
+}
+
+.tutorial-step strong,
+.tutorial-step span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tutorial-step strong {
+  color: #d8e6ec;
+  font-weight: 600;
+}
+
 .log {
   display: grid;
   grid-template-columns: 48px 130px minmax(0, 1fr);
@@ -500,6 +604,7 @@ button.danger:hover:not(:disabled) {
   }
 
   .logistics-panel,
+  .tutorial-panel,
   .log-panel {
     min-height: 54px;
   }
