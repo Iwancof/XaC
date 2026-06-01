@@ -32,6 +32,7 @@ use script::{
     ATTACK_POLICY_WIRE_CUTTER,
 };
 mod script_imports;
+mod script_parse;
 mod script_render;
 mod tiny;
 mod tiny_actions;
