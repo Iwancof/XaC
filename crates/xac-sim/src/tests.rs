@@ -1325,6 +1325,67 @@ fn wire_cutter_breaks_wire_and_splits_cpu_network() {
     );
 }
 
+#[test]
+fn reconnecting_split_network_keeps_core_store_over_read_only_cache() {
+    let mut sim = test_sim("sim");
+    for x in 20..=30 {
+        sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::Router, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let remote_router_id = sim.selected_id.clone().unwrap();
+    sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let core_router_id = sim.selected_id.clone().unwrap();
+    assign_script(&mut sim, &core_router_id, "net_set 7 10");
+    sim.fuel_banks.insert(core_router_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+    let network_id = sim.blocks[&core_router_id].network_id.unwrap();
+    assert_eq!(
+        sim.networks[&network_id].store.get("7"),
+        Some(&serde_json::Value::from(10))
+    );
+
+    let split_wire_id = sim.block_id_at(Pos { x: 29, y: 29 }).unwrap();
+    sim.deconstruct_block(&split_wire_id).unwrap();
+    assign_script(&mut sim, &remote_router_id, "net_set 7 42");
+    set_block_behavior_source(&mut sim, &core_router_id, "net_set 7 99");
+    sim.fuel_banks.insert(remote_router_id.clone(), 100.0);
+    sim.fuel_banks.insert(core_router_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    let core_network_id = sim.blocks[&core_router_id].network_id.unwrap();
+    let remote_network_id = sim.blocks[&remote_router_id].network_id.unwrap();
+    assert_ne!(core_network_id, remote_network_id);
+    assert_eq!(
+        sim.networks[&core_network_id].store.get("7"),
+        Some(&serde_json::Value::from(99))
+    );
+    assert_eq!(
+        sim.networks[&remote_network_id].store.get("7"),
+        Some(&serde_json::Value::from(10)),
+        "the split side should keep only a read-only snapshot"
+    );
+    assert!(sim.networks[&remote_network_id].read_only_cache);
+
+    sim.place_block(BlockKind::Wire, Pos { x: 29, y: 29 }, Direction::East)
+        .unwrap();
+
+    let reconnected_network_id = sim.blocks[&core_router_id].network_id.unwrap();
+    assert_eq!(
+        sim.blocks[&remote_router_id].network_id,
+        Some(reconnected_network_id)
+    );
+    assert_eq!(
+        sim.networks[&reconnected_network_id].store.get("7"),
+        Some(&serde_json::Value::from(99)),
+        "reconnecting should keep the core-backed store over the larger stale cache"
+    );
+}
+
 fn assign_script(sim: &mut Simulation, block_id: &str, source: &str) {
     let behavior = sim.edit_builtin_copy(block_id).unwrap();
     let result = sim
@@ -1336,6 +1397,13 @@ fn assign_script(sim: &mut Simulation, block_id: &str, source: &str) {
     let result = sim
         .build_behavior(&behavior.summary.id)
         .expect("custom XaC script should build");
+    assert!(result.success);
+}
+
+fn set_block_behavior_source(sim: &mut Simulation, block_id: &str, source: &str) {
+    let behavior_id = sim.blocks[block_id].behavior_ref.clone().unwrap();
+    sim.save_behavior(&behavior_id, source.to_string()).unwrap();
+    let result = sim.build_behavior(&behavior_id).unwrap();
     assert!(result.success);
 }
 

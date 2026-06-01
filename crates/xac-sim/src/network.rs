@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use xac_core::{BlockKind, Direction, DroneState, Network};
+use xac_core::{Block, BlockKind, Direction, DroneState, Network};
 
 use crate::geometry::footprint_positions;
 use crate::Simulation;
@@ -29,7 +29,7 @@ impl Simulation {
             }
             let component = connected_component(start, &connector_positions, &mut seen);
             let block_ids = self.network_block_ids(&component);
-            let store = inherit_store(&block_ids, &previous_networks);
+            let store = inherit_store(&block_ids, &previous_networks, &self.blocks);
             let cpu_pool = block_ids
                 .iter()
                 .filter_map(|id| self.blocks.get(id))
@@ -115,6 +115,7 @@ impl Simulation {
 fn inherit_store(
     block_ids: &[String],
     previous_networks: &BTreeMap<u32, Network>,
+    blocks: &BTreeMap<String, Block>,
 ) -> BTreeMap<String, serde_json::Value> {
     let mut overlapping: Vec<_> = previous_networks
         .values()
@@ -123,13 +124,19 @@ fn inherit_store(
                 .iter()
                 .filter(|id| network.block_ids.contains(id))
                 .count();
-            (overlap > 0).then_some((overlap, &network.store))
+            let core_backed = network.block_ids.iter().any(|id| {
+                blocks
+                    .get(id)
+                    .map(|block| block.kind == BlockKind::Core)
+                    .unwrap_or(false)
+            });
+            (overlap > 0).then_some((core_backed, overlap, &network.store))
         })
         .collect();
-    overlapping.sort_by_key(|(overlap, _)| *overlap);
+    overlapping.sort_by_key(|(core_backed, overlap, _)| (*core_backed, *overlap));
 
     let mut merged = BTreeMap::new();
-    for (_, store) in overlapping {
+    for (_, _, store) in overlapping {
         merged.extend(store.clone());
     }
     merged
