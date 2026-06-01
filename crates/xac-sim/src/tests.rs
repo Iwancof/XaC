@@ -363,6 +363,51 @@ fn carrier_drone_behavior_assignment_rejects_block_behavior() {
 }
 
 #[test]
+fn edited_carrier_drone_behavior_builds_and_runs() {
+    let mut sim = test_sim("sim");
+    let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+    sim.place_block(BlockKind::DronePort, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let port_id = sim.selected_id.clone().unwrap();
+    sim.place_block(BlockKind::Turret, Pos { x: 42, y: 30 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+    sim.ensure_drone_and_job(&port_id);
+    let drone_id = sim.drones.values().next().unwrap().id.clone();
+    assert_eq!(sim.pending_jobs.len(), 1);
+
+    let copied = sim.edit_builtin_copy(&drone_id).unwrap();
+    let behavior_id = copied.summary.id.clone();
+    let source = "log edited drone online\nif has_pending_job claim_delivery_job";
+    sim.save_behavior(&behavior_id, source.to_string()).unwrap();
+    let build = sim.build_behavior(&behavior_id).unwrap();
+    assert!(build.success);
+    sim.fuel_banks.insert(drone_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    assert!(
+        sim.logs
+            .iter()
+            .any(|entry| { entry.source == drone_id && entry.message == "edited drone online" }),
+        "edited carrier drone source should execute through the Wasm host log API"
+    );
+    let drone = &sim.drones[&drone_id];
+    assert!(
+        drone.job.is_some(),
+        "edited carrier drone code should claim the pending delivery job"
+    );
+    assert_eq!(
+        drone.job.as_ref().map(|job| (&job.pickup, &job.dropoff)),
+        Some((&core_id, &turret_id))
+    );
+    assert!(
+        sim.pending_jobs.is_empty(),
+        "claim_delivery_job should consume the queued delivery"
+    );
+}
+
+#[test]
 fn project_behavior_source_persists_under_config_root() {
     let config_root = test_config_root("behavior-persistence");
     let mut sim = Simulation::new(&config_root).unwrap();
