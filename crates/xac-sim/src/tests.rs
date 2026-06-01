@@ -1101,6 +1101,77 @@ fn scripted_mining_factory_feeds_turret_and_defends_core() {
 }
 
 #[test]
+fn builtin_presets_mine_produce_ammo_and_defend_core() {
+    let mut sim = test_sim("sim");
+
+    for x in 20..=30 {
+        sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
+        .unwrap();
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
+        .unwrap();
+    sim.place_block(BlockKind::Router, Pos { x: 22, y: 30 }, Direction::East)
+        .unwrap();
+    let router_id = sim.selected_id.clone().unwrap();
+    sim.place_block(BlockKind::Assembler, Pos { x: 23, y: 30 }, Direction::East)
+        .unwrap();
+    let assembler_id = sim.selected_id.clone().unwrap();
+    sim.place_block(BlockKind::Turret, Pos { x: 24, y: 30 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+
+    assert_eq!(
+        sim.blocks[&drill_id].behavior_ref.as_deref(),
+        Some("builtin.drill.basic")
+    );
+    assert_eq!(
+        sim.blocks[&router_id].behavior_ref.as_deref(),
+        Some("builtin.router.basic")
+    );
+    assert_eq!(
+        sim.blocks[&assembler_id].behavior_ref.as_deref(),
+        Some("builtin.assembler.basic")
+    );
+    assert_eq!(
+        sim.blocks[&turret_id].behavior_ref.as_deref(),
+        Some("builtin.turret.basic")
+    );
+
+    sim.step_ticks(1200);
+    assert!(
+        sim.snapshot().item_flows.iter().any(|flow| {
+            flow.item == ItemKind::Ammo
+                && flow.from_entity == assembler_id
+                && flow.to_entity == turret_id
+        }),
+        "built-in drill, router, and assembler presets should feed ammo into the built-in turret"
+    );
+
+    sim.enemies.clear();
+    let enemy_id = sim.make_id("enemy");
+    sim.enemies.insert(
+        enemy_id.clone(),
+        combat::enemy_at(
+            enemy_id.clone(),
+            EnemyKind::Grunt,
+            WorldPos { x: 25.5, y: 30.5 },
+        ),
+    );
+
+    sim.step_ticks(240);
+
+    assert!(
+        !sim.enemies.contains_key(&enemy_id),
+        "built-in turret preset should use factory-fed ammo to destroy a nearby grunt"
+    );
+}
+
+#[test]
 fn cpu_node_increases_wasm_driven_drill_throughput() {
     fn setup(with_cpu_node: bool) -> (Simulation, EntityId) {
         let mut sim = test_sim("sim");
