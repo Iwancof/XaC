@@ -96,6 +96,9 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("core plate 20");
   await expect(page.locator(".metrics")).toContainText("core ammo 60");
   await expect(page.locator(".metrics")).toContainText("enemies 1");
+  await expect(page.getByTestId("overlay-details")).toContainText("Network");
+  await expect(page.getByTestId("overlay-details")).toContainText("net 1");
+  await expect(page.getByTestId("overlay-details")).toContainText("CPU 120");
   await expect(page.getByTestId("tutorial-panel")).toContainText("Objectives");
   await expect(page.getByTestId("tutorial-progress")).toContainText("0/7");
   await expect(page.getByTestId("tutorial-mining-loop")).toHaveAttribute("data-state", "pending");
@@ -192,6 +195,13 @@ test("places minimum devices from the right block list and opens drill behavior"
     window.__XAC_TEST_STATE__?.snapshot().blocks.find((block) => block.id === "drill_1")
   );
   expect(drillNetwork).toEqual(expect.objectContaining({ network_id: 1, effective_cpu_rate: 201 }));
+  await page.getByRole("button", { name: "CPU", exact: true }).click();
+  await expect(page.getByTestId("overlay-details")).toContainText("drill_1");
+  await expect(page.getByTestId("overlay-details")).toContainText("201.0 fuel/s");
+  await expect(page.getByTestId("overlay-details")).toContainText("network 1");
+  await page.getByRole("button", { name: "Network", exact: true }).click();
+  await expect(page.getByTestId("overlay-details")).toContainText("CPU 200");
+  await expect(page.getByTestId("overlay-details")).toContainText("active 1");
 
   await page.getByRole("button", { name: /\+40/ }).click();
   await expect(page.locator(".metrics")).toContainText("core ore 41");

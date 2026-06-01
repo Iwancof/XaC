@@ -413,7 +413,7 @@ button.danger:hover:not(:disabled) {
 .bottom-bar {
   min-height: 0;
   display: grid;
-  grid-template-columns: 390px minmax(280px, 420px) 1fr;
+  grid-template-columns: minmax(440px, 520px) minmax(280px, 420px) 1fr;
   gap: 12px;
   padding: 10px 12px;
   border-top: 1px solid #253038;
@@ -423,8 +423,8 @@ button.danger:hover:not(:disabled) {
   min-width: 0;
   min-height: 0;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
+  grid-template-rows: auto 34px minmax(0, 1fr);
+  gap: 6px;
 }
 
 .overlay-controls {
@@ -440,6 +440,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .logistics-panel,
+.overlay-details,
 .tutorial-panel,
 .log-panel {
   min-width: 0;
@@ -457,6 +458,79 @@ button.danger:hover:not(:disabled) {
   color: #f3f7f9;
   font-size: 12px;
   font-weight: 700;
+}
+
+.overlay-details {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 4px;
+}
+
+.overlay-detail-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: #f3f7f9;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.overlay-detail-heading span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overlay-detail-heading strong {
+  color: #8da0aa;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.overlay-detail-list {
+  min-height: 0;
+  display: grid;
+  gap: 3px;
+  overflow: auto;
+}
+
+.overlay-detail-row {
+  display: grid;
+  grid-template-columns: minmax(70px, 0.8fr) minmax(90px, 0.7fr) minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  color: #b8c7ce;
+  font-size: 11px;
+}
+
+.overlay-detail-row strong,
+.overlay-detail-row span,
+.overlay-detail-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.overlay-detail-row strong {
+  color: #d8e6ec;
+}
+
+.overlay-detail-row span {
+  color: #95e2a8;
+}
+
+.overlay-detail-row small,
+.overlay-empty {
+  color: #8da0aa;
+}
+
+.overlay-empty {
+  display: grid;
+  place-items: center;
+  min-height: 18px;
+  font-size: 12px;
 }
 
 .logistics-heading span {
@@ -655,6 +729,7 @@ button.danger:hover:not(:disabled) {
   }
 
   .logistics-panel,
+  .overlay-details,
   .tutorial-panel,
   .log-panel {
     min-height: 54px;

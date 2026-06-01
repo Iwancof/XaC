@@ -1,14 +1,9 @@
 import {
-  Activity,
-  Cpu,
   FastForward,
   FolderOpen,
-  Layers,
   Pause,
   Play,
-  Radar,
   RotateCw,
-  Route,
   Save,
   StepForward,
   X
@@ -37,6 +32,8 @@ import { CodeEditor } from "./CodeEditor";
 import { GridWorld } from "./GridWorld";
 import { Inspector } from "./Inspector";
 import { LogisticsPanel } from "./LogisticsPanel";
+import { OverlayDetails } from "./OverlayDetails";
+import { OVERLAYS, type Overlay } from "./overlays";
 import { PALETTE } from "./palette";
 import { TutorialPanel } from "./TutorialPanel";
 import type {
@@ -52,16 +49,6 @@ import type {
   ItemKind,
   Pos
 } from "./types";
-
-type Overlay = "none" | "network" | "cpu" | "logistics" | "attack";
-
-const OVERLAYS: Array<{ id: Overlay; label: string; icon: typeof Layers }> = [
-  { id: "none", label: "None", icon: Layers },
-  { id: "network", label: "Network", icon: Activity },
-  { id: "cpu", label: "CPU", icon: Cpu },
-  { id: "logistics", label: "Logistics", icon: Route },
-  { id: "attack", label: "Attack", icon: Radar }
-];
 
 const NEXT_DIRECTION: Record<Direction, Direction> = {
   north: "east",
@@ -470,6 +457,7 @@ export function App() {
               </button>
             ))}
           </section>
+          <OverlayDetails snapshot={snapshot} overlay={overlay} />
           <TutorialPanel snapshot={snapshot} />
         </div>
 

@@ -3,9 +3,8 @@ import { useEffect, useRef } from "react";
 import { enemyColor } from "./enemyMetadata";
 import { blockAttackRangeTiles, blockFootprintSize } from "./gameMetadata";
 import { itemColor } from "./itemMetadata";
+import type { Overlay } from "./overlays";
 import type { Block, BlockKind, Direction, Enemy, GameSnapshot, Pos } from "./types";
-
-type Overlay = "none" | "network" | "cpu" | "logistics" | "attack";
 
 interface GridWorldProps {
   snapshot: GameSnapshot | null;
@@ -152,6 +151,7 @@ function renderWorld(
   drawEnemies(graphics, snapshot.enemies, selectedId);
   drawDrones(graphics, snapshot, selectedId);
   stage.addChild(graphics);
+  addOverlayLabels(stage, snapshot, overlay);
 
   if (buildKind) {
     const ghost = new Text({
@@ -165,6 +165,26 @@ function renderWorld(
     ghost.x = 12;
     ghost.y = 10;
     stage.addChild(ghost);
+  }
+}
+
+function addOverlayLabels(stage: Container, snapshot: GameSnapshot, overlay: Overlay) {
+  if (overlay !== "cpu") return;
+  for (const block of snapshot.blocks) {
+    if (!block.active || block.effective_cpu_rate <= 0) continue;
+    const [width] = blockFootprintSize(block.kind);
+    const text = new Text({
+      text: block.effective_cpu_rate.toFixed(0),
+      style: {
+        fill: "#dfffee",
+        fontFamily: "Inter, system-ui, sans-serif",
+        fontSize: 10,
+        stroke: { color: "#0e1214", width: 3 }
+      }
+    });
+    text.x = block.pos.x * TILE + Math.max(2, (width * TILE - text.width) / 2);
+    text.y = block.pos.y * TILE + 2;
+    stage.addChild(text);
   }
 }
 
