@@ -1,5 +1,6 @@
 import type { Block, Direction, ItemKind, TerrainKind } from "../types";
 import { mockSourceWithoutComments } from "./mockBehaviorValidator";
+import { allDirections } from "./mockGeometry";
 
 export type MockBehaviorResult = {
   mine: boolean;
@@ -210,10 +211,6 @@ function compareNumber(left: number, operator: string | undefined, right: number
   if (operator === ">=") return left >= right;
   if (operator === ">") return left > right;
   return false;
-}
-
-function allDirections(): Direction[] {
-  return ["north", "east", "south", "west"];
 }
 
 function isItem(value: string | undefined): value is ItemKind {

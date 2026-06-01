@@ -2,15 +2,12 @@ import { mockIPC } from "@tauri-apps/api/mocks";
 import {
   blockDefaultBehaviorId,
   blockAttackRangeTiles,
-  blockFootprintSize,
   blockInventoryCapacity,
   blockLocalCpuRate,
   blockMaxHp,
-  blockNetworkCpuOutput,
   canAcceptItem,
   displayBlockKind,
   DRILL_MINE_BASE_TICKS,
-  isNetworkConnector,
   isNetworkNode,
   isProgrammableBlock
 } from "../gameMetadata";
@@ -24,6 +21,17 @@ import {
   type MockBehaviorResult
 } from "./mockBehaviorRuntime";
 import { commonTemplates } from "./mockCommonTemplates";
+import {
+  blockAt,
+  blockCenter,
+  closestPointOnBlock,
+  distance,
+  footprintPositions,
+  moveToward,
+  rotateDirection,
+  step
+} from "./mockGeometry";
+import { recomputeNetworks } from "./mockNetwork";
 import { validateMockBehaviorBuild } from "./mockBehaviorValidator";
 import type {
   BehaviorRuntimeStats,
@@ -214,7 +222,7 @@ function createInitialState(): MockState {
 
 function snapshot(): GameSnapshot {
   const blocks = state.blocks.map((block) => ({ ...block, inventory: clone(block.inventory) }));
-  const networks = recomputeNetworks(blocks);
+  const networks = recomputeNetworks(blocks, state.drones);
   const tiles = buildTiles(blocks);
   const enemies = state.enemies.map((enemy) => ({ ...enemy, pos: { ...enemy.pos } }));
   const drones = state.drones.map((drone) => ({
@@ -331,7 +339,7 @@ function runTicks(count: number) {
       break;
     }
     state.tick += 1;
-    recomputeNetworks(state.blocks);
+    recomputeNetworks(state.blocks, state.drones);
 
     for (const block of state.blocks) {
       if (block.active && block.behavior_ref) {
@@ -680,105 +688,6 @@ function forceRuntimeError(entityId: string, message = "mocked wasm unreachable 
   throw new Error(`unknown runtime entity: ${entityId}`);
 }
 
-function recomputeNetworks(blocks: Block[]): Network[] {
-  for (const block of blocks) {
-    block.network_id = null;
-    block.effective_cpu_rate = block.active ? blockLocalCpuRate(block.kind) : 0;
-  }
-
-  const connectorPositions = new Set<string>();
-  for (const block of blocks) {
-    if (!isNetworkConnector(block.kind)) continue;
-    for (const pos of footprintPositions(block.kind, block.pos)) {
-      connectorPositions.add(posKey(pos));
-    }
-  }
-
-  const networks: Network[] = [];
-  const seen = new Set<string>();
-  const starts = [...connectorPositions]
-    .map(parsePosKey)
-    .sort((a, b) => a.y - b.y || a.x - b.x);
-
-  for (const start of starts) {
-    if (seen.has(posKey(start))) continue;
-    const component = connectedConnectorComponent(start, connectorPositions, seen);
-    const blockIds = networkBlockIds(blocks, component);
-    const cpuPool = blockIds.reduce((sum, id) => {
-      const block = blocks.find((candidate) => candidate.id === id);
-      return sum + (block ? blockNetworkCpuOutput(block.kind) : 0);
-    }, 0);
-    const activeDevices =
-      blockIds.filter((id) => blocks.find((block) => block.id === id)?.active).length +
-      dockedDroneCountInNetwork(blockIds);
-    const effectivePerDevice = activeDevices ? cpuPool / activeDevices : 0;
-    const networkId = networks.length + 1;
-
-    for (const id of blockIds) {
-      const block = blocks.find((candidate) => candidate.id === id);
-      if (!block) continue;
-      block.network_id = networkId;
-      if (block.active) {
-        block.effective_cpu_rate = blockLocalCpuRate(block.kind) + effectivePerDevice;
-      }
-    }
-
-    networks.push({
-      id: networkId,
-      cpu_pool: cpuPool,
-      active_devices: activeDevices,
-      effective_per_device: effectivePerDevice,
-      block_ids: blockIds,
-      store: {},
-      read_only_cache: !blockIds.some((id) => blocks.find((block) => block.id === id)?.kind === "core")
-    });
-  }
-
-  return networks;
-}
-
-function connectedConnectorComponent(start: Pos, connectorPositions: Set<string>, seen: Set<string>) {
-  const queue = [start];
-  const component: Pos[] = [];
-  seen.add(posKey(start));
-
-  while (queue.length > 0) {
-    const current = queue.shift()!;
-    component.push(current);
-    for (const dir of allDirections()) {
-      const next = step(current, dir);
-      const key = posKey(next);
-      if (connectorPositions.has(key) && !seen.has(key)) {
-        seen.add(key);
-        queue.push(next);
-      }
-    }
-  }
-
-  return component;
-}
-
-function networkBlockIds(blocks: Block[], component: Pos[]) {
-  const blockIds = new Set<string>();
-  for (const pos of component) {
-    const connector = blockAt(blocks, pos);
-    if (connector) {
-      blockIds.add(connector.id);
-    }
-    for (const dir of allDirections()) {
-      const neighbor = blockAt(blocks, step(pos, dir));
-      if (neighbor && isNetworkNode(neighbor.kind)) {
-        blockIds.add(neighbor.id);
-      }
-    }
-  }
-  return [...blockIds].sort();
-}
-
-function dockedDroneCountInNetwork(blockIds: string[]) {
-  return state.drones.filter((drone) => drone.state === "docked" && blockIds.includes(drone.home_port)).length;
-}
-
 function runEnemies() {
   for (const enemy of state.enemies) {
     if (enemy.hp <= 0) continue;
@@ -907,94 +816,6 @@ function outputAvailable(block: Block, dir: Direction, itemFilter: ItemKind | nu
 
 function inventoryTotal(inventory: Inventory) {
   return Object.values(inventory.items).reduce((sum, amount) => sum + (amount ?? 0), 0);
-}
-
-function blockAt(blocks: Block[], pos: Pos) {
-  return blocks.find((block) => footprintPositions(block.kind, block.pos).some((tile) => tile.x === pos.x && tile.y === pos.y));
-}
-
-function blockCenter(block: Block): Pos {
-  const [width, height] = blockFootprintSize(block.kind);
-  return {
-    x: block.pos.x + width / 2,
-    y: block.pos.y + height / 2
-  };
-}
-
-function closestPointOnBlock(origin: Pos, block: Block): Pos {
-  const [width, height] = blockFootprintSize(block.kind);
-  return {
-    x: clamp(origin.x, block.pos.x, block.pos.x + width),
-    y: clamp(origin.y, block.pos.y, block.pos.y + height)
-  };
-}
-
-function distance(a: Pos, b: Pos) {
-  const dx = a.x - b.x;
-  const dy = a.y - b.y;
-  return Math.hypot(dx, dy);
-}
-
-function moveToward(origin: Pos, target: Pos, maxDistance: number): Pos {
-  const dx = target.x - origin.x;
-  const dy = target.y - origin.y;
-  const currentDistance = Math.hypot(dx, dy);
-  if (currentDistance <= maxDistance || currentDistance === 0) {
-    return { ...target };
-  }
-  const scale = maxDistance / currentDistance;
-  return {
-    x: origin.x + dx * scale,
-    y: origin.y + dy * scale
-  };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function footprintPositions(kind: BlockKind, pos: Pos) {
-  const [width, height] = blockFootprintSize(kind);
-  const positions: Pos[] = [];
-  for (let y = pos.y; y < pos.y + height; y += 1) {
-    for (let x = pos.x; x < pos.x + width; x += 1) {
-      positions.push({ x, y });
-    }
-  }
-  return positions;
-}
-
-function allDirections(): Direction[] {
-  return ["north", "east", "south", "west"];
-}
-
-function step(pos: Pos, dir: Direction): Pos {
-  const delta: Record<Direction, Pos> = {
-    north: { x: 0, y: -1 },
-    east: { x: 1, y: 0 },
-    south: { x: 0, y: 1 },
-    west: { x: -1, y: 0 }
-  };
-  return { x: pos.x + delta[dir].x, y: pos.y + delta[dir].y };
-}
-
-function posKey(pos: Pos) {
-  return `${pos.x},${pos.y}`;
-}
-
-function parsePosKey(key: string): Pos {
-  const [x, y] = key.split(",").map(Number);
-  return { x, y };
-}
-
-function rotateDirection(dir: Direction): Direction {
-  const next: Record<Direction, Direction> = {
-    north: "east",
-    east: "south",
-    south: "west",
-    west: "north"
-  };
-  return next[dir];
 }
 
 function usedBy(behaviorId: string) {
