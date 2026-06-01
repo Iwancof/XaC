@@ -593,6 +593,63 @@ fn behavior_build_compiles_wat_and_save_invalidates_cache() {
 }
 
 #[test]
+fn lazy_runtime_compile_persists_wasm_cache_for_saved_behavior() {
+    let config_root = test_config_root("lazy-wasm-cache");
+    let mut sim = Simulation::new(&config_root).unwrap();
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    let copied = sim.edit_builtin_copy(&drill_id).unwrap();
+    let behavior_id = copied.summary.id.clone();
+    sim.save_behavior(&behavior_id, "log lazy compiled\nmine".to_string())
+        .unwrap();
+    assert!(sim.behaviors[&behavior_id].wasm_hash.is_none());
+    assert!(!sim.compiled_behaviors.contains_key(&behavior_id));
+
+    sim.fuel_banks.insert(drill_id.clone(), 100.0);
+    sim.step_ticks(1);
+
+    let package = &sim.behaviors[&behavior_id];
+    let wasm_hash = package
+        .wasm_hash
+        .clone()
+        .expect("lazy compile should set the behavior wasm hash");
+    assert_eq!(package.summary.build_status, "compiled");
+    assert!(sim.compiled_behaviors.contains_key(&behavior_id));
+    assert!(
+        sim.logs
+            .iter()
+            .any(|entry| { entry.source == drill_id && entry.message == "lazy compiled" }),
+        "saved code should run through lazy Wasm compilation"
+    );
+
+    let cached_wasm = fs::read(
+        config_root
+            .join("cache/wasm")
+            .join(format!("{wasm_hash}.wasm")),
+    )
+    .unwrap();
+    assert_eq!(
+        cached_wasm.get(0..4),
+        Some(&b"\0asm"[..]),
+        "lazy runtime compilation should persist the same wasm artifact shape as explicit builds"
+    );
+    let metadata_source = fs::read_to_string(
+        config_root
+            .join("cache/wasm")
+            .join(format!("{wasm_hash}.metadata.toml")),
+    )
+    .unwrap();
+    assert!(metadata_source.contains(&behavior_id));
+    assert!(metadata_source.contains(&wasm_hash));
+
+    let index_source =
+        fs::read_to_string(config_root.join("projects/default_project/behaviors.toml")).unwrap();
+    assert!(index_source.contains("build_status = \"compiled\""));
+    assert!(index_source.contains(&wasm_hash));
+}
+
+#[test]
 fn behavior_build_compiles_tiny_source_and_hot_reloads_it() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)

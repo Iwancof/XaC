@@ -6,6 +6,7 @@ use xac_wasm::{
     DrillCommand, NetStoreOp,
 };
 
+use crate::behavior::{persist_compiled_behavior_cache, persist_project_behavior_index};
 use crate::cpu::FuelPolicy;
 use crate::Simulation;
 
@@ -233,12 +234,24 @@ impl Simulation {
         }
 
         let compiled = self.runtime.compile_wat(kind, &source)?;
+        {
+            let package = self
+                .behaviors
+                .get(behavior_id)
+                .ok_or_else(|| anyhow!("unknown behavior: {behavior_id}"))?;
+            persist_compiled_behavior_cache(&self.config_root, package, &compiled)?;
+        }
         let wasm_hash = compiled.wasm_hash().to_string();
+        let mut persist_index = false;
         if let Some(package) = self.behaviors.get_mut(behavior_id) {
             package.wasm_hash = Some(wasm_hash);
             if package.summary.build_status != "built" {
                 package.summary.build_status = "compiled".to_string();
             }
+            persist_index = !package.summary.builtin;
+        }
+        if persist_index {
+            persist_project_behavior_index(&self.config_root, &self.behaviors)?;
         }
         self.compiled_behaviors
             .insert(behavior_id.to_string(), compiled.clone());
