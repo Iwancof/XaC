@@ -17,6 +17,7 @@ use imports::{allowed_host_import, allowed_worlds};
 use imports::{ALL_BEHAVIOR_KINDS, HOST_IMPORT_SPECS};
 
 mod script;
+mod script_ast;
 use script::{
     compile_xac_script, is_wat_source, ATTACK_POLICY_ARMORED, ATTACK_POLICY_GRUNT,
     ATTACK_POLICY_LOWEST_HP, ATTACK_POLICY_NEAREST, ATTACK_POLICY_RUNNER,
