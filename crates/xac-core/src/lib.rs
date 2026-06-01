@@ -126,6 +126,13 @@ pub enum ItemKind {
     DronePart,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ItemMetadata {
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub stack_size: u32,
+}
+
 impl ItemKind {
     pub fn all() -> [Self; 5] {
         [
@@ -156,6 +163,44 @@ impl ItemKind {
             ItemKind::CpuPart => "cpu_part",
             ItemKind::DronePart => "drone_part",
         }
+    }
+
+    pub fn metadata(&self) -> ItemMetadata {
+        match self {
+            ItemKind::Ore => ItemMetadata {
+                id: "ore",
+                display_name: "Ore",
+                stack_size: 100,
+            },
+            ItemKind::Plate => ItemMetadata {
+                id: "plate",
+                display_name: "Plate",
+                stack_size: 100,
+            },
+            ItemKind::Ammo => ItemMetadata {
+                id: "ammo",
+                display_name: "Ammo",
+                stack_size: 100,
+            },
+            ItemKind::CpuPart => ItemMetadata {
+                id: "cpu_part",
+                display_name: "CPU Part",
+                stack_size: 50,
+            },
+            ItemKind::DronePart => ItemMetadata {
+                id: "drone_part",
+                display_name: "Drone Part",
+                stack_size: 50,
+            },
+        }
+    }
+
+    pub fn display_name(&self) -> &'static str {
+        self.metadata().display_name
+    }
+
+    pub fn stack_size(&self) -> u32 {
+        self.metadata().stack_size
     }
 }
 
@@ -776,6 +821,18 @@ mod tests {
         Items(Vec<ItemKind>),
     }
 
+    #[derive(Debug, Deserialize)]
+    struct SharedResources {
+        item: Vec<SharedResourceItem>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct SharedResourceItem {
+        id: ItemKind,
+        display_name: String,
+        stack_size: u32,
+    }
+
     #[test]
     fn cpu_scaled_ticks_uses_core_speed_contract() {
         assert_eq!(cpu_scaled_ticks(8.0, 30), 30);
@@ -783,6 +840,29 @@ mod tests {
         assert_eq!(cpu_scaled_ticks(4.0, 30), 60);
         assert_eq!(cpu_scaled_ticks(800.0, 20), MIN_CPU_SCALED_TICKS);
         assert_eq!(cpu_scaled_ticks(0.0, 20), 200);
+    }
+
+    #[test]
+    fn shared_resource_manifest_matches_item_contract() {
+        let shared: SharedResources =
+            toml::from_str(include_str!("../../../assets/resources.toml")).unwrap();
+        assert_eq!(shared.item.len(), ItemKind::all().len());
+        let shared_by_id: std::collections::BTreeMap<_, _> = shared
+            .item
+            .iter()
+            .map(|item| (item.id.as_str(), item))
+            .collect();
+
+        for kind in ItemKind::all() {
+            let metadata = kind.metadata();
+            let shared = shared_by_id
+                .get(metadata.id)
+                .unwrap_or_else(|| panic!("missing resource metadata for {}", metadata.id));
+            assert_eq!(shared.display_name, metadata.display_name);
+            assert_eq!(shared.stack_size, metadata.stack_size);
+            assert_eq!(kind.display_name(), metadata.display_name);
+            assert_eq!(kind.stack_size(), metadata.stack_size);
+        }
     }
 
     #[test]

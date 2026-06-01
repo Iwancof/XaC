@@ -1,7 +1,8 @@
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { useEffect, useRef } from "react";
 import { blockFootprintSize } from "./gameMetadata";
-import type { Block, BlockKind, Direction, Enemy, GameSnapshot, ItemFlowEvent, ItemKind, Pos, Tile } from "./types";
+import { itemColor } from "./itemMetadata";
+import type { Block, BlockKind, Direction, Enemy, GameSnapshot, Pos, Tile } from "./types";
 
 type Overlay = "none" | "network" | "cpu" | "logistics" | "attack";
 
@@ -34,14 +35,6 @@ const ENEMY_COLORS = {
   runner: 0xf97316,
   armored: 0x7f1d1d,
   wire_cutter: 0xeab308
-};
-
-const ITEM_COLORS: Record<ItemKind, number> = {
-  ore: 0xd8a94a,
-  plate: 0xb9c2cf,
-  ammo: 0xf43f5e,
-  cpu_part: 0x36d399,
-  drone_part: 0x38bdf8
 };
 
 export function GridWorld({
@@ -291,13 +284,9 @@ function drawItemFlows(g: Graphics, snapshot: GameSnapshot) {
     const y = lerp(flow.from.y, flow.to.y, progress) * TILE;
     const alpha = 0.9 - progress * 0.45;
     const radius = Math.min(5, 2.5 + flow.amount * 0.35);
-    g.circle(x, y, radius).fill({ color: itemColor(flow), alpha });
+    g.circle(x, y, radius).fill({ color: itemColor(flow.item), alpha });
     g.circle(x, y, radius + 1).stroke({ width: 1, color: 0x0e1214, alpha: 0.55 });
   }
-}
-
-function itemColor(flow: ItemFlowEvent) {
-  return ITEM_COLORS[flow.item];
 }
 
 function drawEnemies(g: Graphics, enemies: Enemy[], selectedId: string | null) {

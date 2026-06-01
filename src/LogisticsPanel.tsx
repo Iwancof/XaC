@@ -1,4 +1,5 @@
 import { Route } from "lucide-react";
+import { displayItemKind } from "./itemMetadata";
 import type { GameSnapshot, ItemFlowEvent } from "./types";
 
 interface LogisticsPanelProps {
@@ -25,7 +26,7 @@ export function LogisticsPanel({ snapshot }: LogisticsPanelProps) {
           <div className="logistics-row job" key={job.id}>
             <span>{job.id}</span>
             <strong>
-              {job.item} x{job.amount}
+              {displayItemKind(job.item)} x{job.amount}
             </strong>
             <small>
               {job.pickup}
@@ -52,5 +53,5 @@ export function LogisticsPanel({ snapshot }: LogisticsPanelProps) {
 }
 
 function flowLabel(flow: ItemFlowEvent) {
-  return `${flow.item} x${flow.amount}`;
+  return `${displayItemKind(flow.item)} x${flow.amount}`;
 }

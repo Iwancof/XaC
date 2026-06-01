@@ -1,4 +1,5 @@
 import { Box, Code2, Copy, GitBranch, Hammer, RotateCw, Save, Trash2 } from "lucide-react";
+import { displayItemKind } from "./itemMetadata";
 import type {
   BehaviorRuntimeStats,
   BehaviorSource,
@@ -7,7 +8,9 @@ import type {
   BuildResult,
   Drone,
   Enemy,
-  GameSnapshot
+  GameSnapshot,
+  Inventory,
+  ItemKind
 } from "./types";
 
 interface InspectorProps {
@@ -82,14 +85,7 @@ export function Inspector({
             <span>Network</span>
             <strong>{selectedBlock.network_id ?? "local"}</strong>
           </div>
-          <div className="inventory">
-            {Object.entries(selectedBlock.inventory.items).map(([kind, amount]) => (
-              <span key={kind}>
-                {kind}: {amount}
-              </span>
-            ))}
-            {Object.keys(selectedBlock.inventory.items).length === 0 && <span>empty</span>}
-          </div>
+          <InventoryRows inventory={selectedBlock.inventory} emptyLabel="empty" />
           {selectedNetwork && (
             <div className="network-card">
               <span>network CPU {selectedNetwork.cpu_pool.toFixed(0)}</span>
@@ -184,16 +180,13 @@ export function Inspector({
               {selectedDrone.pos.x.toFixed(2)}, {selectedDrone.pos.y.toFixed(2)}
             </strong>
             <span>Job</span>
-            <strong>{selectedDrone.job ? `${selectedDrone.job.item} ${selectedDrone.job.amount}` : "none"}</strong>
+            <strong>
+              {selectedDrone.job
+                ? `${displayItemKind(selectedDrone.job.item)} ${selectedDrone.job.amount}`
+                : "none"}
+            </strong>
           </div>
-          <div className="inventory">
-            {Object.entries(selectedDrone.cargo.items).map(([kind, amount]) => (
-              <span key={kind}>
-                {kind}: {amount}
-              </span>
-            ))}
-            {Object.keys(selectedDrone.cargo.items).length === 0 && <span>empty cargo</span>}
-          </div>
+          <InventoryRows inventory={selectedDrone.cargo} emptyLabel="empty cargo" />
           {selectedDrone.behavior_runtime && <RuntimeStats stats={selectedDrone.behavior_runtime} />}
           {droneBehaviorRef && (
             <>
@@ -264,6 +257,20 @@ export function Inspector({
         </div>
       )}
     </section>
+  );
+}
+
+function InventoryRows({ inventory, emptyLabel }: { inventory: Inventory; emptyLabel: string }) {
+  const entries = Object.entries(inventory.items) as Array<[ItemKind, number]>;
+  return (
+    <div className="inventory">
+      {entries.map(([kind, amount]) => (
+        <span key={kind}>
+          {displayItemKind(kind)}: {amount}
+        </span>
+      ))}
+      {entries.length === 0 && <span>{emptyLabel}</span>}
+    </div>
   );
 }
 

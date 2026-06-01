@@ -37,6 +37,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.getByRole("button", { name: /Core/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Ore Drill/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Belt Conveyor/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Storage/ })).toBeVisible();
   const builtinBehaviorIds = await page.evaluate(() =>
     window.__XAC_TEST_STATE__?.snapshot().behaviors.map((behavior) => behavior.id)
   );
@@ -128,7 +129,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("flows");
   await expect(page.locator(".inspector")).toContainText("runtime tick");
   await expect(page.locator(".inspector")).toContainText("wasm mocked-was");
-  await expect(page.getByLabel("Logistics")).toContainText("ore x1");
+  await expect(page.getByLabel("Logistics")).toContainText("Ore x1");
   await expect(page.getByLabel("Logistics")).toContainText("conveyor_9 -> core_1");
   const oreFlows = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().item_flows ?? []);
   expect(oreFlows).toEqual(
@@ -144,7 +145,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".log-panel")).toContainText("over_budget with 40 fuel");
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
-  await expect(page.locator(".inspector")).toContainText("ore: 41");
+  await expect(page.locator(".inspector")).toContainText("Ore: 41");
   await expect(page.locator(".inspector")).toContainText("received ore");
 
   await canvas.click({ position: tileCenter(20, 30) });
@@ -185,6 +186,13 @@ mine
   await expect(page.locator(".inspector")).toContainText("Select a block");
   await expect(page.locator(".log-panel")).toContainText("deconstructed Drill");
 
+  await page.getByRole("button", { name: /Storage/ }).click();
+  await canvas.click({ position: tileCenter(20, 30) });
+  await expect(page.locator(".metrics")).toContainText("blocks 23");
+  await expect(page.locator(".inspector")).toContainText("storage");
+  await expect(page.locator(".inspector")).toContainText("empty");
+  await expect(page.locator(".log-panel")).toContainText("placed Storage at 20,30");
+
   const behaviorCalls = await page.evaluate(() => {
     return (
       window.__XAC_TEST_STATE__?.calls.filter((call) =>
@@ -200,11 +208,12 @@ mine
   const placeCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "place_block") ?? [];
   });
-  expect(placeCalls).toHaveLength(22);
+  expect(placeCalls).toHaveLength(23);
   expect(placeCalls[0].args).toEqual({ kind: "cpu_node", x: 19, y: 29, dir: "east" });
   expect(placeCalls.some((call) => call.args.kind === "wire" && call.args.x === 30 && call.args.y === 29)).toBe(true);
   expect(placeCalls.some((call) => call.args.kind === "conveyor" && call.args.x === 29 && call.args.y === 30)).toBe(true);
-  expect(placeCalls.at(-1)?.args).toEqual({ kind: "drill", x: 20, y: 30, dir: "east" });
+  expect(placeCalls.some((call) => call.args.kind === "storage" && call.args.x === 20 && call.args.y === 30)).toBe(true);
+  expect(placeCalls.at(-1)?.args).toEqual({ kind: "storage", x: 20, y: 30, dir: "east" });
 
   const rotateCalls = await page.evaluate(() => {
     return window.__XAC_TEST_STATE__?.calls.filter((call) => call.cmd === "rotate_block") ?? [];
