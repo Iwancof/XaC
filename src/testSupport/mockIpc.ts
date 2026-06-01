@@ -26,6 +26,7 @@ import type {
   Direction,
   Drone,
   Enemy,
+  EnemyKind,
   GameSnapshot,
   Inventory,
   ItemFlowEvent,
@@ -40,6 +41,19 @@ import type {
 
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
+const ENEMY_ATTACK_RANGE = 0.2;
+const ENEMY_ATTACK_DAMAGE: Record<EnemyKind, number> = {
+  grunt: 5,
+  runner: 5,
+  armored: 8,
+  wire_cutter: 5
+};
+const ENEMY_ATTACK_COOLDOWN_TICKS: Record<EnemyKind, number> = {
+  grunt: 20,
+  runner: 12,
+  armored: 28,
+  wire_cutter: 16
+};
 
 type CommandCall = {
   cmd: string;
@@ -302,6 +316,7 @@ function runTicks(count: number) {
         transferFrom(block);
       }
     }
+    runEnemies();
   }
 }
 
@@ -622,6 +637,44 @@ function dockedDroneCountInNetwork(blockIds: string[]) {
   return state.drones.filter((drone) => drone.state === "docked" && blockIds.includes(drone.home_port)).length;
 }
 
+function runEnemies() {
+  for (const enemy of state.enemies) {
+    if (enemy.hp <= 0) continue;
+    const target = nearestEnemyTarget(enemy);
+    if (!target) continue;
+
+    enemy.target_id = target.block.id;
+    if (enemy.attack_cooldown > 0) {
+      enemy.attack_cooldown -= 1;
+    }
+
+    if (distance(enemy.pos, target.pos) <= ENEMY_ATTACK_RANGE) {
+      if (enemy.attack_cooldown === 0) {
+        target.block.hp = Math.max(0, target.block.hp - ENEMY_ATTACK_DAMAGE[enemy.kind]);
+        enemy.attack_cooldown = ENEMY_ATTACK_COOLDOWN_TICKS[enemy.kind];
+      } else {
+        target.block.status = `under attack by ${enemy.id}`;
+      }
+    } else {
+      enemy.pos = moveToward(enemy.pos, target.pos, enemy.move_speed);
+      target.block.status = `targeted by ${enemy.id}`;
+    }
+  }
+}
+
+function nearestEnemyTarget(enemy: Enemy) {
+  const targetKinds =
+    enemy.kind === "wire_cutter" ? new Set<BlockKind>(["wire", "cpu_node", "drone_port"]) : new Set<BlockKind>(["core"]);
+  return nearestBlockTarget(enemy.pos, (kind) => targetKinds.has(kind)) ?? nearestBlockTarget(enemy.pos, (kind) => kind === "core");
+}
+
+function nearestBlockTarget(origin: Pos, predicate: (kind: BlockKind) => boolean) {
+  return state.blocks
+    .filter((block) => predicate(block.kind))
+    .map((block) => ({ block, pos: closestPointOnBlock(origin, block) }))
+    .sort((a, b) => distance(origin, a.pos) - distance(origin, b.pos))[0];
+}
+
 function buildTiles(blocks: Block[]): Tile[] {
   const tiles: Tile[] = [];
   for (let y = 0; y < MAP_HEIGHT; y += 1) {
@@ -685,6 +738,38 @@ function blockCenter(block: Block): Pos {
     x: block.pos.x + width / 2,
     y: block.pos.y + height / 2
   };
+}
+
+function closestPointOnBlock(origin: Pos, block: Block): Pos {
+  const [width, height] = blockFootprintSize(block.kind);
+  return {
+    x: clamp(origin.x, block.pos.x, block.pos.x + width),
+    y: clamp(origin.y, block.pos.y, block.pos.y + height)
+  };
+}
+
+function distance(a: Pos, b: Pos) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.hypot(dx, dy);
+}
+
+function moveToward(origin: Pos, target: Pos, maxDistance: number): Pos {
+  const dx = target.x - origin.x;
+  const dy = target.y - origin.y;
+  const currentDistance = Math.hypot(dx, dy);
+  if (currentDistance <= maxDistance || currentDistance === 0) {
+    return { ...target };
+  }
+  const scale = maxDistance / currentDistance;
+  return {
+    x: origin.x + dx * scale,
+    y: origin.y + dy * scale
+  };
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function footprintPositions(kind: BlockKind, pos: Pos) {

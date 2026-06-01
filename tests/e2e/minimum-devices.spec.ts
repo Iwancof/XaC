@@ -11,8 +11,9 @@ declare global {
       calls: IpcCall[];
       snapshot: () => {
         behaviors: Array<{ id: string; source_path: string }>;
-        blocks: Array<{ id: string; kind: string; network_id: number | null; effective_cpu_rate: number }>;
+        blocks: Array<{ id: string; kind: string; hp: number; network_id: number | null; effective_cpu_rate: number }>;
         drones: Array<{ id: string; behavior_ref: string | null }>;
+        enemies: Array<{ id: string; pos: { x: number; y: number }; target_id: string | null }>;
         item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
         networks: Array<{
           cpu_pool: number;
@@ -77,6 +78,19 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".inspector")).toContainText("runner");
   await expect(page.locator(".inspector")).toContainText("28.50, 28.50");
   await expect(page.locator(".inspector")).toContainText("core_1");
+  await page.getByRole("button", { name: /Tick/ }).click();
+  await expect(page.locator(".inspector")).toContainText("28.60, 28.60");
+  const movedEnemy = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().enemies[0]);
+  expect(movedEnemy).toEqual(
+    expect.objectContaining({
+      id: "enemy_1",
+      target_id: "core_1",
+      pos: expect.objectContaining({
+        x: expect.closeTo(28.6, 0.02),
+        y: expect.closeTo(28.6, 0.02)
+      })
+    })
+  );
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
 
@@ -174,7 +188,11 @@ test("places minimum devices from the right block list and opens drill behavior"
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
   await expect(page.locator(".inspector")).toContainText("Ore: 41");
-  await expect(page.locator(".inspector")).toContainText("received ore");
+  await expect(page.locator(".inspector")).toContainText("under attack by enemy_1");
+  const defendedCore = await page.evaluate(() =>
+    window.__XAC_TEST_STATE__?.snapshot().blocks.find((block) => block.id === "core_1")
+  );
+  expect(defendedCore?.hp).toBeLessThan(500);
 
   await canvas.click({ position: tileCenter(20, 30) });
   await expect(page.locator(".inspector")).toContainText("drill");
