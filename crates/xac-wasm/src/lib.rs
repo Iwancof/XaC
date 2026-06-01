@@ -10,8 +10,10 @@ mod host;
 use host::define_host_imports;
 mod host_common;
 mod host_cost;
+mod host_drill;
 mod host_helpers;
 mod host_net;
+mod host_router;
 
 mod imports;
 use imports::{allowed_host_import, allowed_worlds};

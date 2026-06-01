@@ -1,190 +1,28 @@
 use anyhow::Result;
 use wasmtime::{Caller, Linker};
-use xac_core::{Direction, Pos};
+use xac_core::Pos;
 
 use super::abi_codes::{
-    direction_from_code, dropoff_tag_from_code, enemy_kind_code, item_code, item_from_code,
-    recipe_code, recipe_from_code, recipe_index,
+    dropoff_tag_from_code, enemy_kind_code, item_from_code, recipe_code, recipe_from_code,
+    recipe_index,
 };
 use super::host_common::define_common_imports;
+use super::host_drill::define_drill_imports;
 use super::host_helpers::{
     charge_host, drone_loadable_amount, drone_unloadable_amount, push_assembler_command,
-    push_drill_command, push_drone_port_command, router_any_output_available,
-    router_item_output_available, router_output_available, turret_can_attack_scan_index,
+    push_drone_port_command, turret_can_attack_scan_index,
 };
 use super::host_net::define_net_imports;
+use super::host_router::define_router_imports;
 use super::{
     attack_policy_to_rules, host_cost, AssemblerCommand, BehaviorHostState, BehaviorIntent,
-    DrillCommand, DroneCommand, DronePortCommand, TargetRule,
+    DroneCommand, DronePortCommand, TargetRule,
 };
 
 pub(super) fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
     define_common_imports(linker)?;
-    linker.func_wrap(
-        "xac:drill",
-        "output_blocked",
-        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
-            if !charge_host(&mut caller, host_cost::OUTPUT_BLOCKED) {
-                return 0;
-            }
-            if caller.data().input.output_blocked {
-                1
-            } else {
-                0
-            }
-        },
-    )?;
-    linker.func_wrap(
-        "xac:drill",
-        "mine",
-        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
-            if !charge_host(&mut caller, host_cost::MINE) {
-                return 0;
-            }
-            if !caller.data().input.drill_can_mine {
-                return 0;
-            }
-            push_drill_command(caller.data_mut(), DrillCommand::Mine);
-            1
-        },
-    )?;
-    linker.func_wrap(
-        "xac:drill",
-        "output",
-        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
-            if !charge_host(&mut caller, host_cost::DRILL_OUTPUT) {
-                return 0;
-            }
-            let Some(item) = item_from_code(item) else {
-                return 0;
-            };
-            if !caller
-                .data()
-                .input
-                .drill_output_available
-                .get(&item)
-                .copied()
-                .unwrap_or(false)
-            {
-                return 0;
-            }
-            push_drill_command(caller.data_mut(), DrillCommand::Output { item });
-            1
-        },
-    )?;
-    linker.func_wrap(
-        "xac:drill",
-        "ore_kind",
-        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
-            if !charge_host(&mut caller, host_cost::ORE_KIND) {
-                return -1;
-            }
-            caller
-                .data()
-                .input
-                .drill_ore_kind
-                .as_ref()
-                .map(item_code)
-                .unwrap_or(-1)
-        },
-    )?;
-    linker.func_wrap(
-        "xac:router",
-        "push_any",
-        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
-            if !charge_host(&mut caller, host_cost::PUSH) {
-                return 0;
-            }
-            if !router_any_output_available(caller.data()) {
-                return 0;
-            }
-            caller.data_mut().intent = BehaviorIntent::Router {
-                item: None,
-                preferred: Direction::all().to_vec(),
-            };
-            1
-        },
-    )?;
-    linker.func_wrap(
-        "xac:router",
-        "push_dir",
-        |mut caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
-            if !charge_host(&mut caller, host_cost::PUSH) {
-                return 0;
-            }
-            let Some(dir) = direction_from_code(dir) else {
-                return 0;
-            };
-            if !router_output_available(caller.data(), dir) {
-                return 0;
-            }
-            caller.data_mut().intent = BehaviorIntent::Router {
-                item: None,
-                preferred: vec![dir],
-            };
-            1
-        },
-    )?;
-    linker.func_wrap(
-        "xac:router",
-        "push_item_dir",
-        |mut caller: Caller<'_, BehaviorHostState>, item: i32, dir: i32| -> i32 {
-            if !charge_host(&mut caller, host_cost::PUSH_ITEM) {
-                return 0;
-            }
-            let Some(item) = item_from_code(item) else {
-                return 0;
-            };
-            let Some(dir) = direction_from_code(dir) else {
-                return 0;
-            };
-            if !router_item_output_available(caller.data(), &item, dir) {
-                return 0;
-            }
-            caller.data_mut().intent = BehaviorIntent::Router {
-                item: Some(item),
-                preferred: vec![dir],
-            };
-            1
-        },
-    )?;
-    linker.func_wrap(
-        "xac:router",
-        "output_available",
-        |mut caller: Caller<'_, BehaviorHostState>, dir: i32| -> i32 {
-            if !charge_host(&mut caller, host_cost::OUTPUT_AVAILABLE) {
-                return 0;
-            }
-            let Some(dir) = direction_from_code(dir) else {
-                return 0;
-            };
-            if router_output_available(caller.data(), dir) {
-                1
-            } else {
-                0
-            }
-        },
-    )?;
-    linker.func_wrap(
-        "xac:router",
-        "output_item_available",
-        |mut caller: Caller<'_, BehaviorHostState>, item: i32, dir: i32| -> i32 {
-            if !charge_host(&mut caller, host_cost::OUTPUT_ITEM_AVAILABLE) {
-                return 0;
-            }
-            let Some(item) = item_from_code(item) else {
-                return 0;
-            };
-            let Some(dir) = direction_from_code(dir) else {
-                return 0;
-            };
-            if router_item_output_available(caller.data(), &item, dir) {
-                1
-            } else {
-                0
-            }
-        },
-    )?;
+    define_drill_imports(linker)?;
+    define_router_imports(linker)?;
     linker.func_wrap(
         "xac:assembler",
         "set_recipe",
