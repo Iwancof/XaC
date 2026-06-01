@@ -26,7 +26,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await page.goto("/");
 
   await expect(page.getByText("Blocks", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Core/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Core/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Ore Drill/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Belt Conveyor/ })).toBeVisible();
 

@@ -103,6 +103,11 @@ impl Simulation {
         pos: Pos,
         dir: Direction,
     ) -> Result<GameSnapshot> {
+        if kind == BlockKind::Core {
+            return Err(anyhow!(
+                "core is the initial 4x4 objective and cannot be placed"
+            ));
+        }
         let footprint = footprint_positions(kind, pos);
         if footprint.iter().any(|tile| !self.in_bounds(*tile)) {
             return Err(anyhow!("position is outside the map"));
@@ -463,6 +468,24 @@ mod tests {
         let err = sim.deconstruct_block(&core_id).unwrap_err();
         assert!(err.to_string().contains("core cannot be deconstructed"));
         assert!(sim.blocks.contains_key(&core_id));
+    }
+
+    #[test]
+    fn core_cannot_be_placed_after_world_seed() {
+        let mut sim = test_sim("sim");
+        let err = sim
+            .place_block(BlockKind::Core, Pos { x: 10, y: 10 }, Direction::East)
+            .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("core is the initial 4x4 objective"));
+        assert_eq!(
+            sim.blocks
+                .values()
+                .filter(|block| block.kind == BlockKind::Core)
+                .count(),
+            1
+        );
     }
 
     #[test]

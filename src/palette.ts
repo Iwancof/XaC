@@ -1,7 +1,6 @@
 import type { BuildPaletteItem } from "./types";
 
 export const PALETTE: BuildPaletteItem[] = [
-  { kind: "core", label: "Core", category: "Base" },
   { kind: "drill", label: "Ore Drill", category: "Mining", dir: "east" },
   { kind: "conveyor", label: "Belt Conveyor", category: "Logistics", dir: "east" },
   { kind: "wire", label: "Wire", category: "Network" },

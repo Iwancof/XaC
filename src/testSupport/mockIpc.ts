@@ -181,6 +181,9 @@ function gameStatus(blocks: Block[], networks: Network[], enemies: Enemy[]) {
 }
 
 function placeBlock({ kind, x, y, dir }: { kind: BlockKind; x: number; y: number; dir: Direction }) {
+  if (kind === "core") {
+    throw new Error("core is the initial 4x4 objective and cannot be placed");
+  }
   const pos = { x, y };
   const footprint = footprintPositions(kind, pos);
   if (footprint.some((tile) => !inBounds(tile))) {
