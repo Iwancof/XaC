@@ -28,10 +28,17 @@ import {
   distance,
   footprintPositions,
   moveToward,
-  rotateDirection,
-  step
+  rotateDirection
 } from "./mockGeometry";
 import { addItem, inventoryCount, inventoryFree, inventoryTotal, removeItem } from "./mockInventory";
+import {
+  networkBlocks,
+  networkStockCount,
+  outputAvailable,
+  outputBlocked,
+  transferFrom,
+  type MockLogisticsContext
+} from "./mockLogistics";
 import { recomputeNetworks } from "./mockNetwork";
 import { validateMockBehaviorBuild } from "./mockBehaviorValidator";
 import type {
@@ -348,7 +355,7 @@ function runTicks(count: number) {
     }
     for (const block of state.blocks) {
       if (block.kind === "drill" || block.kind === "conveyor" || block.kind === "assembler") {
-        transferFrom(block);
+        transferFrom(logisticsContext(), block);
       }
     }
     runMockDrones();
@@ -783,37 +790,6 @@ function inBounds(pos: Pos) {
   return pos.x >= 0 && pos.y >= 0 && pos.x < MAP_WIDTH && pos.y < MAP_HEIGHT;
 }
 
-function transferFrom(block: Block, dir = block.dir, itemFilter: ItemKind | null = null) {
-  const item = Object.entries(block.inventory.items).find(
-    ([kind, amount]) => (amount ?? 0) > 0 && (!itemFilter || kind === itemFilter)
-  );
-  if (!item) return false;
-  const [kind, amount] = item as [ItemKind, number];
-  const dst = blockAt(state.blocks, step(block.pos, dir));
-  if (!dst || !canAcceptItem(dst.kind, kind) || inventoryTotal(dst.inventory) >= dst.inventory.capacity) return false;
-  block.inventory.items[kind] = Math.max(0, amount - 1);
-  if (block.inventory.items[kind] === 0) delete block.inventory.items[kind];
-  addItem(dst.inventory, kind, 1);
-  block.status = `sent ${kind}`;
-  dst.status = `received ${kind}`;
-  recordItemFlow(block.id, dst.id, kind, 1, blockCenter(block), blockCenter(dst));
-  return true;
-}
-
-function outputBlocked(block: Block) {
-  const dst = blockAt(state.blocks, step(block.pos, block.dir));
-  return !dst || !canAcceptItem(dst.kind, "ore") || inventoryTotal(dst.inventory) >= dst.inventory.capacity;
-}
-
-function outputAvailable(block: Block, dir: Direction, itemFilter: ItemKind | null = null) {
-  const item = Object.entries(block.inventory.items).find(
-    ([kind, amount]) => (amount ?? 0) > 0 && (!itemFilter || kind === itemFilter)
-  )?.[0] as ItemKind | undefined;
-  if (!item) return false;
-  const dst = blockAt(state.blocks, step(block.pos, dir));
-  return Boolean(dst && canAcceptItem(dst.kind, item) && inventoryTotal(dst.inventory) < dst.inventory.capacity);
-}
-
 function usedBy(behaviorId: string) {
   return (
     state.blocks.filter((block) => block.behavior_ref === behaviorId).length +
@@ -834,12 +810,12 @@ function runMockBehavior(block: Block) {
   recordRuntime(block, fuelBudget, fuelSpent, fuelBudget - fuelSpent, "mocked-wasm-hash");
   const source = block.behavior_ref ? state.behaviors[block.behavior_ref]?.source ?? "" : "";
   return evaluateMockBehaviorScript(block, source, {
-    outputBlocked: () => outputBlocked(block),
-    outputAvailable: (dir, item) => outputAvailable(block, dir, item),
+    outputBlocked: () => outputBlocked(logisticsContext(), block),
+    outputAvailable: (dir, item) => outputAvailable(logisticsContext(), block, dir, item),
     terrainAtSelf: () => terrainAt(block.pos),
     visibleTurretTargetCount: () => visibleTurretTargets(block).length,
     canAttackTurretIndex: (index) => Boolean(visibleTurretTargets(block)[index]),
-    stockCount: (item) => networkStockCount(block, item),
+    stockCount: (item) => networkStockCount(state.blocks, block, item),
     dockedDroneCount: () => dockedDroneCountAtPort(block.id),
     pendingJobCount: () => state.pendingJobs.length
   });
@@ -847,7 +823,7 @@ function runMockBehavior(block: Block) {
 
 function applyMockBehavior(block: Block, behavior: MockBehaviorResult) {
   if (behavior.mine) runMockDrill(block);
-  if (behavior.output) transferFrom(block, behavior.output.dir, behavior.output.item);
+  if (behavior.output) transferFrom(logisticsContext(), block, behavior.output.dir, behavior.output.item);
   if (behavior.router) runMockRouter(block, behavior.router);
   if (behavior.assembler) runMockAssembler(block, behavior.assembler);
   if (behavior.turret) runMockTurret(block, behavior.turret.priority);
@@ -855,7 +831,7 @@ function applyMockBehavior(block: Block, behavior: MockBehaviorResult) {
 }
 
 function runMockDrill(block: Block) {
-  if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(block)) return;
+  if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(logisticsContext(), block)) return;
   block.progress += 1;
   if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
     block.progress = 0;
@@ -868,7 +844,7 @@ function runMockDrill(block: Block) {
 function runMockRouter(block: Block, router: { item: ItemKind | null; dirs: Direction[] }) {
   if (block.kind !== "router") return;
   for (const dir of router.dirs) {
-    if (transferFrom(block, dir, router.item)) break;
+    if (transferFrom(logisticsContext(), block, dir, router.item)) break;
   }
 }
 
@@ -935,7 +911,7 @@ function createMockDeliveryJob(port: Block, item: ItemKind, amount: number, drop
   if (state.pendingJobs.some((job) => job.dropoff === dropoff.id && job.item === item)) return false;
   if (state.drones.some((drone) => drone.job?.dropoff === dropoff.id && drone.job.item === item)) return false;
 
-  const pickup = networkBlocks(port).find(
+  const pickup = networkBlocks(state.blocks, port).find(
     (block) =>
       ["core", "storage", "assembler", "drone_port"].includes(block.kind) &&
       inventoryCount(block.inventory, item) >= amount
@@ -1051,15 +1027,6 @@ function dockedDroneCountAtPort(portId: string) {
   return state.drones.filter((drone) => drone.home_port === portId && droneAtHome(drone)).length;
 }
 
-function networkStockCount(block: Block, item: ItemKind) {
-  return networkBlocks(block).reduce((sum, candidate) => sum + inventoryCount(candidate.inventory, item), 0);
-}
-
-function networkBlocks(block: Block) {
-  if (block.network_id === null) return [block];
-  return state.blocks.filter((candidate) => candidate.network_id === block.network_id);
-}
-
 function canMockProduce(block: Block, recipe: string | null) {
   if (recipe === "plate") {
     return inventoryCount(block.inventory, "ore") >= 2 && inventoryTotal(block.inventory) < block.inventory.capacity;
@@ -1114,6 +1081,13 @@ function recordRuntime(
     over_budget: overBudget,
     runtime_error: runtimeError,
     wasm_hash: wasmHash
+  };
+}
+
+function logisticsContext(): MockLogisticsContext {
+  return {
+    blocks: state.blocks,
+    recordItemFlow
   };
 }
 
