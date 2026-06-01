@@ -1,0 +1,46 @@
+{
+  "templates": [
+    {
+      "id": "rust_basic_drill",
+      "display_name": "Rust Basic Drill",
+      "language": "Rust",
+      "relative_path": "common/templates/rust/basic_drill.rs",
+      "source_lines": [
+        "// XaC Rust template sketch.",
+        "// Compile target: wasm32-unknown-unknown with XaC host imports.",
+        "",
+        "#[no_mangle]",
+        "pub extern \"C\" fn tick() {",
+        "    if output_blocked() != 0 {",
+        "        return;",
+        "    }",
+        "    mine();",
+        "}",
+        "",
+        "extern \"C\" {",
+        "    fn output_blocked() -> i32;",
+        "    fn mine() -> i32;",
+        "}"
+      ]
+    },
+    {
+      "id": "assemblyscript_basic_router",
+      "display_name": "AssemblyScript Basic Router",
+      "language": "AssemblyScript",
+      "relative_path": "common/templates/assemblyscript/basic_router.ts",
+      "source_lines": [
+        "// XaC AssemblyScript template sketch.",
+        "// Export tick and call XaC host imports from generated bindings.",
+        "",
+        "export function tick(): void {",
+        "  if (outputAvailable(1)) {",
+        "    push(1);",
+        "  }",
+        "}",
+        "",
+        "declare function outputAvailable(direction: i32): bool;",
+        "declare function push(direction: i32): i32;"
+      ]
+    }
+  ]
+}
