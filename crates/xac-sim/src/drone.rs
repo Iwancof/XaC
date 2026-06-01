@@ -1,5 +1,9 @@
 use xac_core::{
-    BehaviorKind, BlockKind, DeliveryJob, Drone, DroneState, Inventory, ItemKind, Pos, WorldPos,
+    BehaviorKind, BlockKind, DeliveryJob, Drone, DroneState, ItemKind, Pos, WorldPos,
+    CARRIER_DRONE_BATTERY_CAPACITY, CARRIER_DRONE_BATTERY_RECHARGE_PER_TICK,
+    CARRIER_DRONE_DOCKING_DISTANCE, CARRIER_DRONE_LOCAL_CPU_RATE,
+    CARRIER_DRONE_LOGIC_FUEL_CAPACITY, CARRIER_DRONE_LOGIC_RECHARGE_PER_TICK,
+    CARRIER_DRONE_MOVE_BATTERY_COST, CARRIER_DRONE_MOVE_SPEED, CARRIER_DRONE_WORK_BATTERY_COST,
 };
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, DroneCommand, DronePortCommand};
 
@@ -7,15 +11,10 @@ use crate::cpu::FuelPolicy;
 use crate::geometry::{block_center, closest_point_on_block};
 use crate::Simulation;
 
-const CARRIER_DRONE_LOCAL_CPU_RATE: f32 = 4.0;
 const DRONE_BEHAVIOR_FUEL_POLICY: FuelPolicy = FuelPolicy {
     min_invocation_fuel: 40,
     max_bank_seconds: 8.0,
 };
-const DRONE_MOVE_SPEED: f32 = 0.18;
-const DRONE_MOVE_BATTERY_COST: f32 = 0.05;
-const DRONE_WORK_BATTERY_COST: f32 = 0.1;
-const DOCKING_DISTANCE: f32 = 0.15;
 
 impl Simulation {
     pub(crate) fn run_drones(&mut self) {
@@ -81,17 +80,12 @@ impl Simulation {
         let id = self.make_id("drone");
         self.drones.insert(
             id.clone(),
-            Drone {
+            Drone::carrier(
                 id,
-                home_port: port_id.to_string(),
-                behavior_ref: Some("builtin.carrier_drone.basic".to_string()),
-                pos: block_center(&port),
-                battery: 100.0,
-                logic_fuel: 1000,
-                cargo: Inventory::with_capacity(20),
-                state: DroneState::Docked,
-                job: None,
-            },
+                port_id.to_string(),
+                Some("builtin.carrier_drone.basic".to_string()),
+                block_center(&port),
+            ),
         );
     }
 
@@ -246,10 +240,10 @@ impl Simulation {
             drone_logic_fuel: logic_fuel,
             drone_has_job: has_job,
             drone_has_pending_job: !self.pending_jobs.is_empty(),
-            drone_can_move: battery >= DRONE_MOVE_BATTERY_COST,
-            drone_can_return_to_port: at_home || battery >= DRONE_MOVE_BATTERY_COST,
-            drone_can_work: battery >= DRONE_WORK_BATTERY_COST,
-            drone_can_idle: at_home || battery >= DRONE_MOVE_BATTERY_COST,
+            drone_can_move: battery >= CARRIER_DRONE_MOVE_BATTERY_COST,
+            drone_can_return_to_port: at_home || battery >= CARRIER_DRONE_MOVE_BATTERY_COST,
+            drone_can_work: battery >= CARRIER_DRONE_WORK_BATTERY_COST,
+            drone_can_idle: at_home || battery >= CARRIER_DRONE_MOVE_BATTERY_COST,
             drone_cargo_free: cargo_free,
             drone_cargo_counts: cargo_counts,
             drone_contact_inventory_counts: contact_inventory_counts,
@@ -389,14 +383,14 @@ impl Simulation {
     }
 
     fn move_drone_to_tile(&mut self, drone_id: &str, pos: Pos) {
-        if !self.ensure_drone_battery(drone_id, DRONE_MOVE_BATTERY_COST) {
+        if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_MOVE_BATTERY_COST) {
             return;
         }
         let target = WorldPos::from_tile_center(pos);
         if let Some(drone) = self.drones.get_mut(drone_id) {
             drone.state = DroneState::Offline;
-            drone.pos = drone.pos.move_toward(target, DRONE_MOVE_SPEED);
-            drone.battery = (drone.battery - DRONE_MOVE_BATTERY_COST).max(0.0);
+            drone.pos = drone.pos.move_toward(target, CARRIER_DRONE_MOVE_SPEED);
+            drone.battery = (drone.battery - CARRIER_DRONE_MOVE_BATTERY_COST).max(0.0);
         }
         if self.drone_at_home(drone_id) {
             self.charge_docked_drone(drone_id);
@@ -416,7 +410,7 @@ impl Simulation {
         if requested == 0 {
             return;
         }
-        if !self.ensure_drone_battery(drone_id, DRONE_WORK_BATTERY_COST) {
+        if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_WORK_BATTERY_COST) {
             return;
         }
         let loaded = self
@@ -430,7 +424,7 @@ impl Simulation {
         let at_home = self.drone_at_home(drone_id);
         if let Some(drone) = self.drones.get_mut(drone_id) {
             drone.cargo.add(item.clone(), loaded);
-            drone.battery = (drone.battery - DRONE_WORK_BATTERY_COST).max(0.0);
+            drone.battery = (drone.battery - CARRIER_DRONE_WORK_BATTERY_COST).max(0.0);
             drone.state = if at_home {
                 DroneState::Docked
             } else {
@@ -460,7 +454,7 @@ impl Simulation {
         if requested == 0 {
             return;
         }
-        if !self.ensure_drone_battery(drone_id, DRONE_WORK_BATTERY_COST) {
+        if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_WORK_BATTERY_COST) {
             return;
         }
         let unloaded = self
@@ -469,7 +463,7 @@ impl Simulation {
             .map(|drone| {
                 let unloaded = drone.cargo.remove(&item, requested);
                 if unloaded > 0 {
-                    drone.battery = (drone.battery - DRONE_WORK_BATTERY_COST).max(0.0);
+                    drone.battery = (drone.battery - CARRIER_DRONE_WORK_BATTERY_COST).max(0.0);
                 }
                 unloaded
             })
@@ -497,7 +491,7 @@ impl Simulation {
             .values()
             .filter_map(|block| {
                 let distance = pos.distance(closest_point_on_block(pos, block));
-                (distance <= DOCKING_DISTANCE).then_some((distance, block.id.clone()))
+                (distance <= CARRIER_DRONE_DOCKING_DISTANCE).then_some((distance, block.id.clone()))
             })
             .min_by(|(a, _), (b, _)| a.total_cmp(b))
             .map(|(_, id)| id)
@@ -554,8 +548,10 @@ impl Simulation {
     fn charge_docked_drone(&mut self, drone_id: &str) {
         if let Some(drone) = self.drones.get_mut(drone_id) {
             drone.state = DroneState::Docked;
-            drone.battery = (drone.battery + 1.0).min(100.0);
-            drone.logic_fuel = (drone.logic_fuel + 10).min(1000);
+            drone.battery = (drone.battery + CARRIER_DRONE_BATTERY_RECHARGE_PER_TICK)
+                .min(CARRIER_DRONE_BATTERY_CAPACITY);
+            drone.logic_fuel = (drone.logic_fuel + CARRIER_DRONE_LOGIC_RECHARGE_PER_TICK)
+                .min(CARRIER_DRONE_LOGIC_FUEL_CAPACITY);
         }
     }
 
@@ -567,13 +563,13 @@ impl Simulation {
             self.charge_docked_drone(drone_id);
             return;
         }
-        if !self.ensure_drone_battery(drone_id, DRONE_MOVE_BATTERY_COST) {
+        if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_MOVE_BATTERY_COST) {
             return;
         }
         if let Some(drone) = self.drones.get_mut(drone_id) {
             drone.state = DroneState::Returning;
-            drone.pos = drone.pos.move_toward(home_pos, DRONE_MOVE_SPEED);
-            drone.battery = (drone.battery - DRONE_MOVE_BATTERY_COST).max(0.0);
+            drone.pos = drone.pos.move_toward(home_pos, CARRIER_DRONE_MOVE_SPEED);
+            drone.battery = (drone.battery - CARRIER_DRONE_MOVE_BATTERY_COST).max(0.0);
         }
     }
 
@@ -583,7 +579,7 @@ impl Simulation {
         };
         self.drones
             .get(drone_id)
-            .map(|drone| drone.pos.distance(home_pos) <= DOCKING_DISTANCE)
+            .map(|drone| drone.pos.distance(home_pos) <= CARRIER_DRONE_DOCKING_DISTANCE)
             .unwrap_or(false)
     }
 
@@ -603,15 +599,15 @@ impl Simulation {
         };
 
         let mut completed = false;
-        if !self.ensure_drone_battery(drone_id, DRONE_WORK_BATTERY_COST) {
+        if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_WORK_BATTERY_COST) {
             return;
         }
         if let Some(drone) = self.drones.get_mut(drone_id) {
-            drone.battery = (drone.battery - DRONE_WORK_BATTERY_COST).max(0.0);
+            drone.battery = (drone.battery - CARRIER_DRONE_WORK_BATTERY_COST).max(0.0);
             drone.logic_fuel = drone.logic_fuel.saturating_sub(1);
             if drone.cargo.count(&job.item) == 0 {
                 if let Some(pickup_pos) = pickup_pos {
-                    if drone.pos.distance(pickup_pos) <= DOCKING_DISTANCE {
+                    if drone.pos.distance(pickup_pos) <= CARRIER_DRONE_DOCKING_DISTANCE {
                         let loaded = self
                             .blocks
                             .get_mut(&job.pickup)
@@ -623,12 +619,12 @@ impl Simulation {
                             drone.cargo.add(job.item.clone(), loaded);
                         }
                     } else {
-                        drone.pos = drone.pos.move_toward(pickup_pos, DRONE_MOVE_SPEED);
+                        drone.pos = drone.pos.move_toward(pickup_pos, CARRIER_DRONE_MOVE_SPEED);
                     }
                 } else {
                     completed = true;
                 }
-            } else if drone.pos.distance(dropoff_pos) <= DOCKING_DISTANCE {
+            } else if drone.pos.distance(dropoff_pos) <= CARRIER_DRONE_DOCKING_DISTANCE {
                 let delivered = drone.cargo.remove(&job.item, job.amount);
                 if let Some(block) = self.blocks.get_mut(&job.dropoff) {
                     block.inventory.add(job.item.clone(), delivered);
@@ -636,7 +632,7 @@ impl Simulation {
                 }
                 completed = true;
             } else {
-                drone.pos = drone.pos.move_toward(dropoff_pos, DRONE_MOVE_SPEED);
+                drone.pos = drone.pos.move_toward(dropoff_pos, CARRIER_DRONE_MOVE_SPEED);
             }
         }
 

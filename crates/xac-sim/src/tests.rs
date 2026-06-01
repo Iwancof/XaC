@@ -3,7 +3,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use xac_core::{BehaviorKind, BehaviorSummary, DroneState, Inventory, WorldPos};
+use xac_core::{BehaviorKind, BehaviorSummary, DroneState, WorldPos};
 
 static TEST_CONFIG_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -1214,17 +1214,12 @@ fn docked_carrier_drone_banks_wasm_fuel_from_home_network_cpu() {
         let port = sim.blocks[&port_id].clone();
         sim.drones.insert(
             drone_id.clone(),
-            Drone {
-                id: drone_id.clone(),
-                home_port: port_id,
-                behavior_ref: Some(behavior_id),
-                pos: geometry::block_center(&port),
-                battery: 100.0,
-                logic_fuel: 1000,
-                cargo: Inventory::with_capacity(20),
-                state: DroneState::Docked,
-                job: None,
-            },
+            Drone::carrier(
+                drone_id.clone(),
+                port_id,
+                Some(behavior_id),
+                geometry::block_center(&port),
+            ),
         );
         let job_id = sim.make_id("job");
         sim.pending_jobs.push(DeliveryJob {
@@ -1269,17 +1264,12 @@ fn destroyed_drone_port_cleans_home_drone_and_delivery_jobs() {
     let port = sim.blocks[&port_id].clone();
     sim.drones.insert(
         drone_id.clone(),
-        Drone {
-            id: drone_id.clone(),
-            home_port: port_id.clone(),
-            behavior_ref: Some("builtin.carrier_drone.basic".to_string()),
-            pos: geometry::block_center(&port),
-            battery: 100.0,
-            logic_fuel: 1000,
-            cargo: Inventory::with_capacity(20),
-            state: DroneState::Docked,
-            job: None,
-        },
+        Drone::carrier(
+            drone_id.clone(),
+            port_id.clone(),
+            Some("builtin.carrier_drone.basic".to_string()),
+            geometry::block_center(&port),
+        ),
     );
     sim.fuel_banks.insert(drone_id.clone(), 50.0);
     let job_id = sim.make_id("job");
@@ -1326,17 +1316,12 @@ fn carrier_drone_low_level_script_loads_moves_and_unloads() {
     let pickup = sim.blocks[&pickup_id].clone();
     sim.drones.insert(
         drone_id.clone(),
-        Drone {
-            id: drone_id.clone(),
-            home_port: pickup_id.clone(),
-            behavior_ref: Some(behavior_id.clone()),
-            pos: geometry::block_center(&pickup),
-            battery: 100.0,
-            logic_fuel: 1000,
-            cargo: Inventory::with_capacity(20),
-            state: DroneState::Docked,
-            job: None,
-        },
+        Drone::carrier(
+            drone_id.clone(),
+            pickup_id.clone(),
+            Some(behavior_id.clone()),
+            geometry::block_center(&pickup),
+        ),
     );
     sim.fuel_banks.insert(drone_id.clone(), 100.0);
 
@@ -1387,20 +1372,14 @@ fn carrier_drone_low_level_physical_commands_require_battery() {
     let behavior_id = install_test_drone_behavior_source(&mut sim, "load ammo 5");
     let drone_id = sim.make_id("drone");
     let pickup_center = geometry::block_center(&sim.blocks[&pickup_id]);
-    sim.drones.insert(
+    let mut drone = Drone::carrier(
         drone_id.clone(),
-        Drone {
-            id: drone_id.clone(),
-            home_port: pickup_id.clone(),
-            behavior_ref: Some(behavior_id.clone()),
-            pos: pickup_center,
-            battery: 0.0,
-            logic_fuel: 1000,
-            cargo: Inventory::with_capacity(20),
-            state: DroneState::Docked,
-            job: None,
-        },
+        pickup_id.clone(),
+        Some(behavior_id.clone()),
+        pickup_center,
     );
+    drone.battery = 0.0;
+    sim.drones.insert(drone_id.clone(), drone);
     sim.fuel_banks.insert(drone_id.clone(), 100.0);
 
     sim.step_ticks(1);
@@ -1468,27 +1447,18 @@ fn carrier_drone_delivery_job_requires_battery_before_moving() {
     let drone_id = sim.make_id("drone");
     let start_pos = geometry::block_center(&sim.blocks[&dropoff_id]);
     let job_id = sim.make_id("job");
-    sim.drones.insert(
-        drone_id.clone(),
-        Drone {
-            id: drone_id.clone(),
-            home_port: pickup_id.clone(),
-            behavior_ref: None,
-            pos: start_pos,
-            battery: 0.0,
-            logic_fuel: 1000,
-            cargo: Inventory::with_capacity(20),
-            state: DroneState::Delivering,
-            job: Some(DeliveryJob {
-                id: job_id,
-                item: ItemKind::Ammo,
-                amount: 5,
-                pickup: pickup_id.clone(),
-                dropoff: dropoff_id,
-                priority: 50,
-            }),
-        },
-    );
+    let mut drone = Drone::carrier(drone_id.clone(), pickup_id.clone(), None, start_pos);
+    drone.battery = 0.0;
+    drone.state = DroneState::Delivering;
+    drone.job = Some(DeliveryJob {
+        id: job_id,
+        item: ItemKind::Ammo,
+        amount: 5,
+        pickup: pickup_id.clone(),
+        dropoff: dropoff_id,
+        priority: 50,
+    });
+    sim.drones.insert(drone_id.clone(), drone);
 
     sim.step_ticks(1);
 

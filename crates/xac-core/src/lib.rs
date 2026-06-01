@@ -343,6 +343,17 @@ pub enum DroneState {
     Offline,
 }
 
+pub const CARRIER_DRONE_LOCAL_CPU_RATE: f32 = 4.0;
+pub const CARRIER_DRONE_BATTERY_CAPACITY: f32 = 100.0;
+pub const CARRIER_DRONE_LOGIC_FUEL_CAPACITY: u64 = 1000;
+pub const CARRIER_DRONE_CARGO_CAPACITY: u32 = 20;
+pub const CARRIER_DRONE_MOVE_SPEED: f32 = 0.18;
+pub const CARRIER_DRONE_MOVE_BATTERY_COST: f32 = 0.05;
+pub const CARRIER_DRONE_WORK_BATTERY_COST: f32 = 0.1;
+pub const CARRIER_DRONE_DOCKING_DISTANCE: f32 = 0.15;
+pub const CARRIER_DRONE_BATTERY_RECHARGE_PER_TICK: f32 = 1.0;
+pub const CARRIER_DRONE_LOGIC_RECHARGE_PER_TICK: u64 = 10;
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LogLevel {
@@ -472,6 +483,27 @@ pub struct Drone {
     pub job: Option<DeliveryJob>,
 }
 
+impl Drone {
+    pub fn carrier(
+        id: EntityId,
+        home_port: EntityId,
+        behavior_ref: Option<BehaviorId>,
+        pos: WorldPos,
+    ) -> Self {
+        Self {
+            id,
+            home_port,
+            behavior_ref,
+            pos,
+            battery: CARRIER_DRONE_BATTERY_CAPACITY,
+            logic_fuel: CARRIER_DRONE_LOGIC_FUEL_CAPACITY,
+            cargo: Inventory::with_capacity(CARRIER_DRONE_CARGO_CAPACITY),
+            state: DroneState::Docked,
+            job: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Network {
     pub id: u32,
@@ -580,5 +612,27 @@ mod tests {
         assert!(!BlockKind::Drill.can_accept_item(&ItemKind::Ore));
         assert!(!BlockKind::Wire.can_accept_item(&ItemKind::Ore));
         assert!(!BlockKind::CpuNode.can_accept_item(&ItemKind::Ore));
+    }
+
+    #[test]
+    fn carrier_drone_constructor_uses_mvp_unit_contract() {
+        let drone = Drone::carrier(
+            "drone_1".to_string(),
+            "drone_port_1".to_string(),
+            Some("builtin.carrier_drone.basic".to_string()),
+            WorldPos { x: 4.5, y: 8.5 },
+        );
+
+        assert_eq!(drone.home_port, "drone_port_1");
+        assert_eq!(
+            drone.behavior_ref.as_deref(),
+            Some("builtin.carrier_drone.basic")
+        );
+        assert_eq!(drone.pos, WorldPos { x: 4.5, y: 8.5 });
+        assert_eq!(drone.battery, CARRIER_DRONE_BATTERY_CAPACITY);
+        assert_eq!(drone.logic_fuel, CARRIER_DRONE_LOGIC_FUEL_CAPACITY);
+        assert_eq!(drone.cargo.capacity, CARRIER_DRONE_CARGO_CAPACITY);
+        assert_eq!(drone.state, DroneState::Docked);
+        assert!(drone.job.is_none());
     }
 }
