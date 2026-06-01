@@ -363,6 +363,63 @@ fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
 }
 
 #[test]
+fn edited_drill_behavior_mines_and_belts_ore_to_four_by_four_core() {
+    let mut sim = test_sim("sim");
+
+    for x in 20..=30 {
+        sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
+        .unwrap();
+    for x in 21..30 {
+        sim.place_block(BlockKind::Conveyor, Pos { x, y: 30 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    let copied = sim.edit_builtin_copy(&drill_id).unwrap();
+    let behavior_id = copied.summary.id.clone();
+    let player_source = "if output_blocked return\nlog player drill online\nmine";
+
+    sim.save_behavior(&behavior_id, player_source.to_string())
+        .unwrap();
+    let build = sim.build_behavior(&behavior_id).unwrap();
+    assert!(build.success);
+    assert_eq!(
+        sim.open_behavior(&behavior_id).unwrap().source,
+        player_source
+    );
+    assert_eq!(
+        sim.blocks[&drill_id].behavior_ref.as_deref(),
+        Some(behavior_id.as_str()),
+        "editing the built-in drill should reassign the placed drill to the project behavior"
+    );
+
+    let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+    assert_eq!(
+        sim.block_id_at(Pos { x: 33, y: 33 }),
+        Some(core_id.clone()),
+        "the destination core should expose its full 4x4 footprint to belts"
+    );
+    let starting_core_ore = sim.blocks[&core_id].inventory.count(&ItemKind::Ore);
+
+    sim.step_ticks(500);
+
+    assert!(
+        sim.logs
+            .iter()
+            .any(|entry| { entry.source == drill_id && entry.message == "player drill online" }),
+        "the player-edited drill code should actually execute through the Wasm host log API"
+    );
+    assert!(
+        sim.blocks[&core_id].inventory.count(&ItemKind::Ore) > starting_core_ore,
+        "ore mined by the edited drill behavior should ride conveyors into the 4x4 core"
+    );
+}
+
+#[test]
 fn behavior_build_compiles_wat_and_save_invalidates_cache() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
