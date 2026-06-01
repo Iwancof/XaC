@@ -1314,6 +1314,138 @@ fn carrier_drone_low_level_script_loads_moves_and_unloads() {
 }
 
 #[test]
+fn carrier_drone_low_level_physical_commands_require_battery() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Storage, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let pickup_id = sim.selected_id.clone().unwrap();
+    sim.blocks
+        .get_mut(&pickup_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ammo, 6);
+    sim.place_block(BlockKind::Storage, Pos { x: 35, y: 30 }, Direction::East)
+        .unwrap();
+    let dropoff_id = sim.selected_id.clone().unwrap();
+    let behavior_id = install_test_drone_behavior_source(&mut sim, "load ammo 5");
+    let drone_id = sim.make_id("drone");
+    let pickup_center = geometry::block_center(&sim.blocks[&pickup_id]);
+    sim.drones.insert(
+        drone_id.clone(),
+        Drone {
+            id: drone_id.clone(),
+            home_port: pickup_id.clone(),
+            behavior_ref: Some(behavior_id.clone()),
+            pos: pickup_center,
+            battery: 0.0,
+            logic_fuel: 1000,
+            cargo: Inventory::with_capacity(20),
+            state: DroneState::Docked,
+            job: None,
+        },
+    );
+    sim.fuel_banks.insert(drone_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    assert_eq!(
+        sim.drones[&drone_id].cargo.count(&ItemKind::Ammo),
+        0,
+        "load should not move inventory into cargo with an empty battery"
+    );
+    assert_eq!(
+        sim.blocks[&pickup_id].inventory.count(&ItemKind::Ammo),
+        6,
+        "load should not remove block inventory with an empty battery"
+    );
+
+    set_test_drone_behavior_source(&mut sim, &behavior_id, "move_to 35 30");
+    let start_pos = sim.drones[&drone_id].pos;
+    sim.drones.get_mut(&drone_id).unwrap().battery = 0.0;
+    sim.fuel_banks.insert(drone_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    assert!(
+        sim.drones[&drone_id].pos.distance(start_pos) <= f32::EPSILON,
+        "move_to should not change position with an empty battery"
+    );
+
+    set_test_drone_behavior_source(&mut sim, &behavior_id, "unload ammo 5");
+    {
+        let drone = sim.drones.get_mut(&drone_id).unwrap();
+        drone.pos = geometry::block_center(&sim.blocks[&dropoff_id]);
+        drone.battery = 0.0;
+        drone.cargo.add(ItemKind::Ammo, 5);
+    }
+    sim.fuel_banks.insert(drone_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    assert_eq!(
+        sim.drones[&drone_id].cargo.count(&ItemKind::Ammo),
+        5,
+        "unload should leave cargo untouched with an empty battery"
+    );
+    assert_eq!(
+        sim.blocks[&dropoff_id].inventory.count(&ItemKind::Ammo),
+        0,
+        "unload should not mutate block inventory with an empty battery"
+    );
+}
+
+#[test]
+fn carrier_drone_delivery_job_requires_battery_before_moving() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Storage, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let pickup_id = sim.selected_id.clone().unwrap();
+    sim.blocks
+        .get_mut(&pickup_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ammo, 6);
+    sim.place_block(BlockKind::Storage, Pos { x: 35, y: 30 }, Direction::East)
+        .unwrap();
+    let dropoff_id = sim.selected_id.clone().unwrap();
+    let drone_id = sim.make_id("drone");
+    let start_pos = geometry::block_center(&sim.blocks[&dropoff_id]);
+    let job_id = sim.make_id("job");
+    sim.drones.insert(
+        drone_id.clone(),
+        Drone {
+            id: drone_id.clone(),
+            home_port: pickup_id.clone(),
+            behavior_ref: None,
+            pos: start_pos,
+            battery: 0.0,
+            logic_fuel: 1000,
+            cargo: Inventory::with_capacity(20),
+            state: DroneState::Delivering,
+            job: Some(DeliveryJob {
+                id: job_id,
+                item: ItemKind::Ammo,
+                amount: 5,
+                pickup: pickup_id.clone(),
+                dropoff: dropoff_id,
+                priority: 50,
+            }),
+        },
+    );
+
+    sim.step_ticks(1);
+
+    let drone = &sim.drones[&drone_id];
+    assert!(
+        drone.pos.distance(start_pos) <= f32::EPSILON,
+        "delivery job movement should not advance with an empty battery"
+    );
+    assert_eq!(drone.state, DroneState::Offline);
+    assert_eq!(drone.cargo.count(&ItemKind::Ammo), 0);
+    assert_eq!(sim.blocks[&pickup_id].inventory.count(&ItemKind::Ammo), 6);
+}
+
+#[test]
 fn wire_cutter_breaks_wire_and_splits_cpu_network() {
     let mut sim = test_sim("sim");
     for x in 20..=30 {
