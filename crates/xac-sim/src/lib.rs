@@ -476,6 +476,63 @@ mod tests {
     }
 
     #[test]
+    fn network_cpu_is_shared_across_active_devices() {
+        let mut sim = test_sim("sim");
+
+        sim.place_block(BlockKind::Drill, Pos { x: 29, y: 30 }, Direction::East)
+            .unwrap();
+        let drill_id = sim.selected_id.clone().unwrap();
+        let initial_network_id = sim.blocks[&drill_id].network_id.unwrap();
+        let initial_network = sim.networks[&initial_network_id].clone();
+        let initial_rate = sim.blocks[&drill_id].effective_cpu_rate;
+
+        assert_eq!(
+            initial_network.cpu_pool,
+            BlockKind::Core.network_cpu_output()
+        );
+        assert_eq!(initial_network.active_devices, 1);
+        assert_eq!(initial_network.effective_per_device, 120.0);
+        assert_eq!(
+            initial_rate,
+            BlockKind::Drill.local_cpu_rate() + initial_network.effective_per_device
+        );
+
+        sim.place_block(BlockKind::Router, Pos { x: 29, y: 31 }, Direction::East)
+            .unwrap();
+        let router_id = sim.selected_id.clone().unwrap();
+        let shared_network_id = sim.blocks[&drill_id].network_id.unwrap();
+        let shared_network = sim.networks[&shared_network_id].clone();
+        let shared_drill_rate = sim.blocks[&drill_id].effective_cpu_rate;
+
+        assert_eq!(shared_network.active_devices, 2);
+        assert_eq!(shared_network.effective_per_device, 60.0);
+        assert!(
+            shared_drill_rate < initial_rate,
+            "adding another programmable device should thin the shared CPU rate"
+        );
+        assert_eq!(
+            sim.blocks[&router_id].effective_cpu_rate,
+            BlockKind::Router.local_cpu_rate() + shared_network.effective_per_device
+        );
+
+        sim.place_block(BlockKind::CpuNode, Pos { x: 34, y: 30 }, Direction::East)
+            .unwrap();
+        let boosted_network_id = sim.blocks[&drill_id].network_id.unwrap();
+        let boosted_network = sim.networks[&boosted_network_id].clone();
+
+        assert_eq!(
+            boosted_network.cpu_pool,
+            BlockKind::Core.network_cpu_output() + BlockKind::CpuNode.network_cpu_output()
+        );
+        assert_eq!(boosted_network.active_devices, 2);
+        assert_eq!(boosted_network.effective_per_device, 100.0);
+        assert!(
+            sim.blocks[&drill_id].effective_cpu_rate > shared_drill_rate,
+            "adding cpu_node should increase the share without becoming an active device"
+        );
+    }
+
+    #[test]
     fn builtin_copy_is_editable_and_reassigned() {
         let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)

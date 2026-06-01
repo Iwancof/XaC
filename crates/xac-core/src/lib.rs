@@ -234,6 +234,15 @@ impl BlockKind {
         }
     }
 
+    pub fn network_cpu_output(self) -> f32 {
+        match self {
+            BlockKind::Core => 120.0,
+            BlockKind::CpuNode => 80.0,
+            BlockKind::DronePort => 20.0,
+            _ => 0.0,
+        }
+    }
+
     pub fn footprint_size(self) -> (i32, i32) {
         match self {
             BlockKind::Core => (4, 4),

@@ -33,12 +33,7 @@ impl Simulation {
             let cpu_pool = block_ids
                 .iter()
                 .filter_map(|id| self.blocks.get(id))
-                .map(|b| match b.kind {
-                    BlockKind::Core => 120.0,
-                    BlockKind::CpuNode => 80.0,
-                    BlockKind::DronePort => 20.0,
-                    _ => 0.0,
-                })
+                .map(|block| block.kind.network_cpu_output())
                 .sum::<f32>();
             let active_devices = block_ids
                 .iter()

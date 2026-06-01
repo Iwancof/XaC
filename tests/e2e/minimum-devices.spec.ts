@@ -84,6 +84,8 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("net CPU 200");
   await expect(page.locator(".inspector")).toContainText("drill");
   await expect(page.locator(".inspector")).toContainText("network CPU 200");
+  await expect(page.locator(".inspector")).toContainText("active 1");
+  await expect(page.locator(".inspector")).toContainText("share 200.0");
   await expect(page.locator(".log-panel")).toContainText("placed Drill at 20,30");
 
   await page.getByRole("button", { name: /\+40/ }).click();
