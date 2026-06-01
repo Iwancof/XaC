@@ -543,7 +543,9 @@ pub(super) fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Res
         "xac:turret",
         "attack_best",
         |mut caller: Caller<'_, BehaviorHostState>, policy: i32| -> i32 {
-            if !charge_host(&mut caller, host_cost::ATTACK_BEST) {
+            let candidate_count = caller.data().input.turret_visible_enemy_count.max(0) as u64;
+            let cost = host_cost::ATTACK_BEST.saturating_add(candidate_count);
+            if !charge_host(&mut caller, cost) {
                 return 0;
             }
             if caller.data().input.ammo_count <= 0 {

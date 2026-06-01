@@ -1863,6 +1863,25 @@ fn host_api_cost_can_exhaust_behavior_budget() {
             [TargetRule::LowestHp, TargetRule::Nearest]
         )
     ));
+
+    let crowded_scan = BehaviorHostInput {
+        ammo_count: 5,
+        turret_visible_enemy_count: 3,
+        ..Default::default()
+    };
+    let eval = runtime
+        .evaluate_compiled(&compiled, host_cost::ATTACK_BEST + 2, crowded_scan.clone())
+        .unwrap();
+    assert!(
+        eval.over_budget,
+        "attack_best should charge one extra fuel per visible enemy candidate"
+    );
+
+    let eval = runtime
+        .evaluate_compiled(&compiled, 40, crowded_scan)
+        .unwrap();
+    assert!(!eval.over_budget);
+    assert!(eval.fuel_spent >= host_cost::ATTACK_BEST + 3);
 }
 
 #[test]

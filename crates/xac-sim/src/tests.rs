@@ -1334,6 +1334,91 @@ fn local_cpu_banks_fuel_until_api_heavy_behavior_can_run() {
 }
 
 #[test]
+fn crowded_attack_best_needs_network_cpu_budget() {
+    fn spawn_static_grunts(sim: &mut Simulation, count: usize, pos: WorldPos) {
+        for _ in 0..count {
+            let enemy_id = sim.make_id("enemy");
+            let mut enemy = combat::enemy_at(enemy_id.clone(), EnemyKind::Grunt, pos);
+            enemy.move_speed = 0.0;
+            sim.enemies.insert(enemy_id, enemy);
+        }
+    }
+
+    let mut local_sim = test_sim("crowded-local");
+    local_sim
+        .place_block(BlockKind::Turret, Pos { x: 42, y: 32 }, Direction::East)
+        .unwrap();
+    let local_turret_id = local_sim.selected_id.clone().unwrap();
+    assign_script(
+        &mut local_sim,
+        &local_turret_id,
+        "if ammo_count > 0 attack_best lowest_hp",
+    );
+    local_sim
+        .blocks
+        .get_mut(&local_turret_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ammo, 50);
+    spawn_static_grunts(&mut local_sim, 35, WorldPos { x: 43.5, y: 32.5 });
+    local_sim.fuel_banks.insert(local_turret_id.clone(), 40.0);
+
+    local_sim.step_ticks(1);
+
+    let local_stats = local_sim.blocks[&local_turret_id]
+        .behavior_runtime
+        .as_ref()
+        .expect("turret behavior should have attempted to run");
+    assert!(
+        local_stats.over_budget,
+        "crowded attack_best should exceed the isolated turret's local CPU fuel bank"
+    );
+    assert!(
+        local_sim
+            .enemies
+            .values()
+            .all(|enemy| enemy.hp == enemy.max_hp),
+        "over-budget turret should not fire"
+    );
+
+    let mut network_sim = test_sim("crowded-network");
+    network_sim
+        .place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)
+        .unwrap();
+    let network_turret_id = network_sim.selected_id.clone().unwrap();
+    assign_script(
+        &mut network_sim,
+        &network_turret_id,
+        "if ammo_count > 0 attack_best lowest_hp",
+    );
+    network_sim
+        .blocks
+        .get_mut(&network_turret_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ammo, 50);
+    spawn_static_grunts(&mut network_sim, 35, WorldPos { x: 35.5, y: 32.5 });
+    network_sim
+        .fuel_banks
+        .insert(network_turret_id.clone(), 60.0);
+
+    network_sim.step_ticks(1);
+
+    let network_stats = network_sim.blocks[&network_turret_id]
+        .behavior_runtime
+        .as_ref()
+        .expect("turret behavior should have run on network CPU");
+    assert!(!network_stats.over_budget);
+    assert!(
+        network_sim
+            .enemies
+            .values()
+            .any(|enemy| enemy.hp < enemy.max_hp),
+        "core network CPU should let the same crowded attack_best script fire"
+    );
+}
+
+#[test]
 fn assembler_builtin_calls_host_api_and_produces_ammo() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Assembler, Pos { x: 34, y: 32 }, Direction::East)
