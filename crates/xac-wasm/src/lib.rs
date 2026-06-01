@@ -34,6 +34,7 @@ use script::{
 mod script_imports;
 mod script_render;
 mod tiny;
+mod tiny_actions;
 mod tiny_lexer;
 use tiny::{compile_tiny_source, is_tiny_source};
 
