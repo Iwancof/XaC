@@ -43,6 +43,10 @@ export function isNetworkNode(kind: BlockKind) {
   return BLOCK_METADATA[kind].networkNode;
 }
 
+export function isNetworkConnector(kind: BlockKind) {
+  return BLOCK_METADATA[kind].networkConnector;
+}
+
 export function blockLocalCpuRate(kind: BlockKind) {
   return BLOCK_METADATA[kind].localCpuRate;
 }

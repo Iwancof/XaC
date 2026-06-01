@@ -11,8 +11,16 @@ declare global {
       calls: IpcCall[];
       snapshot: () => {
         behaviors: Array<{ id: string; source_path: string }>;
+        blocks: Array<{ id: string; kind: string; network_id: number | null; effective_cpu_rate: number }>;
         drones: Array<{ id: string; behavior_ref: string | null }>;
         item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
+        networks: Array<{
+          cpu_pool: number;
+          active_devices: number;
+          effective_per_device: number;
+          block_ids: string[];
+          read_only_cache: boolean;
+        }>;
         selected_id: string | null;
       };
       spawnCarrierDrone: (homePortId?: string) => string;
@@ -88,6 +96,13 @@ test("places minimum devices from the right block list and opens drill behavior"
   await canvas.click({ position: tileCenter(19, 29) });
   await expect(page.locator(".metrics")).toContainText("blocks 2");
   await expect(page.locator(".inspector")).toContainText("cpu_node");
+  const isolatedNetworks = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().networks ?? []);
+  expect(isolatedNetworks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ cpu_pool: 80, block_ids: ["cpu_node_1"], read_only_cache: true }),
+      expect.objectContaining({ cpu_pool: 120, block_ids: ["core_1"], read_only_cache: false })
+    ])
+  );
 
   await page.getByRole("button", { name: /Wire/ }).click();
   await expect(page.getByText("Placing wire")).toBeVisible();
@@ -95,6 +110,15 @@ test("places minimum devices from the right block list and opens drill behavior"
     await canvas.click({ position: tileCenter(x, 29) });
   }
   await expect(page.locator(".metrics")).toContainText("blocks 13");
+  const connectedNetworks = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().networks ?? []);
+  expect(connectedNetworks).toEqual([
+    expect.objectContaining({
+      cpu_pool: 200,
+      active_devices: 0,
+      block_ids: expect.arrayContaining(["core_1", "cpu_node_1", "wire_1", "wire_11"]),
+      read_only_cache: false
+    })
+  ]);
 
   await page.getByRole("button", { name: /Belt Conveyor/ }).click();
   await expect(page.getByText("Placing conveyor")).toBeVisible();
@@ -123,6 +147,10 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".inspector")).toContainText("share 200.0");
   await expect(page.locator(".inspector")).toContainText("Fuel Bank");
   await expect(page.locator(".log-panel")).toContainText("placed Drill at 20,30");
+  const drillNetwork = await page.evaluate(() =>
+    window.__XAC_TEST_STATE__?.snapshot().blocks.find((block) => block.id === "drill_1")
+  );
+  expect(drillNetwork).toEqual(expect.objectContaining({ network_id: 1, effective_cpu_rate: 201 }));
 
   await page.getByRole("button", { name: /\+40/ }).click();
   await expect(page.locator(".metrics")).toContainText("core ore 41");
