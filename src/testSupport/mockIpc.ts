@@ -12,6 +12,7 @@ import {
   isNetworkNode,
   isProgrammableBlock
 } from "../gameMetadata";
+import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import type {
   BehaviorSource,
   BehaviorSummary,
@@ -35,10 +36,6 @@ import type {
 
 const MAP_WIDTH = 64;
 const MAP_HEIGHT = 64;
-
-const DRILL_SOURCE = `if output_blocked return
-mine
-`;
 
 type CommandCall = {
   cmd: string;
@@ -380,73 +377,24 @@ function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind))
 }
 
 function builtinBehaviors(): Record<string, MutableBehavior> {
-  return {
-    "builtin.drill.basic": {
-      summary: {
-        id: "builtin.drill.basic",
-        display_name: "Basic Drill",
-        base_kind: "drill",
-        world: "drill-behavior",
-        builtin: true,
-        used_by: 0,
-        source_path: "assets/builtin/drill/basic.xac",
-        build_status: "builtin"
-      },
-      source: DRILL_SOURCE
-    },
-    "builtin.router.basic": {
-      summary: {
-        id: "builtin.router.basic",
-        display_name: "Basic Router",
-        base_kind: "router",
-        world: "router-behavior",
-        builtin: true,
-        used_by: 0,
-        source_path: "assets/builtin/router/basic.xac",
-        build_status: "builtin"
-      },
-      source: "if output_available east push east\npush\n"
-    },
-    "builtin.assembler.basic": {
-      summary: {
-        id: "builtin.assembler.basic",
-        display_name: "Basic Assembler",
-        base_kind: "assembler",
-        world: "assembler-behavior",
-        builtin: true,
-        used_by: 0,
-        source_path: "assets/builtin/assembler/basic.xac",
-        build_status: "builtin"
-      },
-      source: "set_recipe ammo\nif can_produce produce\n"
-    },
-    "builtin.turret.basic": {
-      summary: {
-        id: "builtin.turret.basic",
-        display_name: "Basic Turret",
-        base_kind: "turret",
-        world: "turret-behavior",
-        builtin: true,
-        used_by: 0,
-        source_path: "assets/builtin/turret/basic.xac",
-        build_status: "builtin"
-      },
-      source: "if ammo_count > 0 attack_nearest\n"
-    },
-    "builtin.drone_port.basic": {
-      summary: {
-        id: "builtin.drone_port.basic",
-        display_name: "Basic Drone Port",
-        base_kind: "drone_port",
-        world: "drone-port-behavior",
-        builtin: true,
-        used_by: 0,
-        source_path: "assets/builtin/drone_port/basic.xac",
-        build_status: "builtin"
-      },
-      source: "if docked_drone_count > 0 charge_docked_drones\nif pending_job_count == 0 create_delivery_job ammo 10 frontline\nif pending_job_count > 0 dispatch_idle_drones\n"
-    }
-  };
+  return Object.fromEntries(
+    BUILTIN_BEHAVIOR_PRESETS.map((preset) => [
+      preset.id,
+      {
+        summary: {
+          id: preset.id,
+          display_name: preset.displayName,
+          base_kind: preset.baseKind,
+          world: preset.world,
+          builtin: true,
+          used_by: 0,
+          source_path: preset.sourcePath,
+          build_status: "builtin"
+        },
+        source: preset.source
+      }
+    ])
+  );
 }
 
 function behaviorSummaries(): BehaviorSummary[] {

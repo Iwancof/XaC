@@ -9,6 +9,9 @@ declare global {
   interface Window {
     __XAC_TEST_STATE__?: {
       calls: IpcCall[];
+      snapshot: () => {
+        behaviors: Array<{ id: string; source_path: string }>;
+      };
     };
     __XAC_EDITOR__?: {
       getValue: () => string;
@@ -29,6 +32,21 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.getByRole("button", { name: /Core/ })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Ore Drill/ })).toBeVisible();
   await expect(page.getByRole("button", { name: /Belt Conveyor/ })).toBeVisible();
+  const builtinBehaviorIds = await page.evaluate(() =>
+    window.__XAC_TEST_STATE__?.snapshot().behaviors.map((behavior) => behavior.id)
+  );
+  expect(builtinBehaviorIds).toEqual(
+    expect.arrayContaining([
+      "builtin.drill.basic",
+      "builtin.router.basic",
+      "builtin.router.ammo_east",
+      "builtin.assembler.basic",
+      "builtin.turret.basic",
+      "builtin.turret.priority",
+      "builtin.drone_port.basic",
+      "builtin.carrier_drone.basic"
+    ])
+  );
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
   await expect(canvas).toBeVisible();
