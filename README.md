@@ -37,9 +37,16 @@ sudo pacman -S --needed webkit2gtk-4.1
 
 ```bash
 npm run check
-cargo test --workspace
+npm run test:rust:fast
 npm run test:e2e
 ```
+
+Rust builds use the repo-local Cargo config to pass `-fuse-ld=mold`, so normal
+`cargo` and Tauri dev/build commands use the faster linker on this Linux setup.
+Install `mold` if a fresh machine does not have it. For day-to-day Rust loops,
+`npm run test:rust:fast` uses `cargo nextest` when installed and falls back to
+`cargo test --workspace`; keep `cargo test --workspace` for the full release
+gate because it also runs doc tests.
 
 `npm run test:e2e` starts Vite on `127.0.0.1:5174` with
 `VITE_XAC_MOCK_IPC=1`, replaces Tauri IPC with a deterministic in-browser
@@ -47,6 +54,22 @@ simulation, and drives the real React/Pixi UI with Playwright. Use this for
 concrete user-operation checks such as selecting a block in the right panel,
 clicking the map, and opening built-in behavior source without moving the
 desktop workspace or launching a Tauri window.
+
+The E2E test titles carry tags so mechanical slices are cheap while iterating:
+
+```bash
+npm run test:e2e:list
+npm run test:e2e:smoke
+npm run test:e2e:grep -- @network
+npm run test:e2e:grep -- @behavior
+```
+
+When a second Playwright slice needs to run at the same time, give it another
+port:
+
+```bash
+XAC_E2E_PORT=5175 npm run test:e2e:grep -- @network
+```
 
 ## MVP Notes
 

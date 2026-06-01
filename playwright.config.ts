@@ -1,5 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const e2ePort = process.env.XAC_E2E_PORT ?? "5174";
+const e2eBaseURL = `http://127.0.0.1:${e2ePort}`;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 60_000,
@@ -9,7 +12,7 @@ export default defineConfig({
   fullyParallel: true,
   reporter: [["list"]],
   use: {
-    baseURL: "http://127.0.0.1:5174",
+    baseURL: e2eBaseURL,
     headless: true,
     trace: "on-first-retry",
     viewport: { width: 1440, height: 900 }
@@ -22,11 +25,12 @@ export default defineConfig({
   ],
   webServer: {
     command: "npm run dev:e2e",
-    url: "http://127.0.0.1:5174",
+    url: e2eBaseURL,
     reuseExistingServer: false,
     timeout: 60_000,
     env: {
-      VITE_XAC_MOCK_IPC: "1"
+      VITE_XAC_MOCK_IPC: "1",
+      XAC_E2E_PORT: e2ePort
     }
   }
 });

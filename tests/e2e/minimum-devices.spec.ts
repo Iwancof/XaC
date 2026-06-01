@@ -1,76 +1,7 @@
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+import { dragTiles, tileCenter, type IpcCall } from "./support/xacHarness";
 
-type IpcCall = {
-  cmd: string;
-  args: Record<string, unknown>;
-};
-
-type TestEnemyKind = "grunt" | "runner" | "armored" | "wire_cutter";
-
-declare global {
-  interface Window {
-    __XAC_TEST_STATE__?: {
-      calls: IpcCall[];
-      snapshot: () => {
-        behaviors: Array<{ id: string; source_path: string }>;
-        blocks: Array<{
-          id: string;
-          kind: string;
-          behavior_ref: string | null;
-          hp: number;
-          inventory: { items: Partial<Record<string, number>> };
-          network_id: number | null;
-          effective_cpu_rate: number;
-          target_id: string | null;
-        }>;
-        drones: Array<{ id: string; behavior_ref: string | null; pos: { x: number; y: number } }>;
-        enemies: Array<{ id: string; hp: number; pos: { x: number; y: number }; target_id: string | null }>;
-        item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
-        pending_jobs: Array<{ id: string; item: string; amount: number; pickup: string; dropoff: string }>;
-        networks: Array<{
-          cpu_pool: number;
-          active_devices: number;
-          effective_per_device: number;
-          block_ids: string[];
-          read_only_cache: boolean;
-        }>;
-        status: {
-          wire_threats: number;
-          damaged_wires: number;
-          network_cpu: number;
-        };
-        selected_id: string | null;
-      };
-      spawnCarrierDrone: (homePortId?: string) => string;
-      spawnEnemy: (kind: TestEnemyKind, pos: { x: number; y: number }) => string;
-      setBlockInventory: (blockId: string, items: Partial<Record<string, number>>) => void;
-      forceOverBudget: (entityId: string) => void;
-      forceRuntimeError: (entityId: string, message?: string) => void;
-    };
-    __XAC_EDITOR__?: {
-      getValue: () => string;
-      setValue: (value: string) => void;
-    };
-  }
-}
-
-const tileCenter = (x: number, y: number) => ({
-  x: x * 16 + 8,
-  y: y * 16 + 8
-});
-
-async function dragTiles(page: Page, canvas: Locator, from: { x: number; y: number }, to: { x: number; y: number }) {
-  const box = await canvas.boundingBox();
-  if (!box) {
-    throw new Error("grid canvas should have a bounding box");
-  }
-  await page.mouse.move(box.x + from.x, box.y + from.y);
-  await page.mouse.down();
-  await page.mouse.move(box.x + to.x, box.y + to.y, { steps: 2 });
-  await page.mouse.up();
-}
-
-test("places minimum devices from the right block list and opens drill behavior", async ({ page }) => {
+test("places minimum devices from the right block list and opens drill behavior @smoke @placement", async ({ page }) => {
   test.setTimeout(90_000);
 
   await page.goto("/");
@@ -522,7 +453,7 @@ if can_produce produce
   ]);
 });
 
-test("project behavior can be edited in place or forked for one block", async ({ page }) => {
+test("project behavior can be edited in place or forked for one block @behavior", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
@@ -581,7 +512,7 @@ test("project behavior can be edited in place or forked for one block", async ({
   ]);
 });
 
-test("UI mock runs code-driven assembler ammo into turret defense", async ({ page }) => {
+test("UI mock runs code-driven assembler ammo into turret defense @production @combat", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
@@ -633,7 +564,7 @@ test("UI mock runs code-driven assembler ammo into turret defense", async ({ pag
   await expect(page.getByTestId("tutorial-defense")).toHaveAttribute("data-state", "complete");
 });
 
-test("drag placement paints wire and conveyor mining lines", async ({ page }) => {
+test("drag placement paints wire and conveyor mining lines @smoke @placement", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
@@ -685,7 +616,7 @@ test("drag placement paints wire and conveyor mining lines", async ({ page }) =>
   ]);
 });
 
-test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {
+test("UI mock dispatches carrier drone ammo delivery @drones", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
@@ -720,7 +651,7 @@ test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {
   await expect(page.getByTestId("tutorial-drone-delivery")).toHaveAttribute("data-state", "complete");
 });
 
-test("quick save and load restore the UI world state", async ({ page }) => {
+test("quick save and load restore the UI world state @save", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
@@ -758,7 +689,7 @@ test("quick save and load restore the UI world state", async ({ page }) => {
   expect(restored.loadCalls).toEqual([{ cmd: "load_world", args: { slot: "quick" } }]);
 });
 
-test("wire cutter can sever a CPU network in the UI simulation", async ({ page }) => {
+test("wire cutter can sever a CPU network in the UI simulation @network", async ({ page }) => {
   await page.goto("/");
 
   const canvas = page.getByTestId("grid-world").locator("canvas");
