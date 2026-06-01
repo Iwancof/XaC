@@ -40,6 +40,7 @@ import type {
   Drone,
   Enemy,
   GameSnapshot,
+  ItemKind,
   Pos
 } from "./types";
 
@@ -240,6 +241,7 @@ export function App() {
   };
 
   const core = snapshot?.blocks.find((block) => block.kind === "core");
+  const coreItemCount = (item: ItemKind) => core?.inventory.items[item] ?? 0;
   const selectedBehaviorId = selectedBlock?.behavior_ref ?? null;
 
   return (
@@ -276,7 +278,9 @@ export function App() {
           <span>wire {snapshot?.status.wire_threats ?? 0}</span>
           <span>damage {snapshot?.status.damaged_wires ?? 0}</span>
           <span>net CPU {snapshot?.status.network_cpu.toFixed(0) ?? "0"}</span>
-          <span>core ammo {core?.inventory.items.ammo ?? 0}</span>
+          <span>core ore {coreItemCount("ore")}</span>
+          <span>core plate {coreItemCount("plate")}</span>
+          <span>core ammo {coreItemCount("ammo")}</span>
         </div>
       </header>
 
