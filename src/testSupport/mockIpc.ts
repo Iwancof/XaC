@@ -43,6 +43,7 @@ type CommandCall = {
 };
 
 type MutableBehavior = BehaviorSource;
+type IdKind = BlockKind | "behavior" | "drone";
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
   | { kind: "drone"; entity: Drone; behaviorKind: "carrier_drone" };
@@ -56,7 +57,7 @@ interface MockState {
   logs: LogEntry[];
   selectedId: string | null;
   behaviors: Record<string, MutableBehavior>;
-  idCounters: Partial<Record<BlockKind | "behavior", number>>;
+  idCounters: Partial<Record<IdKind, number>>;
   calls: CommandCall[];
 }
 
@@ -66,6 +67,7 @@ declare global {
       calls: CommandCall[];
       reset: () => void;
       snapshot: () => GameSnapshot;
+      spawnCarrierDrone: (homePortId?: string) => string;
     };
   }
 }
@@ -122,7 +124,8 @@ window.__XAC_TEST_STATE__ = {
     state = createInitialState();
     window.__XAC_TEST_STATE__!.calls = state.calls;
   },
-  snapshot
+  snapshot,
+  spawnCarrierDrone
 };
 
 function createInitialState(): MockState {
@@ -452,6 +455,34 @@ function behaviorSummaries(): BehaviorSummary[] {
   }));
 }
 
+function spawnCarrierDrone(homePortId?: string) {
+  const port = homePortId
+    ? state.blocks.find((block) => block.id === homePortId)
+    : state.blocks.find((block) => block.kind === "drone_port");
+  if (!port) {
+    throw new Error(`unknown drone port: ${homePortId ?? "first drone_port"}`);
+  }
+  if (port.kind !== "drone_port") {
+    throw new Error(`block ${port.id} is not a drone port`);
+  }
+
+  const id = makeId("drone");
+  state.drones.push({
+    id,
+    home_port: port.id,
+    behavior_ref: "builtin.carrier_drone.basic",
+    pos: { x: port.pos.x + 0.5, y: port.pos.y + 0.5 },
+    battery: 100,
+    logic_fuel: 1000,
+    cargo: { items: {}, capacity: 20 },
+    state: "docked",
+    job: null
+  });
+  state.selectedId = id;
+  log("info", id, `carrier drone docked at ${port.id}`);
+  return id;
+}
+
 function recomputeNetworks(blocks: Block[]): Network[] {
   const blockIds = blocks.filter((block) => isNetworkNode(block.kind)).map((block) => block.id);
   const activeDevices = blocks.filter((block) => block.active).length;
@@ -559,10 +590,13 @@ function rotateDirection(dir: Direction): Direction {
 }
 
 function usedBy(behaviorId: string) {
-  return state.blocks.filter((block) => block.behavior_ref === behaviorId).length;
+  return (
+    state.blocks.filter((block) => block.behavior_ref === behaviorId).length +
+    state.drones.filter((drone) => drone.behavior_ref === behaviorId).length
+  );
 }
 
-function makeId(kind: BlockKind | "behavior") {
+function makeId(kind: IdKind) {
   const next = (state.idCounters[kind] ?? 0) + 1;
   state.idCounters[kind] = next;
   return `${kind}_${next}`;

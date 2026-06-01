@@ -11,7 +11,10 @@ declare global {
       calls: IpcCall[];
       snapshot: () => {
         behaviors: Array<{ id: string; source_path: string }>;
+        drones: Array<{ id: string; behavior_ref: string | null }>;
+        selected_id: string | null;
       };
+      spawnCarrierDrone: (homePortId?: string) => string;
     };
     __XAC_EDITOR__?: {
       getValue: () => string;
@@ -212,5 +215,51 @@ mine
   });
   expect(assignCalls).toEqual([
     { cmd: "assign_behavior", args: { blockId: "turret_1", behaviorId: "builtin.turret.priority" } }
+  ]);
+
+  await page.getByRole("button", { name: /Drone Port/ }).click();
+  await canvas.click({ position: tileCenter(35, 30) });
+  await expect(page.locator(".inspector")).toContainText("drone_port");
+
+  const droneId = await page.evaluate(() => window.__XAC_TEST_STATE__!.spawnCarrierDrone("drone_port_1"));
+  expect(droneId).toBe("drone_1");
+  await expect(page.locator(".inspector")).toContainText("drone_1");
+  await expect(page.locator(".inspector")).toContainText("docked");
+  await expect(page.locator(".inspector")).toContainText("empty cargo");
+
+  await page.getByRole("button", { name: "Open", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Carrier Drone");
+  await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /claim_delivery_job/);
+
+  await page.getByRole("button", { name: "Edit Copy", exact: true }).click();
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Carrier Drone Copy");
+  await expect(page.locator(".behavior-meta")).toContainText("project behavior");
+  await expect(page.getByLabel("Assign behavior preset")).toHaveValue("behavior_2");
+  await page.getByLabel("Assign behavior preset").selectOption("builtin.carrier_drone.basic");
+  await expect(page.locator(".log-panel")).toContainText("assigned Basic Carrier Drone");
+  await expect(page.locator(".behavior-meta")).toContainText("Basic Carrier Drone");
+
+  const droneSnapshot = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().drones ?? []);
+  expect(droneSnapshot).toEqual([
+    expect.objectContaining({ id: "drone_1", behavior_ref: "builtin.carrier_drone.basic" })
+  ]);
+
+  const droneBehaviorCalls = await page.evaluate(() => {
+    return (
+      window.__XAC_TEST_STATE__?.calls.filter((call) => {
+        const args = call.args;
+        return (
+          (call.cmd === "open_behavior" && args.behaviorId === "builtin.carrier_drone.basic") ||
+          (call.cmd === "edit_builtin_copy" && args.blockId === "drone_1") ||
+          (call.cmd === "assign_behavior" && args.blockId === "drone_1")
+        );
+      }) ?? []
+    );
+  });
+  expect(droneBehaviorCalls).toEqual([
+    { cmd: "open_behavior", args: { behaviorId: "builtin.carrier_drone.basic" } },
+    { cmd: "edit_builtin_copy", args: { blockId: "drone_1" } },
+    { cmd: "assign_behavior", args: { blockId: "drone_1", behaviorId: "builtin.carrier_drone.basic" } },
+    { cmd: "open_behavior", args: { behaviorId: "builtin.carrier_drone.basic" } }
   ]);
 });
