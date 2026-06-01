@@ -20,9 +20,10 @@ declare global {
           inventory: { items: Partial<Record<string, number>> };
           network_id: number | null;
           effective_cpu_rate: number;
+          target_id: string | null;
         }>;
         drones: Array<{ id: string; behavior_ref: string | null }>;
-        enemies: Array<{ id: string; pos: { x: number; y: number }; target_id: string | null }>;
+        enemies: Array<{ id: string; hp: number; pos: { x: number; y: number }; target_id: string | null }>;
         item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
         networks: Array<{
           cpu_pool: number;
@@ -40,6 +41,7 @@ declare global {
       };
       spawnCarrierDrone: (homePortId?: string) => string;
       spawnEnemy: (kind: TestEnemyKind, pos: { x: number; y: number }) => string;
+      setBlockInventory: (blockId: string, items: Partial<Record<string, number>>) => void;
       forceOverBudget: (entityId: string) => void;
     };
     __XAC_EDITOR__?: {
@@ -477,6 +479,56 @@ if can_produce produce
     { cmd: "save_behavior", args: { behaviorId: "behavior_4", source: assemblerSource } },
     { cmd: "build_behavior", args: { behaviorId: "behavior_4" } }
   ]);
+});
+
+test("UI mock runs code-driven assembler ammo into turret defense", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.getByTestId("grid-world").locator("canvas");
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole("button", { name: /Assembler/ }).click();
+  await canvas.click({ position: tileCenter(34, 30) });
+
+  await page.evaluate(() => window.__XAC_TEST_STATE__!.setBlockInventory("assembler_1", { plate: 1 }));
+  for (let i = 0; i < 15; i += 1) {
+    await page.getByRole("button", { name: /\+40/ }).click();
+  }
+  await page.getByRole("button", { name: /Belt Conveyor/ }).click();
+  await canvas.click({ position: tileCenter(35, 30) });
+  await page.getByRole("button", { name: /Turret/ }).click();
+  await canvas.click({ position: tileCenter(36, 30) });
+  for (let i = 0; i < 3; i += 1) {
+    await page.getByRole("button", { name: /\+40/ }).click();
+  }
+
+  const supplied = await page.evaluate(() => {
+    const snapshot = window.__XAC_TEST_STATE__!.snapshot();
+    return {
+      turret: snapshot.blocks.find((block) => block.id === "turret_1"),
+      ammoFlow: snapshot.item_flows.some(
+        (flow) => flow.item === "ammo" && flow.from_entity === "conveyor_1" && flow.to_entity === "turret_1"
+      )
+    };
+  });
+  expect(supplied.turret?.inventory.items.ammo ?? 0).toBeGreaterThan(0);
+  expect(supplied.ammoFlow).toBe(true);
+
+  const enemyId = await page.evaluate(() => window.__XAC_TEST_STATE__!.spawnEnemy("grunt", { x: 37.5, y: 30.5 }));
+  expect(enemyId).toBe("enemy_2");
+  for (let i = 0; i < 5; i += 1) {
+    await page.getByRole("button", { name: /\+40/ }).click();
+  }
+
+  const defended = await page.evaluate(() => {
+    const snapshot = window.__XAC_TEST_STATE__!.snapshot();
+    return {
+      enemy: snapshot.enemies.find((enemy) => enemy.id === "enemy_2"),
+      turret: snapshot.blocks.find((block) => block.id === "turret_1")
+    };
+  });
+  expect(defended.enemy?.hp ?? 0).toBeLessThan(30);
+  expect(defended.turret?.target_id).toBe("enemy_2");
 });
 
 test("wire cutter can sever a CPU network in the UI simulation", async ({ page }) => {

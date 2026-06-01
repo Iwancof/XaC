@@ -1,6 +1,7 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
 import {
   blockDefaultBehaviorId,
+  blockAttackRangeTiles,
   blockFootprintSize,
   blockInventoryCapacity,
   blockLocalCpuRate,
@@ -42,6 +43,8 @@ import type {
 } from "../types";
 
 const ENEMY_ATTACK_RANGE = 0.2;
+const MOCK_ASSEMBLER_RECIPE_TICKS = 20;
+const MOCK_TURRET_DAMAGE = 12;
 
 type CommandCall = {
   cmd: string;
@@ -51,6 +54,15 @@ type CommandCall = {
 type MutableBehavior = BehaviorSource;
 type IdKind = BlockKind | "behavior" | "drone" | "enemy" | "flow";
 type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
+type MockBehaviorResult = {
+  mine: boolean;
+  router: { item: ItemKind | null; dirs: Direction[] } | null;
+  assembler: { recipe: ItemKind | null; produce: boolean } | null;
+  turret: { priority: string[] } | null;
+};
+type MockBehaviorContext = {
+  assemblerRecipe: string | null;
+};
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
   | { kind: "drone"; entity: Drone; behaviorKind: "carrier_drone" };
@@ -77,6 +89,7 @@ declare global {
       snapshot: () => GameSnapshot;
       spawnCarrierDrone: (homePortId?: string) => string;
       spawnEnemy: (kind: EnemyKind, pos: Pos) => string;
+      setBlockInventory: (blockId: string, items: Partial<Record<ItemKind, number>>) => void;
       forceOverBudget: (entityId: string) => void;
     };
   }
@@ -137,6 +150,7 @@ window.__XAC_TEST_STATE__ = {
   snapshot,
   spawnCarrierDrone,
   spawnEnemy,
+  setBlockInventory,
   forceOverBudget
 };
 
@@ -290,17 +304,8 @@ function runTicks(count: number) {
     recomputeNetworks(state.blocks);
 
     for (const block of state.blocks) {
-      let shouldMine = false;
       if (block.active && block.behavior_ref) {
-        shouldMine = runMockBehavior(block).mine;
-      }
-      if (!shouldMine || block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(block)) continue;
-      block.progress += 1;
-      if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
-        block.progress = 0;
-        addItem(block.inventory, "ore", 1);
-        block.status = "mined ore";
-        log("info", block.id, "mined ore");
+        applyMockBehavior(block, runMockBehavior(block));
       }
     }
     for (const block of state.blocks) {
@@ -540,6 +545,19 @@ function spawnEnemy(kind: EnemyKind, pos: Pos) {
   return id;
 }
 
+function setBlockInventory(blockId: string, items: Partial<Record<ItemKind, number>>) {
+  const block = state.blocks.find((candidate) => candidate.id === blockId);
+  if (!block) {
+    throw new Error(`unknown block: ${blockId}`);
+  }
+  block.inventory.items = {};
+  for (const [item, amount] of Object.entries(items) as [ItemKind, number][]) {
+    if (!canAcceptItem(block.kind, item) || amount <= 0) continue;
+    block.inventory.items[item] = Math.min(amount, block.inventory.capacity);
+  }
+  block.status = inventoryTotal(block.inventory) > 0 ? "test inventory seeded" : "empty";
+}
+
 function forceOverBudget(entityId: string) {
   const block = state.blocks.find((candidate) => candidate.id === entityId);
   if (block) {
@@ -684,6 +702,17 @@ function runEnemies() {
 }
 
 function cleanupDestroyed() {
+  const defeatedEnemyIds = new Set(state.enemies.filter((enemy) => enemy.hp <= 0).map((enemy) => enemy.id));
+  if (defeatedEnemyIds.size > 0) {
+    for (const id of defeatedEnemyIds) {
+      log("info", id, "enemy destroyed");
+    }
+    state.enemies = state.enemies.filter((enemy) => !defeatedEnemyIds.has(enemy.id));
+    if (state.selectedId && defeatedEnemyIds.has(state.selectedId)) {
+      state.selectedId = null;
+    }
+  }
+
   const destroyedBlockIds = new Set(
     state.blocks.filter((block) => block.kind !== "core" && block.hp <= 0).map((block) => block.id)
   );
@@ -742,11 +771,13 @@ function inBounds(pos: Pos) {
   return pos.x >= 0 && pos.y >= 0 && pos.x < MAP_WIDTH && pos.y < MAP_HEIGHT;
 }
 
-function transferFrom(block: Block) {
-  const item = Object.entries(block.inventory.items).find(([, amount]) => (amount ?? 0) > 0);
+function transferFrom(block: Block, dir = block.dir, itemFilter: ItemKind | null = null) {
+  const item = Object.entries(block.inventory.items).find(
+    ([kind, amount]) => (amount ?? 0) > 0 && (!itemFilter || kind === itemFilter)
+  );
   if (!item) return false;
   const [kind, amount] = item as [ItemKind, number];
-  const dst = blockAt(state.blocks, step(block.pos, block.dir));
+  const dst = blockAt(state.blocks, step(block.pos, dir));
   if (!dst || !canAcceptItem(dst.kind, kind) || inventoryTotal(dst.inventory) >= dst.inventory.capacity) return false;
   block.inventory.items[kind] = Math.max(0, amount - 1);
   if (block.inventory.items[kind] === 0) delete block.inventory.items[kind];
@@ -760,6 +791,15 @@ function transferFrom(block: Block) {
 function outputBlocked(block: Block) {
   const dst = blockAt(state.blocks, step(block.pos, block.dir));
   return !dst || !canAcceptItem(dst.kind, "ore") || inventoryTotal(dst.inventory) >= dst.inventory.capacity;
+}
+
+function outputAvailable(block: Block, dir: Direction, itemFilter: ItemKind | null = null) {
+  const item = Object.entries(block.inventory.items).find(
+    ([kind, amount]) => (amount ?? 0) > 0 && (!itemFilter || kind === itemFilter)
+  )?.[0] as ItemKind | undefined;
+  if (!item) return false;
+  const dst = blockAt(state.blocks, step(block.pos, dir));
+  return Boolean(dst && canAcceptItem(dst.kind, item) && inventoryTotal(dst.inventory) < dst.inventory.capacity);
 }
 
 function inventoryTotal(inventory: Inventory) {
@@ -866,7 +906,7 @@ function runMockBehavior(block: Block) {
   const fuelRate = block.effective_cpu_rate;
   const maxBank = Math.max(fuelRate * 8, minInvocationFuel);
   block.fuel_bank = Math.min(maxBank, block.fuel_bank + fuelRate / 20);
-  if (block.fuel_bank < minInvocationFuel) return { mine: false };
+  if (block.fuel_bank < minInvocationFuel) return emptyMockBehaviorResult();
 
   const fuelBudget = Math.floor(block.fuel_bank);
   const fuelSpent = Math.min(8, fuelBudget);
@@ -875,21 +915,221 @@ function runMockBehavior(block: Block) {
   return evaluateMockBehavior(block);
 }
 
-function evaluateMockBehavior(block: Block) {
+function emptyMockBehaviorResult(): MockBehaviorResult {
+  return { mine: false, router: null, assembler: null, turret: null };
+}
+
+function evaluateMockBehavior(block: Block): MockBehaviorResult {
+  const result = emptyMockBehaviorResult();
+  const context: MockBehaviorContext = { assemblerRecipe: block.recipe };
   const source = block.behavior_ref ? state.behaviors[block.behavior_ref]?.source ?? "" : "";
-  if (block.kind !== "drill") return { mine: false };
-  if (drillSourceReturnsWhenBlocked(source) && outputBlocked(block)) {
-    return { mine: false };
+  for (const line of sourceWithoutComments(source).toLowerCase().split(/\n/).filter(Boolean)) {
+    const action = line.startsWith("if ") ? activeMockAction(block, line, context) : line;
+    if (!action) continue;
+    if (action === "return" || action === "stop") break;
+    applyMockAction(block, action, result, context);
   }
-  return { mine: drillSourceCallsMine(source) };
+  return result;
 }
 
-function drillSourceReturnsWhenBlocked(source: string) {
-  return /output_blocked\s*(?:\(\s*\))?\s*\)?\s*\{?\s*return/.test(sourceWithoutComments(source));
+function activeMockAction(block: Block, line: string, context: MockBehaviorContext) {
+  const tokens = line.split(/\s+/).filter(Boolean);
+  if (mockCondition(block, tokens.slice(1), context)) {
+    return tokens.slice(mockConditionTokenLength(block, tokens.slice(1)) + 1).join(" ");
+  }
+  return null;
 }
 
-function drillSourceCallsMine(source: string) {
-  return /\bmine\s*(?:\(\s*\))?\s*(?:;|$)/m.test(sourceWithoutComments(source));
+function mockCondition(block: Block, tokens: string[], context: MockBehaviorContext) {
+  if (block.kind === "drill") {
+    if (tokens[0] === "output_blocked") return outputBlocked(block);
+    if (tokens[0] === "ore_kind" && tokens[1] === "==" && tokens[2] === "ore") return terrainAt(block.pos) === "ore_patch";
+  }
+  if (block.kind === "router") {
+    if (tokens[0] === "output_available" && isItem(tokens[1]) && isDirection(tokens[2])) {
+      return outputAvailable(block, tokens[2], tokens[1]);
+    }
+    if (tokens[0] === "output_available" && isDirection(tokens[1])) {
+      return outputAvailable(block, tokens[1]);
+    }
+  }
+  if (block.kind === "assembler") {
+    if (tokens[0] === "can_produce") return canMockProduce(block, context.assemblerRecipe);
+    if (tokens[0] === "current_recipe" && tokens[1] === "==") return block.recipe === tokens[2];
+    if ((tokens[0] === "input_count" || tokens[0] === "output_count") && isItem(tokens[1])) {
+      return compareNumber(inventoryCount(block.inventory, tokens[1]), tokens[2], Number(tokens[3]));
+    }
+  }
+  if (block.kind === "turret") {
+    if (tokens[0] === "ammo_count") return compareNumber(inventoryCount(block.inventory, "ammo"), tokens[1], Number(tokens[2]));
+    if (tokens[0] === "scan_enemies") return compareNumber(visibleTurretTargets(block).length, tokens[1], Number(tokens[2]));
+    if (tokens[0] === "can_attack") return Boolean(visibleTurretTargets(block)[Number(tokens[1])]);
+  }
+  if (tokens[0] === "inventory_count" && isItem(tokens[1])) {
+    return compareNumber(inventoryCount(block.inventory, tokens[1]), tokens[2], Number(tokens[3]));
+  }
+  if (tokens[0] === "inventory_free") {
+    return compareNumber(block.inventory.capacity - inventoryTotal(block.inventory), tokens[1], Number(tokens[2]));
+  }
+  if (tokens[0] === "fuel_remaining") {
+    return compareNumber(Math.floor(block.fuel_bank), tokens[1], Number(tokens[2]));
+  }
+  return false;
+}
+
+function mockConditionTokenLength(block: Block, tokens: string[]) {
+  if (block.kind === "drill" && tokens[0] === "output_blocked") return 1;
+  if (block.kind === "drill" && tokens[0] === "ore_kind") return 3;
+  if (block.kind === "router" && tokens[0] === "output_available" && isItem(tokens[1])) return 3;
+  if (block.kind === "router" && tokens[0] === "output_available") return 2;
+  if (block.kind === "assembler" && tokens[0] === "can_produce") return 1;
+  if (block.kind === "assembler" && tokens[0] === "current_recipe") return 3;
+  if (block.kind === "assembler" && (tokens[0] === "input_count" || tokens[0] === "output_count")) return 4;
+  if (block.kind === "turret" && (tokens[0] === "ammo_count" || tokens[0] === "scan_enemies")) return 3;
+  if (block.kind === "turret" && tokens[0] === "can_attack") return 2;
+  if (tokens[0] === "inventory_count") return 4;
+  if (tokens[0] === "inventory_free" || tokens[0] === "fuel_remaining") return 3;
+  return tokens.length;
+}
+
+function applyMockAction(block: Block, action: string, result: MockBehaviorResult, context: MockBehaviorContext) {
+  const tokens = action.split(/\s+/).filter(Boolean);
+  if (tokens[0] === "mine" && block.kind === "drill") {
+    result.mine = true;
+  } else if (tokens[0] === "output" && block.kind === "drill" && isItem(tokens[1])) {
+    transferFrom(block, block.dir, tokens[1]);
+  } else if ((tokens[0] === "push_any" || action === "push any") && block.kind === "router") {
+    result.router = { item: null, dirs: allDirections() };
+  } else if (tokens[0] === "push" && block.kind === "router" && isDirection(tokens[1])) {
+    result.router = { item: null, dirs: [tokens[1]] };
+  } else if (tokens[0] === "push" && block.kind === "router" && isItem(tokens[1]) && isDirection(tokens[2])) {
+    result.router = { item: tokens[1], dirs: [tokens[2]] };
+  } else if (tokens[0] === "set_recipe" && block.kind === "assembler" && isRecipe(tokens[1])) {
+    context.assemblerRecipe = tokens[1];
+    result.assembler = { recipe: tokens[1], produce: result.assembler?.produce ?? false };
+  } else if (tokens[0] === "produce" && block.kind === "assembler") {
+    result.assembler = { recipe: result.assembler?.recipe ?? null, produce: true };
+  } else if (tokens[0] === "attack_nearest" && block.kind === "turret") {
+    result.turret = { priority: ["nearest"] };
+  } else if (tokens[0] === "attack_best" && block.kind === "turret") {
+    result.turret = { priority: tokens.slice(1) };
+  } else if (tokens[0] === "attack" && block.kind === "turret") {
+    result.turret = { priority: [`index:${tokens[1]}`] };
+  }
+}
+
+function applyMockBehavior(block: Block, behavior: MockBehaviorResult) {
+  if (behavior.mine) runMockDrill(block);
+  if (behavior.router) runMockRouter(block, behavior.router);
+  if (behavior.assembler) runMockAssembler(block, behavior.assembler);
+  if (behavior.turret) runMockTurret(block, behavior.turret.priority);
+}
+
+function runMockDrill(block: Block) {
+  if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(block)) return;
+  block.progress += 1;
+  if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
+    block.progress = 0;
+    addItem(block.inventory, "ore", 1);
+    block.status = "mined ore";
+    log("info", block.id, "mined ore");
+  }
+}
+
+function runMockRouter(block: Block, router: { item: ItemKind | null; dirs: Direction[] }) {
+  if (block.kind !== "router") return;
+  for (const dir of router.dirs) {
+    if (transferFrom(block, dir, router.item)) break;
+  }
+}
+
+function runMockAssembler(block: Block, assembler: { recipe: ItemKind | null; produce: boolean }) {
+  if (block.kind !== "assembler") return;
+  if (assembler.recipe) {
+    block.recipe = assembler.recipe;
+    block.status = `recipe: ${assembler.recipe}`;
+  }
+  if (!assembler.produce || !canMockProduce(block, block.recipe)) return;
+  block.progress += 1;
+  if (block.progress < MOCK_ASSEMBLER_RECIPE_TICKS) return;
+  block.progress = 0;
+  if (block.recipe === "plate") {
+    removeItem(block.inventory, "ore", 2);
+    addItem(block.inventory, "plate", 1);
+    block.status = "produced plate";
+  } else if (block.recipe === "ammo") {
+    removeItem(block.inventory, "plate", 1);
+    addItem(block.inventory, "ammo", 2);
+    block.status = "produced ammo";
+  }
+}
+
+function runMockTurret(block: Block, priority: string[]) {
+  if (block.kind !== "turret" || inventoryCount(block.inventory, "ammo") <= 0) return;
+  const target = chooseTurretTarget(block, priority);
+  if (!target) return;
+  target.hp -= MOCK_TURRET_DAMAGE;
+  removeItem(block.inventory, "ammo", 1);
+  block.target_id = target.id;
+  block.status = `attacking ${target.id}`;
+}
+
+function canMockProduce(block: Block, recipe: string | null) {
+  if (recipe === "plate") {
+    return inventoryCount(block.inventory, "ore") >= 2 && inventoryTotal(block.inventory) < block.inventory.capacity;
+  }
+  if (recipe === "ammo") {
+    return inventoryCount(block.inventory, "plate") >= 1 && inventoryTotal(block.inventory) + 1 < block.inventory.capacity;
+  }
+  return false;
+}
+
+function chooseTurretTarget(block: Block, priority: string[]) {
+  const targets = visibleTurretTargets(block);
+  if (targets.length === 0) return null;
+  for (const rawRule of priority) {
+    for (const rule of rawRule.split(",").map((part) => part.trim()).filter(Boolean)) {
+      if (rule.startsWith("index:")) {
+        const target = targets[Number(rule.slice("index:".length))];
+        if (target) return target;
+      }
+      if (rule === "lowest_hp" || rule === "weakest") return [...targets].sort((a, b) => a.hp - b.hp)[0];
+      if (rule === "nearest") return targets[0];
+      const byKind = targets.find((target) => target.kind === rule || (rule === "wire-cutter" && target.kind === "wire_cutter"));
+      if (byKind) return byKind;
+    }
+  }
+  return targets[0];
+}
+
+function visibleTurretTargets(block: Block) {
+  const range = blockAttackRangeTiles("turret") ?? 0;
+  const origin = { x: block.pos.x + 0.5, y: block.pos.y + 0.5 };
+  return state.enemies
+    .filter((enemy) => enemy.hp > 0 && distance(origin, enemy.pos) <= range)
+    .sort((a, b) => distance(origin, a.pos) - distance(origin, b.pos));
+}
+
+function compareNumber(left: number, operator: string | undefined, right: number) {
+  if (!Number.isFinite(right)) return false;
+  if (operator === "<") return left < right;
+  if (operator === "<=") return left <= right;
+  if (operator === "==") return left === right;
+  if (operator === ">=") return left >= right;
+  if (operator === ">") return left > right;
+  return false;
+}
+
+function isItem(value: string | undefined): value is ItemKind {
+  return value === "ore" || value === "plate" || value === "ammo" || value === "cpu_part" || value === "drone_part";
+}
+
+function isRecipe(value: string | undefined): value is ItemKind {
+  return value === "plate" || value === "ammo";
+}
+
+function isDirection(value: string | undefined): value is Direction {
+  return value === "north" || value === "east" || value === "south" || value === "west";
 }
 
 function recordRuntime(
@@ -923,6 +1163,15 @@ function inventoryCount(inventory: Inventory, item: ItemKind) {
 
 function addItem(inventory: Inventory, item: ItemKind, amount: number) {
   inventory.items[item] = inventoryCount(inventory, item) + amount;
+}
+
+function removeItem(inventory: Inventory, item: ItemKind, amount: number) {
+  const next = Math.max(0, inventoryCount(inventory, item) - amount);
+  if (next === 0) {
+    delete inventory.items[item];
+  } else {
+    inventory.items[item] = next;
+  }
 }
 
 function recordItemFlow(fromEntity: string, toEntity: string, item: ItemKind, amount: number, from: Pos, to: Pos) {
