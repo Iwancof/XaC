@@ -36,6 +36,13 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("wave 1");
   await expect(page.locator(".metrics")).toContainText("net CPU 120");
   await expect(page.locator(".metrics")).toContainText("core HP 500/500");
+  await expect(page.locator(".metrics")).toContainText("enemies 1");
+  await expect(page.locator(".inspector")).toContainText("core");
+  await canvas.click({ position: tileCenter(28, 28) });
+  await expect(page.locator(".inspector")).toContainText("runner");
+  await expect(page.locator(".inspector")).toContainText("28.50, 28.50");
+  await expect(page.locator(".inspector")).toContainText("core_1");
+  await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
 
   await page.getByRole("button", { name: /Ore Drill/ }).click();

@@ -37,6 +37,8 @@ import type {
   BlockKind,
   BuildResult,
   Direction,
+  Drone,
+  Enemy,
   GameSnapshot,
   Pos
 } from "./types";
@@ -110,6 +112,14 @@ export function App() {
   const selectedBlock = useMemo<Block | null>(() => {
     if (!snapshot?.selected_id) return null;
     return snapshot.blocks.find((block) => block.id === snapshot.selected_id) ?? null;
+  }, [snapshot]);
+  const selectedEnemy = useMemo<Enemy | null>(() => {
+    if (!snapshot?.selected_id) return null;
+    return snapshot.enemies.find((enemy) => enemy.id === snapshot.selected_id) ?? null;
+  }, [snapshot]);
+  const selectedDrone = useMemo<Drone | null>(() => {
+    if (!snapshot?.selected_id) return null;
+    return snapshot.drones.find((drone) => drone.id === snapshot.selected_id) ?? null;
   }, [snapshot]);
 
   const dirty = behavior ? editorValue !== savedValue : false;
@@ -336,6 +346,8 @@ export function App() {
           <Inspector
             snapshot={snapshot}
             selectedBlock={selectedBlock}
+            selectedEnemy={selectedEnemy}
+            selectedDrone={selectedDrone}
             behavior={behavior}
             buildResult={buildResult}
             dirty={dirty}

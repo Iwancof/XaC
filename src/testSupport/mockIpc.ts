@@ -38,6 +38,7 @@ interface MockState {
   tick: number;
   running: boolean;
   blocks: Block[];
+  enemies: Enemy[];
   logs: LogEntry[];
   selectedId: string | null;
   behaviors: Record<string, MutableBehavior>;
@@ -122,6 +123,18 @@ function createInitialState(): MockState {
     tick: 0,
     running: false,
     blocks: [core],
+    enemies: [
+      {
+        id: "enemy_1",
+        kind: "runner",
+        pos: { x: 28.5, y: 28.5 },
+        hp: 20,
+        max_hp: 20,
+        move_speed: 0.14,
+        attack_cooldown: 0,
+        target_id: core.id
+      }
+    ],
     logs: [
       {
         tick: 0,
@@ -143,7 +156,7 @@ function snapshot(): GameSnapshot {
   const blocks = state.blocks.map((block) => ({ ...block, inventory: clone(block.inventory) }));
   const networks = recomputeNetworks(blocks);
   const tiles = buildTiles(blocks);
-  const enemies: Enemy[] = [];
+  const enemies = state.enemies.map((enemy) => ({ ...enemy, pos: { ...enemy.pos } }));
   const drones: Drone[] = [];
   const pendingJobs: DeliveryJob[] = [];
 

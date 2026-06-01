@@ -90,6 +90,10 @@ export function GridWorld({
             x: Math.floor(world.x / TILE),
             y: Math.floor(world.y / TILE)
           };
+          const worldTile = {
+            x: world.x / TILE,
+            y: world.y / TILE
+          };
           const current = snapshotRef.current;
           if (!current || pos.x < 0 || pos.y < 0 || pos.x >= current.width || pos.y >= current.height) {
             onEntityClickRef.current(null);
@@ -97,13 +101,16 @@ export function GridWorld({
           }
           const tile = current.tiles.find((item) => item.pos.x === pos.x && item.pos.y === pos.y);
           const block = current.blocks.find((item) => item.id === tile?.block_id);
-          const enemy = current.enemies.find((item) => Math.floor(item.pos.x) === pos.x && Math.floor(item.pos.y) === pos.y);
+          const enemy = current.enemies.find((item) => distance(item.pos, worldTile) <= 0.55);
+          const drone = current.drones.find((item) => distance(item.pos, worldTile) <= 0.6);
           if (buildKindRef.current) {
             onTileClickRef.current(pos);
-          } else if (block) {
-            onEntityClickRef.current(block.id);
           } else if (enemy) {
             onEntityClickRef.current(enemy.id);
+          } else if (drone) {
+            onEntityClickRef.current(drone.id);
+          } else if (block) {
+            onEntityClickRef.current(block.id);
           } else {
             onEntityClickRef.current(null);
           }
@@ -146,7 +153,7 @@ function renderWorld(
   drawOverlays(graphics, snapshot, overlay);
   drawBlocks(graphics, snapshot.blocks, selectedId);
   drawEnemies(graphics, snapshot.enemies, selectedId);
-  drawDrones(graphics, snapshot);
+  drawDrones(graphics, snapshot, selectedId);
   stage.addChild(graphics);
 
   if (buildKind) {
@@ -278,7 +285,7 @@ function drawEnemies(g: Graphics, enemies: Enemy[], selectedId: string | null) {
   }
 }
 
-function drawDrones(g: Graphics, snapshot: GameSnapshot) {
+function drawDrones(g: Graphics, snapshot: GameSnapshot, selectedId: string | null) {
   for (const drone of snapshot.drones) {
     const x = drone.pos.x * TILE;
     const y = drone.pos.y * TILE;
@@ -286,7 +293,16 @@ function drawDrones(g: Graphics, snapshot: GameSnapshot) {
     g.lineTo(x + 7, y + 5);
     g.lineTo(x - 7, y + 5);
     g.closePath().fill(0x38bdf8);
+    if (selectedId === drone.id) {
+      g.circle(x, y, 9).stroke({ width: 2, color: 0xffffff });
+    }
   }
+}
+
+function distance(a: Pos, b: Pos) {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  return Math.sqrt(dx * dx + dy * dy);
 }
 
 function drawArrow(g: Graphics, x: number, y: number, dir: Direction, color: number) {

@@ -1,9 +1,11 @@
 import { Box, Code2, Copy, GitBranch, Hammer, RotateCw, Save, Trash2 } from "lucide-react";
-import type { BehaviorSource, Block, BuildResult, GameSnapshot } from "./types";
+import type { BehaviorSource, Block, BuildResult, Drone, Enemy, GameSnapshot } from "./types";
 
 interface InspectorProps {
   snapshot: GameSnapshot | null;
   selectedBlock: Block | null;
+  selectedEnemy: Enemy | null;
+  selectedDrone: Drone | null;
   behavior: BehaviorSource | null;
   buildResult: BuildResult | null;
   dirty: boolean;
@@ -19,6 +21,8 @@ interface InspectorProps {
 export function Inspector({
   snapshot,
   selectedBlock,
+  selectedEnemy,
+  selectedDrone,
   behavior,
   buildResult,
   dirty,
@@ -106,8 +110,60 @@ export function Inspector({
             </div>
           )}
         </>
+      ) : selectedEnemy ? (
+        <>
+          <div className="kv">
+            <span>ID</span>
+            <strong>{selectedEnemy.id}</strong>
+            <span>Enemy</span>
+            <strong>{selectedEnemy.kind}</strong>
+            <span>HP</span>
+            <strong>
+              {selectedEnemy.hp}/{selectedEnemy.max_hp}
+            </strong>
+            <span>Position</span>
+            <strong>
+              {selectedEnemy.pos.x.toFixed(2)}, {selectedEnemy.pos.y.toFixed(2)}
+            </strong>
+            <span>Speed</span>
+            <strong>{selectedEnemy.move_speed.toFixed(2)} tiles/tick</strong>
+            <span>Cooldown</span>
+            <strong>{selectedEnemy.attack_cooldown}</strong>
+            <span>Target</span>
+            <strong>{selectedEnemy.target_id ?? "none"}</strong>
+          </div>
+        </>
+      ) : selectedDrone ? (
+        <>
+          <div className="kv">
+            <span>ID</span>
+            <strong>{selectedDrone.id}</strong>
+            <span>Drone</span>
+            <strong>{selectedDrone.state}</strong>
+            <span>Home</span>
+            <strong>{selectedDrone.home_port}</strong>
+            <span>Battery</span>
+            <strong>{selectedDrone.battery.toFixed(0)}%</strong>
+            <span>Logic</span>
+            <strong>{selectedDrone.logic_fuel}</strong>
+            <span>Position</span>
+            <strong>
+              {selectedDrone.pos.x.toFixed(2)}, {selectedDrone.pos.y.toFixed(2)}
+            </strong>
+            <span>Job</span>
+            <strong>{selectedDrone.job ? `${selectedDrone.job.item} ${selectedDrone.job.amount}` : "none"}</strong>
+          </div>
+          <div className="inventory">
+            {Object.entries(selectedDrone.cargo.items).map(([kind, amount]) => (
+              <span key={kind}>
+                {kind}: {amount}
+              </span>
+            ))}
+            {Object.keys(selectedDrone.cargo.items).length === 0 && <span>empty cargo</span>}
+          </div>
+        </>
       ) : (
-        <p className="muted">Select a block to inspect code, CPU, inventory, and network state.</p>
+        <p className="muted">Select a block, enemy, or drone to inspect its state.</p>
       )}
 
       {behavior && (
