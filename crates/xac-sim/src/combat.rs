@@ -2,6 +2,7 @@ use xac_core::{BlockKind, Enemy, EnemyKind, ItemKind, LogLevel, Pos, WorldPos};
 use xac_wasm::TargetRule;
 
 use crate::geometry::nearest_block_target;
+use crate::wave;
 use crate::Simulation;
 
 impl Simulation {
@@ -95,19 +96,16 @@ impl Simulation {
         }
     }
 
-    pub(crate) fn spawn_wave_enemy(&mut self) {
-        let kind = match (self.tick / 80) % 4 {
-            0 => EnemyKind::Grunt,
-            1 => EnemyKind::Runner,
-            2 => EnemyKind::Armored,
-            _ => EnemyKind::Grunt,
-        };
-        self.spawn_enemy(kind);
+    pub(crate) fn spawn_wave(&mut self, wave_index: u32) {
+        for (offset, kind) in wave::wave_enemies(wave_index).into_iter().enumerate() {
+            self.spawn_enemy_in_lane(kind, offset as i32);
+        }
+        self.log(LogLevel::Warn, "wave", format!("wave {wave_index} contact"));
     }
 
-    pub(crate) fn spawn_enemy(&mut self, kind: EnemyKind) {
+    fn spawn_enemy_in_lane(&mut self, kind: EnemyKind, lane_offset: i32) {
         let id = self.make_id("enemy");
-        let lane = (self.tick as i32 / 40) % 20;
+        let lane = ((self.tick as i32 / 40) + lane_offset) % 20;
         let pos = WorldPos {
             x: 4.5 + lane as f32,
             y: 4.5,

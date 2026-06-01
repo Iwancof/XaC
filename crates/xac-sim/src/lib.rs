@@ -18,6 +18,7 @@ mod logistics;
 mod network;
 mod production;
 mod recipes;
+mod wave;
 
 use behavior::{load_behaviors, BehaviorPackage};
 use block_defs::{build_tiles, default_behavior_for, kind_name, make_block};
@@ -202,16 +203,10 @@ impl Simulation {
     }
 
     fn game_status(&self) -> GameStatus {
-        let wave_phase = (self.tick % 80) as u32;
-        let next_wave_in = if wave_phase < 20 {
-            20 - wave_phase
-        } else {
-            100 - wave_phase
-        };
         let core_hp = self.core_hp();
         GameStatus {
-            wave: (self.tick / 80) as u32 + 1,
-            next_wave_in,
+            wave: wave::current_wave(self.tick),
+            next_wave_in: wave::next_wave_in(self.tick),
             core_hp,
             core_max_hp: BlockKind::Core.max_hp(),
             defeated: core_hp <= 0,
@@ -256,11 +251,8 @@ impl Simulation {
             return;
         }
         self.tick += 1;
-        if self.tick % 80 == 20 {
-            self.spawn_wave_enemy();
-        }
-        if self.tick.is_multiple_of(300) {
-            self.spawn_enemy(EnemyKind::WireCutter);
+        if wave::should_spawn_wave(self.tick) {
+            self.spawn_wave(wave::current_wave(self.tick));
         }
 
         self.recompute_networks();
@@ -504,6 +496,45 @@ mod tests {
         assert_eq!(
             sim.tick, defeated_tick,
             "manual ticking should not advance a defeated simulation"
+        );
+    }
+
+    #[test]
+    fn wave_schedule_spawns_mixed_enemy_roles() {
+        assert_eq!(wave::current_wave(0), 1);
+        assert_eq!(wave::next_wave_in(0), 20);
+        assert!(!wave::should_spawn_wave(19));
+        assert!(wave::should_spawn_wave(20));
+        assert_eq!(wave::wave_enemies(1), vec![EnemyKind::Grunt]);
+        assert_eq!(
+            wave::wave_enemies(4),
+            vec![
+                EnemyKind::Grunt,
+                EnemyKind::Grunt,
+                EnemyKind::Runner,
+                EnemyKind::Armored,
+                EnemyKind::WireCutter
+            ]
+        );
+
+        let mut sim = test_sim("sim");
+        sim.step_ticks(20);
+        assert_eq!(sim.enemies.len(), 1);
+        assert_eq!(sim.enemies.values().next().unwrap().kind, EnemyKind::Grunt);
+
+        sim.step_ticks(80);
+        let runner_count = sim
+            .enemies
+            .values()
+            .filter(|enemy| enemy.kind == EnemyKind::Runner)
+            .count();
+        assert_eq!(runner_count, 1);
+        assert_eq!(
+            sim.logs
+                .iter()
+                .filter(|entry| entry.source == "wave" && entry.message.contains("contact"))
+                .count(),
+            2
         );
     }
 

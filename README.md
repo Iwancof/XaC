@@ -121,6 +121,8 @@ if ammo_count > 0 attack_best wire_cutter runner armored nearest
 
 The core is the defended 4x4 objective. Enemies that reach it damage core HP;
 when HP reaches zero the simulation enters a defeated state and stops running.
+Scheduled waves now spawn mixed enemy roles over time, including fast runners,
+armored pressure, and wire cutters that threaten the CPU network.
 
 The MVP core-Wasm ABI also exposes turret scanning as stable scan indices, so
 short scripts can inspect whether visible targets exist and attack a specific
