@@ -1,5 +1,14 @@
 import { Box, Code2, Copy, GitBranch, Hammer, RotateCw, Save, Trash2 } from "lucide-react";
-import type { BehaviorSource, BehaviorSummary, Block, BuildResult, Drone, Enemy, GameSnapshot } from "./types";
+import type {
+  BehaviorRuntimeStats,
+  BehaviorSource,
+  BehaviorSummary,
+  Block,
+  BuildResult,
+  Drone,
+  Enemy,
+  GameSnapshot
+} from "./types";
 
 interface InspectorProps {
   snapshot: GameSnapshot | null;
@@ -88,6 +97,7 @@ export function Inspector({
               <span>share {selectedNetwork.effective_per_device.toFixed(1)}</span>
             </div>
           )}
+          {selectedBlock.behavior_runtime && <RuntimeStats stats={selectedBlock.behavior_runtime} />}
           {selectedBlock.behavior_ref && (
             <>
               <label className="behavior-picker">
@@ -184,6 +194,7 @@ export function Inspector({
             ))}
             {Object.keys(selectedDrone.cargo.items).length === 0 && <span>empty cargo</span>}
           </div>
+          {selectedDrone.behavior_runtime && <RuntimeStats stats={selectedDrone.behavior_runtime} />}
           {droneBehaviorRef && (
             <>
               <label className="behavior-picker">
@@ -231,6 +242,8 @@ export function Inspector({
             <span>{behavior.summary.world}</span>
             <span>{behavior.summary.used_by} placements</span>
             <span>{behavior.summary.builtin ? "read-only preset" : "project behavior"}</span>
+            <span>status {behavior.summary.build_status}</span>
+            <span title={behavior.summary.source_path}>{behavior.summary.source_path}</span>
           </div>
           <div className="behavior-actions">
             <button onClick={onSave} disabled={!dirty || behavior.summary.builtin} title="Save source">
@@ -251,5 +264,20 @@ export function Inspector({
         </div>
       )}
     </section>
+  );
+}
+
+function RuntimeStats({ stats }: { stats: BehaviorRuntimeStats }) {
+  const hash = stats.wasm_hash ? stats.wasm_hash.slice(0, 10) : "none";
+  return (
+    <div className={stats.over_budget ? "runtime-card over-budget" : "runtime-card"}>
+      <span>runtime tick {stats.last_tick ?? "never"}</span>
+      <span>runs {stats.run_count}</span>
+      <span>
+        fuel {stats.fuel_spent}/{stats.fuel_budget}
+      </span>
+      <span>left {stats.fuel_remaining}</span>
+      <span>wasm {hash}</span>
+    </div>
   );
 }

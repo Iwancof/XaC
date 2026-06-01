@@ -573,6 +573,17 @@ pub struct Tile {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct BehaviorRuntimeStats {
+    pub last_tick: Option<u64>,
+    pub run_count: u64,
+    pub fuel_budget: u64,
+    pub fuel_spent: u64,
+    pub fuel_remaining: u64,
+    pub over_budget: bool,
+    pub wasm_hash: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Block {
     pub id: EntityId,
     pub kind: BlockKind,
@@ -587,6 +598,7 @@ pub struct Block {
     pub network_id: Option<u32>,
     pub effective_cpu_rate: f32,
     pub fuel_bank: f32,
+    pub behavior_runtime: Option<BehaviorRuntimeStats>,
     pub progress: u32,
     pub status: String,
 }
@@ -621,6 +633,7 @@ pub struct Drone {
     pub pos: WorldPos,
     pub battery: f32,
     pub logic_fuel: u64,
+    pub behavior_runtime: Option<BehaviorRuntimeStats>,
     pub cargo: Inventory,
     pub state: DroneState,
     pub job: Option<DeliveryJob>,
@@ -640,6 +653,7 @@ impl Drone {
             pos,
             battery: CARRIER_DRONE_BATTERY_CAPACITY,
             logic_fuel: CARRIER_DRONE_LOGIC_FUEL_CAPACITY,
+            behavior_runtime: None,
             cargo: Inventory::with_capacity(CARRIER_DRONE_CARGO_CAPACITY),
             state: DroneState::Docked,
             job: None,
@@ -898,6 +912,7 @@ mod tests {
         assert_eq!(drone.pos, WorldPos { x: 4.5, y: 8.5 });
         assert_eq!(drone.battery, CARRIER_DRONE_BATTERY_CAPACITY);
         assert_eq!(drone.logic_fuel, CARRIER_DRONE_LOGIC_FUEL_CAPACITY);
+        assert!(drone.behavior_runtime.is_none());
         assert_eq!(drone.cargo.capacity, CARRIER_DRONE_CARGO_CAPACITY);
         assert_eq!(drone.state, DroneState::Docked);
         assert!(drone.job.is_none());

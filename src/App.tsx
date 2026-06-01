@@ -226,8 +226,12 @@ export function App() {
         await saveBehavior(behavior.summary.id, editorValue);
       }
       const result = await buildBehavior(behavior.summary.id);
+      const next = await openBehavior(behavior.summary.id);
+      setBehavior(next);
+      setEditorValue(next.source);
       setBuildResult(result);
-      setSavedValue(editorValue);
+      setSavedValue(next.source);
+      setError(null);
       await refresh();
     } catch (err) {
       setError(String(err));

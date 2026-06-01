@@ -123,6 +123,8 @@ test("places minimum devices from the right block list and opens drill behavior"
 
   await page.getByRole("button", { name: /\+40/ }).click();
   await expect(page.locator(".metrics")).toContainText("core ore 41");
+  await expect(page.locator(".inspector")).toContainText("runtime tick");
+  await expect(page.locator(".inspector")).toContainText("wasm mocked-was");
   await page.getByRole("button", { name: /Ore Drill/ }).click();
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
@@ -136,6 +138,8 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".behavior-meta")).toContainText("Basic Drill");
   await expect(page.locator(".behavior-meta")).toContainText("builtin.drill.basic");
   await expect(page.locator(".behavior-meta")).toContainText("read-only preset");
+  await expect(page.locator(".behavior-meta")).toContainText("status builtin");
+  await expect(page.locator(".behavior-meta")).toContainText("assets/builtin/drill/basic.xac");
   await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /if output_blocked return/);
   await expect(page.getByTestId("code-editor")).toHaveAttribute("data-source", /mine/);
 
@@ -158,6 +162,7 @@ mine
   await expect(saveButton).toBeDisabled();
   await buildButton.click();
   await expect(page.locator(".build-ok")).toContainText("mock build succeeded");
+  await expect(page.locator(".behavior-meta")).toContainText("status built");
 
   await page.getByRole("button", { name: "Deconstruct", exact: true }).click();
   await expect(page.locator(".metrics")).toContainText("blocks 22");

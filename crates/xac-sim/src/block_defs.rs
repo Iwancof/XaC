@@ -44,6 +44,7 @@ pub fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Bl
         network_id: None,
         effective_cpu_rate: kind.local_cpu_rate(),
         fuel_bank: 0.0,
+        behavior_runtime: None,
         progress: 0,
         status: "idle".to_string(),
     }

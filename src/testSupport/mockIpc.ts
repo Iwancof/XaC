@@ -14,6 +14,7 @@ import {
 } from "../gameMetadata";
 import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import type {
+  BehaviorRuntimeStats,
   BehaviorSource,
   BehaviorSummary,
   Block,
@@ -44,6 +45,7 @@ type CommandCall = {
 
 type MutableBehavior = BehaviorSource;
 type IdKind = BlockKind | "behavior" | "drone";
+type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
   | { kind: "drone"; entity: Drone; behaviorKind: "carrier_drone" };
@@ -272,8 +274,12 @@ function runTicks(count: number) {
       break;
     }
     state.tick += 1;
+    recomputeNetworks(state.blocks);
 
     for (const block of state.blocks) {
+      if (block.active && block.behavior_ref) {
+        runMockBehavior(block);
+      }
       if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch") continue;
       block.progress += 1;
       if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
@@ -423,6 +429,7 @@ function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind))
     network_id: isNetworkNode(kind) ? 1 : null,
     effective_cpu_rate: blockLocalCpuRate(kind),
     fuel_bank: 0,
+    behavior_runtime: null,
     progress: 0,
     status: "idle"
   };
@@ -475,6 +482,7 @@ function spawnCarrierDrone(homePortId?: string) {
     pos: { x: port.pos.x + 0.5, y: port.pos.y + 0.5 },
     battery: 100,
     logic_fuel: 1000,
+    behavior_runtime: null,
     cargo: { items: {}, capacity: 20 },
     state: "docked",
     job: null
@@ -595,6 +603,37 @@ function usedBy(behaviorId: string) {
     state.blocks.filter((block) => block.behavior_ref === behaviorId).length +
     state.drones.filter((drone) => drone.behavior_ref === behaviorId).length
   );
+}
+
+function runMockBehavior(block: Block) {
+  const minInvocationFuel = 40;
+  const fuelRate = block.effective_cpu_rate;
+  const maxBank = Math.max(fuelRate * 8, minInvocationFuel);
+  block.fuel_bank = Math.min(maxBank, block.fuel_bank + fuelRate / 20);
+  if (block.fuel_bank < minInvocationFuel) return;
+
+  const fuelBudget = Math.floor(block.fuel_bank);
+  const fuelSpent = Math.min(8, fuelBudget);
+  block.fuel_bank = Math.max(0, block.fuel_bank - fuelSpent);
+  recordRuntime(block, fuelBudget, fuelSpent, fuelBudget - fuelSpent, "mocked-wasm-hash");
+}
+
+function recordRuntime(
+  entity: RuntimeEntity,
+  fuelBudget: number,
+  fuelSpent: number,
+  fuelRemaining: number,
+  wasmHash: string
+) {
+  entity.behavior_runtime = {
+    last_tick: state.tick,
+    run_count: (entity.behavior_runtime?.run_count ?? 0) + 1,
+    fuel_budget: fuelBudget,
+    fuel_spent: fuelSpent,
+    fuel_remaining: fuelRemaining,
+    over_budget: false,
+    wasm_hash: wasmHash
+  };
 }
 
 function makeId(kind: IdKind) {

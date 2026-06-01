@@ -622,6 +622,17 @@ fn lazy_runtime_compile_persists_wasm_cache_for_saved_behavior() {
             .any(|entry| { entry.source == drill_id && entry.message == "lazy compiled" }),
         "saved code should run through lazy Wasm compilation"
     );
+    let stats = sim.blocks[&drill_id]
+        .behavior_runtime
+        .as_ref()
+        .expect("Wasm execution should expose per-block runtime stats");
+    assert_eq!(stats.last_tick, Some(1));
+    assert_eq!(stats.run_count, 1);
+    assert_eq!(stats.fuel_budget, 40);
+    assert!(stats.fuel_spent > 0);
+    assert!(stats.fuel_remaining < stats.fuel_budget);
+    assert!(!stats.over_budget);
+    assert_eq!(stats.wasm_hash.as_deref(), Some(wasm_hash.as_str()));
 
     let cached_wasm = fs::read(
         config_root
@@ -1473,9 +1484,22 @@ fn docked_carrier_drone_banks_wasm_fuel_from_home_network_cpu() {
             connected.drones[&connected_drone_id].job.is_some(),
             "docked drone on the core network should bank enough network CPU fuel to run its Wasm behavior"
         );
+    let connected_stats = connected.drones[&connected_drone_id]
+        .behavior_runtime
+        .as_ref()
+        .expect("connected drone should expose its Wasm runtime stats");
+    assert!(connected_stats.fuel_budget >= 40);
+    assert!(connected_stats.fuel_spent > 0);
+    assert!(!connected_stats.over_budget);
     assert!(
         isolated.drones[&isolated_drone_id].job.is_none(),
         "docked drone on a small isolated drone_port network should still be banking fuel"
+    );
+    assert!(
+        isolated.drones[&isolated_drone_id]
+            .behavior_runtime
+            .is_none(),
+        "isolated drone should not expose runtime stats until it has enough fuel to execute"
     );
 }
 

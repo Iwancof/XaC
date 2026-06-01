@@ -120,6 +120,7 @@ button.danger:hover:not(:disabled) {
 
 .metrics span,
 .network-card span,
+.runtime-card span,
 .inventory span {
   border: 1px solid #2a363d;
   border-radius: 5px;
@@ -211,6 +212,7 @@ button.danger:hover:not(:disabled) {
 
 .inventory,
 .network-card,
+.runtime-card,
 .behavior-picker,
 .behavior-actions,
 .behavior-meta > div {
@@ -222,9 +224,22 @@ button.danger:hover:not(:disabled) {
 
 .inventory,
 .network-card,
+.runtime-card,
 .behavior-picker,
 .behavior-meta {
   margin-top: 10px;
+}
+
+.runtime-card span {
+  border-color: #31404a;
+  background: #162025;
+  color: #abc1ca;
+}
+
+.runtime-card.over-budget span {
+  border-color: #69313a;
+  background: #27171a;
+  color: #fca5a5;
 }
 
 .behavior-picker {
@@ -256,6 +271,13 @@ button.danger:hover:not(:disabled) {
 .muted,
 .empty-editor {
   color: #8da0aa;
+}
+
+.behavior-meta span {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .block-list {

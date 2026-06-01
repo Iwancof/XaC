@@ -33,6 +33,16 @@ export interface Inventory {
   capacity: number;
 }
 
+export interface BehaviorRuntimeStats {
+  last_tick: number | null;
+  run_count: number;
+  fuel_budget: number;
+  fuel_spent: number;
+  fuel_remaining: number;
+  over_budget: boolean;
+  wasm_hash: string | null;
+}
+
 export interface Tile {
   pos: Pos;
   terrain: TerrainKind;
@@ -55,6 +65,7 @@ export interface Block {
   network_id: number | null;
   effective_cpu_rate: number;
   fuel_bank: number;
+  behavior_runtime: BehaviorRuntimeStats | null;
   progress: number;
   status: string;
 }
@@ -86,6 +97,7 @@ export interface Drone {
   pos: Pos;
   battery: number;
   logic_fuel: number;
+  behavior_runtime: BehaviorRuntimeStats | null;
   cargo: Inventory;
   state: "docked" | "delivering" | "returning" | "offline";
   job: DeliveryJob | null;

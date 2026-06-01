@@ -263,6 +263,7 @@ impl Simulation {
                 return None;
             }
         };
+        self.record_drone_behavior_runtime(drone_id, fuel, &eval);
         self.spend_fuel_bank(drone_id, eval.fuel_spent);
         self.spend_drone_logic_fuel(drone_id, eval.fuel_spent);
         if eval.over_budget {

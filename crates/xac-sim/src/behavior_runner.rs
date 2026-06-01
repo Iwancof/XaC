@@ -55,6 +55,7 @@ impl Simulation {
 
             match self.runtime.evaluate_compiled(&compiled, fuel, host_input) {
                 Ok(eval) => {
+                    self.record_block_behavior_runtime(&id, fuel, &eval);
                     self.spend_fuel_bank(&id, eval.fuel_spent);
                     if eval.over_budget {
                         if let Some(block) = self.blocks.get_mut(&id) {
