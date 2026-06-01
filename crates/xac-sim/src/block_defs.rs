@@ -48,32 +48,6 @@ pub fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Bl
     }
 }
 
-pub fn kind_name(kind: BlockKind) -> &'static str {
-    match kind {
-        BlockKind::Core => "core",
-        BlockKind::Wire => "wire",
-        BlockKind::CpuNode => "cpu_node",
-        BlockKind::Drill => "drill",
-        BlockKind::Conveyor => "conveyor",
-        BlockKind::Router => "router",
-        BlockKind::Storage => "storage",
-        BlockKind::Assembler => "assembler",
-        BlockKind::Turret => "turret",
-        BlockKind::DronePort => "drone_port",
-    }
-}
-
-pub fn default_behavior_for(kind: BlockKind) -> Option<&'static str> {
-    match kind {
-        BlockKind::Drill => Some("builtin.drill.basic"),
-        BlockKind::Router => Some("builtin.router.basic"),
-        BlockKind::Assembler => Some("builtin.assembler.basic"),
-        BlockKind::Turret => Some("builtin.turret.basic"),
-        BlockKind::DronePort => Some("builtin.drone_port.basic"),
-        _ => None,
-    }
-}
-
 pub fn cpu_scaled_threshold(effective_cpu_rate: f32, base: u32) -> u32 {
     let speedup = (effective_cpu_rate / 8.0).clamp(0.1, 10.0);
     ((base as f32 / speedup).ceil() as u32).max(3)

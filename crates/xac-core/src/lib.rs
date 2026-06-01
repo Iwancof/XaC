@@ -199,6 +199,32 @@ impl BehaviorKind {
 }
 
 impl BlockKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BlockKind::Core => "core",
+            BlockKind::Wire => "wire",
+            BlockKind::CpuNode => "cpu_node",
+            BlockKind::Drill => "drill",
+            BlockKind::Conveyor => "conveyor",
+            BlockKind::Router => "router",
+            BlockKind::Storage => "storage",
+            BlockKind::Assembler => "assembler",
+            BlockKind::Turret => "turret",
+            BlockKind::DronePort => "drone_port",
+        }
+    }
+
+    pub fn default_behavior_id(self) -> Option<&'static str> {
+        match self {
+            BlockKind::Drill => Some("builtin.drill.basic"),
+            BlockKind::Router => Some("builtin.router.basic"),
+            BlockKind::Assembler => Some("builtin.assembler.basic"),
+            BlockKind::Turret => Some("builtin.turret.basic"),
+            BlockKind::DronePort => Some("builtin.drone_port.basic"),
+            _ => None,
+        }
+    }
+
     pub fn is_programmable(self) -> bool {
         matches!(
             self,
@@ -612,6 +638,44 @@ mod tests {
         assert!(!BlockKind::Drill.can_accept_item(&ItemKind::Ore));
         assert!(!BlockKind::Wire.can_accept_item(&ItemKind::Ore));
         assert!(!BlockKind::CpuNode.can_accept_item(&ItemKind::Ore));
+    }
+
+    #[test]
+    fn block_kind_identity_and_default_behavior_contracts_are_centralized() {
+        assert_eq!(BlockKind::Core.as_str(), "core");
+        assert_eq!(BlockKind::Wire.as_str(), "wire");
+        assert_eq!(BlockKind::CpuNode.as_str(), "cpu_node");
+        assert_eq!(BlockKind::Drill.as_str(), "drill");
+        assert_eq!(BlockKind::Conveyor.as_str(), "conveyor");
+        assert_eq!(BlockKind::Router.as_str(), "router");
+        assert_eq!(BlockKind::Storage.as_str(), "storage");
+        assert_eq!(BlockKind::Assembler.as_str(), "assembler");
+        assert_eq!(BlockKind::Turret.as_str(), "turret");
+        assert_eq!(BlockKind::DronePort.as_str(), "drone_port");
+
+        assert_eq!(
+            BlockKind::Drill.default_behavior_id(),
+            Some("builtin.drill.basic")
+        );
+        assert_eq!(
+            BlockKind::Router.default_behavior_id(),
+            Some("builtin.router.basic")
+        );
+        assert_eq!(
+            BlockKind::Assembler.default_behavior_id(),
+            Some("builtin.assembler.basic")
+        );
+        assert_eq!(
+            BlockKind::Turret.default_behavior_id(),
+            Some("builtin.turret.basic")
+        );
+        assert_eq!(
+            BlockKind::DronePort.default_behavior_id(),
+            Some("builtin.drone_port.basic")
+        );
+        assert_eq!(BlockKind::Core.default_behavior_id(), None);
+        assert_eq!(BlockKind::Conveyor.default_behavior_id(), None);
+        assert_eq!(BlockKind::Wire.default_behavior_id(), None);
     }
 
     #[test]

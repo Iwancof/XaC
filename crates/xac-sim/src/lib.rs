@@ -22,7 +22,7 @@ mod recipes;
 mod wave;
 
 use behavior::{load_behaviors, BehaviorPackage};
-use block_defs::{build_tiles, default_behavior_for, kind_name, make_block};
+use block_defs::{build_tiles, make_block};
 use geometry::footprint_positions;
 
 pub const MAP_WIDTH: i32 = 64;
@@ -122,9 +122,9 @@ impl Simulation {
             }
         }
 
-        let id = self.make_id(kind_name(kind));
+        let id = self.make_id(kind.as_str());
         let mut block = make_block(id.clone(), kind, pos, dir);
-        block.behavior_ref = default_behavior_for(kind).map(ToOwned::to_owned);
+        block.behavior_ref = kind.default_behavior_id().map(ToOwned::to_owned);
         if kind == BlockKind::Turret {
             block.tags.push("frontline".to_string());
         }
@@ -158,7 +158,7 @@ impl Simulation {
         self.log(
             LogLevel::Info,
             block_id.to_string(),
-            format!("deconstructed {}", kind_name(block.kind)),
+            format!("deconstructed {}", block.kind.as_str()),
         );
         self.recompute_networks();
         Ok(self.snapshot())
@@ -175,7 +175,7 @@ impl Simulation {
         self.log(
             LogLevel::Info,
             block_id.to_string(),
-            format!("rotated {} to {dir:?}", kind_name(kind)),
+            format!("rotated {} to {dir:?}", kind.as_str()),
         );
         Ok(self.snapshot())
     }
