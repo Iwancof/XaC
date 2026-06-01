@@ -11,3 +11,6 @@ sha2 = "0.10"
 wasmtime = "36.0"
 wat = "1.240"
 xac-core = { path = "../xac-core" }
+
+[dev-dependencies]
+wit-parser = "0.236"

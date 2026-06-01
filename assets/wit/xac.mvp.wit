@@ -1,174 +1,179 @@
 package xac:mvp;
 
+/// Current behavior ABI draft for XaC's core Wasm runtime.
+///
+/// The engine currently links raw core Wasm imports such as
+/// `xac:drill/mine` and `xac:router/push_item_dir`. This WIT file records the
+/// same host API surface in SDK-friendly names. SDK bindings should lower
+/// these names to the raw import modules and integer codes used by
+/// `crates/xac-wasm`.
 interface types {
-  record vec2 {
-    x: s32,
-    y: s32,
+  enum direction {
+    north,
+    east,
+    south,
+    west,
   }
 
-  type entity-id = string;
-  type item-kind = string;
-  type enemy-kind = string;
-
-  record item {
-    id: entity-id,
-    kind: item-kind,
-    amount: s32,
+  enum item-kind {
+    ore,
+    plate,
+    ammo,
+    cpu-part,
+    drone-part,
   }
 
-  record enemy-info {
-    id: entity-id,
-    kind: enemy-kind,
-    pos: vec2,
-    hp: s32,
-    distance: f32,
+  enum enemy-kind {
+    grunt,
+    runner,
+    armored,
+    wire-cutter,
   }
 
-  record delivery-job {
-    id: entity-id,
-    item-kind: item-kind,
-    amount: s32,
-    pickup: entity-id,
-    dropoff: entity-id,
-  }
-
-  variant value {
-    none,
-    bool(bool),
-    s32(s32),
-    s64(s64),
-    f32(float32),
-    f64(float64),
-    string(string),
-    id(entity-id),
-    pos(vec2),
+  enum dropoff-tag {
+    frontline,
   }
 }
 
 interface common-api {
-  use types.{value};
+  use types.{item-kind};
 
-  log: func(message: string);
-  net-store-get: func(key: string) -> value;
-  net-store-set: func(key: string, value: value);
-  net-store-delete: func(key: string);
-  stock-count: func(item-kind: string) -> s32;
-  stock-capacity: func(item-kind: string) -> s32;
-  has-space: func(item-kind: string, amount: s32) -> bool;
+  /// Writes a short behavior log message. Raw core ABI: xac:common/log(ptr,len).
+  log: func(message: string) -> bool;
   fuel-remaining: func() -> u64;
+  stock-count: func(item: item-kind) -> s32;
+  stock-capacity: func(item: item-kind) -> s32;
+  has-space: func(item: item-kind, amount: s32) -> bool;
+}
+
+interface net-api {
+  store-get-i32: func(key: s32) -> s32;
+  store-set-i32: func(key: s32, value: s32) -> bool;
+  store-delete-i32: func(key: s32) -> bool;
 }
 
 interface drill-api {
+  use types.{item-kind};
+
   output-blocked: func() -> bool;
   mine: func() -> bool;
-  output: func(item-kind: string) -> bool;
-  ore-kind: func() -> string;
+  output: func(item: item-kind) -> bool;
+  /// Returns an item-kind code in the raw ABI, or -1 when no ore exists.
+  ore-kind: func() -> s32;
 }
 
 interface router-api {
-  use types.{item};
+  use types.{direction, item-kind};
 
-  push: func(dir: string, item: item) -> bool;
-  push-item-dir: func(item-kind: string, dir: string) -> bool;
-  push-any: func(item: item) -> bool;
-  output-available: func(dir: string) -> bool;
-  output-item-available: func(item-kind: string, dir: string) -> bool;
-}
-
-interface turret-api {
-  use types.{enemy-info};
-
-  scan-enemies: func() -> list<enemy-info>;
-  enemy-kind: func(index: s32) -> enemy-kind;
-  enemy-hp: func(index: s32) -> s32;
-  enemy-distance: func(index: s32) -> f32;
-  can-attack: func(index: s32) -> bool;
-  attack: func(enemy-id: string) -> bool;
-  attack-nearest: func() -> bool;
-  attack-best: func(policy: string) -> bool;
-  ammo-count: func() -> s32;
+  push-any: func() -> bool;
+  push-dir: func(dir: direction) -> bool;
+  push-item-dir: func(item: item-kind, dir: direction) -> bool;
+  output-available: func(dir: direction) -> bool;
+  output-item-available: func(item: item-kind, dir: direction) -> bool;
 }
 
 interface assembler-api {
-  set-recipe: func(recipe-id: string) -> bool;
-  current-recipe: func() -> string;
+  use types.{item-kind};
+
+  set-recipe: func(recipe: item-kind) -> bool;
+  /// Returns an item-kind code in the raw ABI, or -1 when no recipe is set.
+  current-recipe: func() -> s32;
   can-produce: func() -> bool;
+  input-count: func(item: item-kind) -> s32;
+  output-count: func(item: item-kind) -> s32;
   produce: func() -> bool;
-  input-count: func(item-kind: string) -> s32;
-  output-count: func(item-kind: string) -> s32;
 }
 
-interface drone-api {
-  battery-ratio: func() -> f32;
-  battery-percent: func() -> s32;
-  logic-fuel-remaining: func() -> u64;
-  has-job: func() -> bool;
-  has-pending-job: func() -> bool;
-  move-to: func(x: s32, y: s32) -> bool;
-  load: func(item-kind: string, amount: s32) -> s32;
-  unload: func(item-kind: string, amount: s32) -> s32;
-  cargo-count: func(item-kind: string) -> s32;
-  return-to-port: func() -> bool;
-  claim-delivery-job: func() -> bool;
-  deliver: func() -> bool;
-  idle: func() -> bool;
+interface turret-api {
+  /// Returns the number of visible enemies in the scan window.
+  scan-enemies: func() -> s32;
+  /// Returns an enemy-kind code in the raw ABI, or -1 for an invalid index.
+  enemy-kind: func(index: s32) -> s32;
+  enemy-hp: func(index: s32) -> s32;
+  enemy-distance: func(index: s32) -> f32;
+  can-attack: func(index: s32) -> bool;
+  attack: func(index: s32) -> bool;
+  ammo-count: func() -> s32;
+  attack-nearest: func() -> bool;
+  /// Policy is the packed priority code produced by XaC Script/Tiny.
+  attack-best: func(policy: s32) -> bool;
 }
 
 interface drone-port-api {
-  stock-count: func(item-kind: string) -> s32;
+  use types.{dropoff-tag, item-kind};
+
+  dispatch: func() -> bool;
+  stock-count: func(item: item-kind) -> s32;
   charge-docked-drones: func() -> bool;
   docked-drone-count: func() -> s32;
   pending-job-count: func() -> s32;
-  create-delivery-job: func(item-kind: string, amount: s32, dropoff-tag: string) -> bool;
+  create-delivery-job: func(item: item-kind, amount: s32, dropoff: dropoff-tag)
+    -> bool;
   dispatch-idle-drones: func() -> bool;
-  dispatch: func() -> bool;
+}
+
+interface drone-api {
+  use types.{item-kind};
+
+  battery-percent: func() -> s32;
+  battery-ratio: func() -> f32;
+  logic-fuel-remaining: func() -> u64;
+  has-job: func() -> bool;
+  has-pending-job: func() -> bool;
+  return-to-port: func() -> bool;
+  claim-delivery-job: func() -> bool;
+  deliver: func() -> bool;
+  move-to: func(x: s32, y: s32) -> bool;
+  load: func(item: item-kind, amount: s32) -> s32;
+  unload: func(item: item-kind, amount: s32) -> s32;
+  cargo-count: func(item: item-kind) -> s32;
+  idle: func() -> bool;
 }
 
 world drill-behavior {
   import common-api;
+  import net-api;
   import drill-api;
 
-  export init: func();
   export tick: func();
 }
 
 world router-behavior {
   import common-api;
+  import net-api;
   import router-api;
-  use types.{item};
 
-  export init: func();
-  export on-item: func(item: item);
-}
-
-world turret-behavior {
-  import common-api;
-  import turret-api;
-
-  export init: func();
   export tick: func();
 }
 
 world assembler-behavior {
   import common-api;
+  import net-api;
   import assembler-api;
 
-  export init: func();
+  export tick: func();
+}
+
+world turret-behavior {
+  import common-api;
+  import net-api;
+  import turret-api;
+
   export tick: func();
 }
 
 world drone-port-behavior {
   import common-api;
+  import net-api;
   import drone-port-api;
 
-  export init: func();
   export tick: func();
 }
 
 world carrier-drone-behavior {
   import common-api;
+  import net-api;
   import drone-api;
 
-  export init: func();
   export tick: func();
 }

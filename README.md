@@ -48,8 +48,9 @@ desktop workspace or launching a Tauri window.
 
 ## MVP Notes
 
-The WIT draft lives at `assets/wit/xac.mvp.wit`. The current vertical slice
-accepts short XaC Script behavior source such as:
+The WIT draft lives at `assets/wit/xac.mvp.wit`. It is parse-tested and tracks
+the current raw Wasm host-import ABI used by `crates/xac-wasm`. The current
+vertical slice accepts short XaC Script behavior source such as:
 
 ```text
 if output_blocked return

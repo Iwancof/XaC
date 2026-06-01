@@ -5518,6 +5518,7 @@ dependencies = [
  "sha2",
  "wasmtime",
  "wat",
+ "wit-parser 0.236.1",
  "xac-core",
 ]
 

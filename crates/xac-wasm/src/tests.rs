@@ -27,6 +27,325 @@ fn router_item_available(item: ItemKind, dir: Direction) -> BTreeMap<ItemKind, [
 }
 
 #[test]
+fn wit_draft_declares_current_behavior_abi() {
+    let wit = include_str!("../../../assets/wit/xac.mvp.wit");
+    let mut resolve = wit_parser::Resolve::default();
+    resolve
+        .push_str("assets/wit/xac.mvp.wit", wit)
+        .expect("WIT draft should parse");
+
+    let imports = [
+        (None, "xac:common", "log", "log: func"),
+        (None, "xac:common", "fuel_remaining", "fuel-remaining: func"),
+        (None, "xac:common", "stock_count", "stock-count: func"),
+        (None, "xac:common", "stock_capacity", "stock-capacity: func"),
+        (None, "xac:common", "has_space", "has-space: func"),
+        (None, "xac:net", "store_get_i32", "store-get-i32: func"),
+        (None, "xac:net", "store_set_i32", "store-set-i32: func"),
+        (
+            None,
+            "xac:net",
+            "store_delete_i32",
+            "store-delete-i32: func",
+        ),
+        (
+            Some(BehaviorKind::Drill),
+            "xac:drill",
+            "output_blocked",
+            "output-blocked: func",
+        ),
+        (Some(BehaviorKind::Drill), "xac:drill", "mine", "mine: func"),
+        (
+            Some(BehaviorKind::Drill),
+            "xac:drill",
+            "output",
+            "output: func",
+        ),
+        (
+            Some(BehaviorKind::Drill),
+            "xac:drill",
+            "ore_kind",
+            "ore-kind: func",
+        ),
+        (
+            Some(BehaviorKind::Router),
+            "xac:router",
+            "push_any",
+            "push-any: func",
+        ),
+        (
+            Some(BehaviorKind::Router),
+            "xac:router",
+            "push_dir",
+            "push-dir: func",
+        ),
+        (
+            Some(BehaviorKind::Router),
+            "xac:router",
+            "push_item_dir",
+            "push-item-dir: func",
+        ),
+        (
+            Some(BehaviorKind::Router),
+            "xac:router",
+            "output_available",
+            "output-available: func",
+        ),
+        (
+            Some(BehaviorKind::Router),
+            "xac:router",
+            "output_item_available",
+            "output-item-available: func",
+        ),
+        (
+            Some(BehaviorKind::Assembler),
+            "xac:assembler",
+            "set_recipe",
+            "set-recipe: func",
+        ),
+        (
+            Some(BehaviorKind::Assembler),
+            "xac:assembler",
+            "current_recipe",
+            "current-recipe: func",
+        ),
+        (
+            Some(BehaviorKind::Assembler),
+            "xac:assembler",
+            "can_produce",
+            "can-produce: func",
+        ),
+        (
+            Some(BehaviorKind::Assembler),
+            "xac:assembler",
+            "input_count",
+            "input-count: func",
+        ),
+        (
+            Some(BehaviorKind::Assembler),
+            "xac:assembler",
+            "output_count",
+            "output-count: func",
+        ),
+        (
+            Some(BehaviorKind::Assembler),
+            "xac:assembler",
+            "produce",
+            "produce: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "scan_enemies",
+            "scan-enemies: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "enemy_kind",
+            "enemy-kind: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "enemy_hp",
+            "enemy-hp: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "enemy_distance",
+            "enemy-distance: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "can_attack",
+            "can-attack: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "attack",
+            "attack: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "ammo_count",
+            "ammo-count: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "attack_nearest",
+            "attack-nearest: func",
+        ),
+        (
+            Some(BehaviorKind::Turret),
+            "xac:turret",
+            "attack_best",
+            "attack-best: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "dispatch",
+            "dispatch: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "stock_count",
+            "stock-count: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "charge_docked_drones",
+            "charge-docked-drones: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "docked_drone_count",
+            "docked-drone-count: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "pending_job_count",
+            "pending-job-count: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "create_delivery_job",
+            "create-delivery-job: func",
+        ),
+        (
+            Some(BehaviorKind::DronePort),
+            "xac:drone_port",
+            "dispatch_idle_drones",
+            "dispatch-idle-drones: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "battery_percent",
+            "battery-percent: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "battery_ratio",
+            "battery-ratio: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "logic_fuel_remaining",
+            "logic-fuel-remaining: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "has_job",
+            "has-job: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "has_pending_job",
+            "has-pending-job: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "return_to_port",
+            "return-to-port: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "claim_delivery_job",
+            "claim-delivery-job: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "deliver",
+            "deliver: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "move_to",
+            "move-to: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "load",
+            "load: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "unload",
+            "unload: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "cargo_count",
+            "cargo-count: func",
+        ),
+        (
+            Some(BehaviorKind::CarrierDrone),
+            "xac:drone",
+            "idle",
+            "idle: func",
+        ),
+    ];
+
+    for (kind, module, raw_name, wit_name) in imports {
+        let runtime_allows = kind
+            .map(|kind| allowed_kind_import(kind, module, raw_name))
+            .unwrap_or_else(|| allowed_common_import(module, raw_name));
+        assert!(runtime_allows, "runtime should allow {module}/{raw_name}");
+        assert!(wit.contains(wit_name), "WIT should declare {wit_name}");
+    }
+
+    for world in [
+        "drill-behavior",
+        "router-behavior",
+        "assembler-behavior",
+        "turret-behavior",
+        "drone-port-behavior",
+        "carrier-drone-behavior",
+    ] {
+        let world_header = format!("world {world}");
+        let start = wit.find(&world_header).expect("world should exist in WIT");
+        let rest = &wit[start + world_header.len()..];
+        let end = rest.find("\nworld ").unwrap_or(rest.len());
+        let world_body = &rest[..end];
+        assert!(
+            world_body.contains("import net-api;"),
+            "{world} should import the shared network store API"
+        );
+        assert!(
+            world_body.contains("export tick: func();"),
+            "{world} should use the runtime tick ABI"
+        );
+    }
+    assert!(
+        !wit.contains("on-item"),
+        "router WIT should not describe the removed on-item export ABI"
+    );
+}
+
+#[test]
 fn compiles_wat_and_evaluates_action_code() {
     let runtime = BehaviorRuntime::new().unwrap();
     let compiled = runtime
