@@ -601,6 +601,85 @@ fn edited_drill_behavior_mines_and_belts_ore_to_four_by_four_core() {
 }
 
 #[test]
+fn playable_mining_loop_uses_code_cpu_wire_and_free_moving_enemies() {
+    let mut sim = test_sim("sim");
+
+    for x in 20..=30 {
+        sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
+        .unwrap();
+    for x in 21..30 {
+        sim.place_block(BlockKind::Conveyor, Pos { x, y: 30 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+
+    let copied = sim.edit_builtin_copy(&drill_id).unwrap();
+    let behavior_id = copied.summary.id.clone();
+    let tiny_source = "fn tick() { if (output_blocked()) { return; } mine(); }";
+    sim.save_behavior(&behavior_id, tiny_source.to_string())
+        .unwrap();
+    assert_eq!(
+        sim.open_behavior(&behavior_id)
+            .unwrap()
+            .summary
+            .source_language,
+        "Tiny Function"
+    );
+    assert!(sim.build_behavior(&behavior_id).unwrap().success);
+
+    let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+    assert_eq!(
+        sim.block_id_at(Pos { x: 33, y: 33 }),
+        Some(core_id.clone()),
+        "the core should occupy a 4x4 footprint for logistics and targeting"
+    );
+    let starting_core_ore = sim.blocks[&core_id].inventory.count(&ItemKind::Ore);
+    let effective_cpu_rate = sim.blocks[&drill_id].effective_cpu_rate;
+    assert!(
+        effective_cpu_rate > BlockKind::Drill.local_cpu_rate(),
+        "wire plus cpu_node should boost the drill above local CPU"
+    );
+
+    sim.step_ticks(240);
+
+    assert!(
+        sim.blocks[&core_id].inventory.count(&ItemKind::Ore) > starting_core_ore,
+        "player-authored Tiny code should compile to Wasm, mine ore, and belt it into the 4x4 core"
+    );
+    assert!(
+        sim.snapshot().item_flows.iter().any(|flow| {
+            flow.item == ItemKind::Ore
+                && flow.from_entity.starts_with("conveyor")
+                && flow.to_entity == core_id
+        }),
+        "the mining loop should expose visible conveyor-to-core ore flow"
+    );
+
+    let enemy_id = sim.make_id("enemy");
+    let mut enemy = combat::enemy_at(
+        enemy_id.clone(),
+        EnemyKind::Runner,
+        WorldPos { x: 32.5, y: 20.25 },
+    );
+    enemy.move_speed = 0.35;
+    sim.enemies.insert(enemy_id.clone(), enemy);
+
+    sim.step_ticks(1);
+
+    let enemy = &sim.enemies[&enemy_id];
+    assert_eq!(enemy.target_id.as_deref(), Some(core_id.as_str()));
+    assert!(
+        (enemy.pos.y.fract()).abs() > f32::EPSILON,
+        "mobile enemies should keep sub-tile world positions instead of snapping to grid cells"
+    );
+}
+
+#[test]
 fn behavior_build_compiles_wat_and_save_invalidates_cache() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Turret, Pos { x: 34, y: 32 }, Direction::East)

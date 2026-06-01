@@ -32,11 +32,7 @@ impl Simulation {
         let Some(dst_id) = self.block_id_at(block.pos.step(block.dir)) else {
             return true;
         };
-        !self
-            .blocks
-            .get(&dst_id)
-            .map(|dst| dst.kind.can_accept_item(&ItemKind::Ore) && dst.inventory.has_space(1))
-            .unwrap_or(false)
+        !self.receiver_can_accept(&dst_id, &ItemKind::Ore, 1)
     }
 
     pub(crate) fn transfer_from(&mut self, block_id: &str, dir: Direction, amount: u32) -> bool {
@@ -136,19 +132,22 @@ impl Simulation {
         amount: u32,
     ) -> Option<(ItemKind, u32)> {
         let src = self.blocks.get(src_id)?;
-        let dst = self.blocks.get(dst_id)?;
-        if !dst.inventory.has_space(amount) {
-            return None;
-        }
         src.inventory
             .items
             .iter()
             .find(|(item_kind, available)| {
                 **available > 0
                     && item_filter.is_none_or(|filter| filter == *item_kind)
-                    && dst.kind.can_accept_item(item_kind)
+                    && self.receiver_can_accept(dst_id, item_kind, amount)
             })
             .map(|(kind, amount)| (kind.clone(), *amount))
+    }
+
+    fn receiver_can_accept(&self, dst_id: &str, item_kind: &ItemKind, amount: u32) -> bool {
+        self.blocks
+            .get(dst_id)
+            .map(|dst| dst.kind.can_accept_item(item_kind) && dst.inventory.has_space(amount))
+            .unwrap_or(false)
     }
 
     fn flow_endpoints(
