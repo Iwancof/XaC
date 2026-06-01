@@ -285,12 +285,12 @@ impl EnemyKind {
         }
     }
 
-    pub fn speed_ticks(self) -> u32 {
+    pub fn attack_cooldown_ticks(self) -> u32 {
         match self {
-            EnemyKind::Grunt => 8,
-            EnemyKind::Runner => 3,
-            EnemyKind::Armored => 12,
-            EnemyKind::WireCutter => 5,
+            EnemyKind::Grunt => 20,
+            EnemyKind::Runner => 12,
+            EnemyKind::Armored => 28,
+            EnemyKind::WireCutter => 16,
         }
     }
 
@@ -421,9 +421,8 @@ pub struct Enemy {
     pub pos: WorldPos,
     pub hp: i32,
     pub max_hp: i32,
-    pub speed_ticks: u32,
-    pub move_cooldown: u32,
     pub move_speed: f32,
+    pub attack_cooldown: u32,
     pub target_id: Option<EntityId>,
 }
 

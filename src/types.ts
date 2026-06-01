@@ -64,9 +64,8 @@ export interface Enemy {
   pos: Pos;
   hp: number;
   max_hp: number;
-  speed_ticks: number;
-  move_cooldown: number;
   move_speed: number;
+  attack_cooldown: number;
   target_id: string | null;
 }
 

@@ -86,12 +86,23 @@ impl Simulation {
             };
 
             enemy.target_id = Some(target_id.clone());
+            if enemy.attack_cooldown > 0 {
+                enemy.attack_cooldown -= 1;
+            }
             if enemy.pos.distance(target_pos) <= 0.2 {
-                if let Some(block) = self.blocks.get_mut(&target_id) {
-                    block.hp -= enemy.kind.attack_damage();
+                if enemy.attack_cooldown == 0 {
+                    if let Some(block) = self.blocks.get_mut(&target_id) {
+                        block.hp -= enemy.kind.attack_damage();
+                    }
+                    enemy.attack_cooldown = enemy.kind.attack_cooldown_ticks();
+                } else if let Some(block) = self.blocks.get_mut(&target_id) {
+                    block.status = format!("under attack by {}", enemy.id);
                 }
             } else {
                 enemy.pos = enemy.pos.move_toward(target_pos, enemy.move_speed);
+                if let Some(block) = self.blocks.get_mut(&target_id) {
+                    block.status = format!("targeted by {}", enemy.id);
+                }
             }
         }
     }
@@ -174,9 +185,8 @@ pub(crate) fn enemy_at(id: String, kind: EnemyKind, pos: WorldPos) -> Enemy {
         pos,
         hp,
         max_hp: hp,
-        speed_ticks: kind.speed_ticks(),
-        move_cooldown: 0,
         move_speed: kind.move_speed(),
+        attack_cooldown: 0,
         target_id: None,
     }
 }

@@ -587,6 +587,33 @@ mod tests {
     }
 
     #[test]
+    fn enemy_moves_toward_nearest_point_on_four_by_four_core() {
+        let mut sim = test_sim("sim");
+        let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+        let enemy_id = sim.make_id("enemy");
+        let mut enemy = combat::enemy_at(
+            enemy_id.clone(),
+            EnemyKind::Grunt,
+            WorldPos { x: 32.5, y: 20.5 },
+        );
+        enemy.move_speed = 1.0;
+        sim.enemies.insert(enemy_id.clone(), enemy);
+
+        sim.step_ticks(1);
+
+        let moved = &sim.enemies[&enemy_id];
+        assert_eq!(moved.target_id.as_deref(), Some(core_id.as_str()));
+        assert_eq!(
+            moved.pos.x, 32.5,
+            "enemy should move straight toward the closest point on the 4x4 core, not the top-left tile"
+        );
+        assert!(
+            moved.pos.y > 20.5,
+            "enemy should advance with non-grid world coordinates"
+        );
+    }
+
+    #[test]
     fn network_cpu_is_shared_across_active_devices() {
         let mut sim = test_sim("sim");
 
@@ -1119,20 +1146,13 @@ mod tests {
             .inventory
             .add(ItemKind::Ammo, 3);
         let enemy_id = sim.make_id("enemy");
-        sim.enemies.insert(
+        let mut enemy = combat::enemy_at(
             enemy_id.clone(),
-            Enemy {
-                id: enemy_id.clone(),
-                kind: EnemyKind::Grunt,
-                pos: WorldPos { x: 43.5, y: 32.5 },
-                hp: 30,
-                max_hp: 30,
-                speed_ticks: 8,
-                move_cooldown: 0,
-                move_speed: 0.0,
-                target_id: None,
-            },
+            EnemyKind::Grunt,
+            WorldPos { x: 43.5, y: 32.5 },
         );
+        enemy.move_speed = 0.0;
+        sim.enemies.insert(enemy_id.clone(), enemy);
         let starting_hp = sim.enemies[&enemy_id].hp;
 
         sim.step_ticks(20);
@@ -1261,17 +1281,11 @@ mod tests {
         let enemy_id = sim.make_id("enemy");
         sim.enemies.insert(
             enemy_id.clone(),
-            Enemy {
-                id: enemy_id.clone(),
-                kind: EnemyKind::Grunt,
-                pos: WorldPos { x: 35.5, y: 32.5 },
-                hp: 30,
-                max_hp: 30,
-                speed_ticks: 8,
-                move_cooldown: 0,
-                move_speed: 0.07,
-                target_id: None,
-            },
+            combat::enemy_at(
+                enemy_id.clone(),
+                EnemyKind::Grunt,
+                WorldPos { x: 35.5, y: 32.5 },
+            ),
         );
 
         sim.step_ticks(40);
@@ -1306,35 +1320,21 @@ mod tests {
         sim.fuel_banks.insert(turret_id.clone(), 100.0);
 
         let grunt_id = sim.make_id("enemy");
-        sim.enemies.insert(
+        let mut grunt = combat::enemy_at(
             grunt_id.clone(),
-            Enemy {
-                id: grunt_id.clone(),
-                kind: EnemyKind::Grunt,
-                pos: WorldPos { x: 35.5, y: 32.5 },
-                hp: 30,
-                max_hp: 30,
-                speed_ticks: 8,
-                move_cooldown: 0,
-                move_speed: 0.0,
-                target_id: None,
-            },
+            EnemyKind::Grunt,
+            WorldPos { x: 35.5, y: 32.5 },
         );
+        grunt.move_speed = 0.0;
+        sim.enemies.insert(grunt_id.clone(), grunt);
         let cutter_id = sim.make_id("enemy");
-        sim.enemies.insert(
+        let mut cutter = combat::enemy_at(
             cutter_id.clone(),
-            Enemy {
-                id: cutter_id.clone(),
-                kind: EnemyKind::WireCutter,
-                pos: WorldPos { x: 38.5, y: 32.5 },
-                hp: 38,
-                max_hp: 38,
-                speed_ticks: 5,
-                move_cooldown: 0,
-                move_speed: 0.0,
-                target_id: None,
-            },
+            EnemyKind::WireCutter,
+            WorldPos { x: 38.5, y: 32.5 },
         );
+        cutter.move_speed = 0.0;
+        sim.enemies.insert(cutter_id.clone(), cutter);
 
         sim.step_ticks(1);
 
@@ -1363,35 +1363,21 @@ mod tests {
         sim.fuel_banks.insert(turret_id.clone(), 100.0);
 
         let nearest_id = sim.make_id("enemy");
-        sim.enemies.insert(
+        let mut nearest = combat::enemy_at(
             nearest_id.clone(),
-            Enemy {
-                id: nearest_id.clone(),
-                kind: EnemyKind::Grunt,
-                pos: WorldPos { x: 35.5, y: 32.5 },
-                hp: 30,
-                max_hp: 30,
-                speed_ticks: 8,
-                move_cooldown: 0,
-                move_speed: 0.0,
-                target_id: None,
-            },
+            EnemyKind::Grunt,
+            WorldPos { x: 35.5, y: 32.5 },
         );
+        nearest.move_speed = 0.0;
+        sim.enemies.insert(nearest_id.clone(), nearest);
         let second_id = sim.make_id("enemy");
-        sim.enemies.insert(
+        let mut second = combat::enemy_at(
             second_id.clone(),
-            Enemy {
-                id: second_id.clone(),
-                kind: EnemyKind::Runner,
-                pos: WorldPos { x: 36.5, y: 32.5 },
-                hp: 20,
-                max_hp: 20,
-                speed_ticks: 3,
-                move_cooldown: 0,
-                move_speed: 0.0,
-                target_id: None,
-            },
+            EnemyKind::Runner,
+            WorldPos { x: 36.5, y: 32.5 },
         );
+        second.move_speed = 0.0;
+        sim.enemies.insert(second_id.clone(), second);
 
         sim.step_ticks(1);
 
@@ -1655,7 +1641,14 @@ mod tests {
         assert_eq!(status.wire_threats, 1);
         assert_eq!(status.network_cpu, 200.0);
 
-        sim.step_ticks(4);
+        sim.step_ticks(2);
+        assert_eq!(
+            sim.blocks[&wire_id].hp,
+            BlockKind::Wire.max_hp() - EnemyKind::WireCutter.attack_damage(),
+            "wire cutter should not apply damage every tick while attack cooldown is active"
+        );
+
+        sim.step_ticks(40);
 
         assert!(
             !sim.blocks.contains_key(&wire_id),
