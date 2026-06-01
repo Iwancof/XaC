@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use xac_core::{
     BehaviorId, Block, BlockKind, DeliveryJob, Direction, Drone, Enemy, EnemyKind, EntityId,
-    GameSnapshot, GameStatus, ItemKind, LogEntry, LogLevel, Network, Pos, Tile,
+    GameSnapshot, GameStatus, ItemFlowEvent, ItemKind, LogEntry, LogLevel, Network, Pos, Tile,
 };
 use xac_wasm::{BehaviorRuntime, CompiledBehavior};
 
@@ -43,9 +43,11 @@ pub struct Simulation {
     compiled_behaviors: BTreeMap<BehaviorId, CompiledBehavior>,
     fuel_banks: BTreeMap<EntityId, f32>,
     pending_jobs: Vec<DeliveryJob>,
+    item_flows: VecDeque<ItemFlowEvent>,
     logs: VecDeque<LogEntry>,
     selected_id: Option<EntityId>,
     next_id: u64,
+    next_flow_id: u64,
     runtime: BehaviorRuntime,
     config_root: PathBuf,
 }
@@ -66,9 +68,11 @@ impl Simulation {
             compiled_behaviors: BTreeMap::new(),
             fuel_banks: BTreeMap::new(),
             pending_jobs: Vec::new(),
+            item_flows: VecDeque::new(),
             logs: VecDeque::new(),
             selected_id: None,
             next_id: 1,
+            next_flow_id: 1,
             runtime: BehaviorRuntime::new()?,
             config_root: config_root.as_ref().to_path_buf(),
         };
@@ -212,6 +216,7 @@ impl Simulation {
                 .map(|package| self.behavior_summary_with_usage(package))
                 .collect(),
             pending_jobs: self.pending_jobs.clone(),
+            item_flows: self.item_flows.iter().cloned().collect(),
             status: self.game_status(),
         }
     }

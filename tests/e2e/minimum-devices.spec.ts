@@ -12,6 +12,7 @@ declare global {
       snapshot: () => {
         behaviors: Array<{ id: string; source_path: string }>;
         drones: Array<{ id: string; behavior_ref: string | null }>;
+        item_flows: Array<{ item: string; amount: number; from_entity: string; to_entity: string }>;
         selected_id: string | null;
       };
       spawnCarrierDrone: (homePortId?: string) => string;
@@ -125,6 +126,12 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".metrics")).toContainText("core ore 41");
   await expect(page.locator(".inspector")).toContainText("runtime tick");
   await expect(page.locator(".inspector")).toContainText("wasm mocked-was");
+  const oreFlows = await page.evaluate(() => window.__XAC_TEST_STATE__?.snapshot().item_flows ?? []);
+  expect(oreFlows).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ item: "ore", amount: 1, from_entity: "conveyor_9", to_entity: "core_1" })
+    ])
+  );
   await page.getByRole("button", { name: /Ore Drill/ }).click();
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");

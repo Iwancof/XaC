@@ -414,6 +414,10 @@ impl Simulation {
         if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_WORK_BATTERY_COST) {
             return;
         }
+        let flow = self
+            .blocks
+            .get(&block_id)
+            .and_then(|block| Some((block_center(block), self.drones.get(drone_id)?.pos)));
         let loaded = self
             .blocks
             .get_mut(&block_id)
@@ -435,22 +439,30 @@ impl Simulation {
         if let Some(block) = self.blocks.get_mut(&block_id) {
             block.status = format!("drone loaded {}", item.as_str());
         }
+        if let Some((from, to)) = flow {
+            self.record_item_flow(&block_id, drone_id, item, loaded, from, to);
+        }
     }
 
     fn unload_drone_cargo(&mut self, drone_id: &str, item: ItemKind, amount: u32) {
         let Some(block_id) = self.drone_contact_block_id(drone_id) else {
             return;
         };
-        let Some(block) = self.blocks.get(&block_id) else {
+        let Some((can_accept_item, free, block_pos)) = self.blocks.get(&block_id).map(|block| {
+            (
+                block.kind.can_accept_item(&item),
+                block
+                    .inventory
+                    .capacity
+                    .saturating_sub(block.inventory.total()),
+                block_center(block),
+            )
+        }) else {
             return;
         };
-        if !block.kind.can_accept_item(&item) {
+        if !can_accept_item {
             return;
         }
-        let free = block
-            .inventory
-            .capacity
-            .saturating_sub(block.inventory.total());
         let requested = amount.min(free);
         if requested == 0 {
             return;
@@ -458,6 +470,10 @@ impl Simulation {
         if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_WORK_BATTERY_COST) {
             return;
         }
+        let flow = self
+            .drones
+            .get(drone_id)
+            .map(|drone| (drone.pos, block_pos));
         let unloaded = self
             .drones
             .get_mut(drone_id)
@@ -483,6 +499,9 @@ impl Simulation {
             } else {
                 DroneState::Offline
             };
+        }
+        if let Some((from, to)) = flow {
+            self.record_item_flow(drone_id, &block_id, item, unloaded, from, to);
         }
     }
 
@@ -600,6 +619,7 @@ impl Simulation {
         };
 
         let mut completed = false;
+        let mut flow = None;
         if !self.ensure_drone_battery(drone_id, CARRIER_DRONE_WORK_BATTERY_COST) {
             return;
         }
@@ -618,6 +638,14 @@ impl Simulation {
                             completed = true;
                         } else {
                             drone.cargo.add(job.item.clone(), loaded);
+                            flow = Some((
+                                job.pickup.clone(),
+                                drone_id.to_string(),
+                                job.item.clone(),
+                                loaded,
+                                pickup_pos,
+                                drone.pos,
+                            ));
                         }
                     } else {
                         drone.pos = drone.pos.move_toward(pickup_pos, CARRIER_DRONE_MOVE_SPEED);
@@ -627,16 +655,28 @@ impl Simulation {
                 }
             } else if drone.pos.distance(dropoff_pos) <= CARRIER_DRONE_DOCKING_DISTANCE {
                 let delivered = drone.cargo.remove(&job.item, job.amount);
+                let from = drone.pos;
                 if let Some(block) = self.blocks.get_mut(&job.dropoff) {
                     block.inventory.add(job.item.clone(), delivered);
                     block.status = format!("drone delivered {}", job.item.as_str());
                 }
+                flow = Some((
+                    drone_id.to_string(),
+                    job.dropoff.clone(),
+                    job.item.clone(),
+                    delivered,
+                    from,
+                    dropoff_pos,
+                ));
                 completed = true;
             } else {
                 drone.pos = drone.pos.move_toward(dropoff_pos, CARRIER_DRONE_MOVE_SPEED);
             }
         }
 
+        if let Some((from_entity, to_entity, item, amount, from, to)) = flow {
+            self.record_item_flow(&from_entity, &to_entity, item, amount, from, to);
+        }
         if completed {
             self.clear_drone_job(drone_id);
         }

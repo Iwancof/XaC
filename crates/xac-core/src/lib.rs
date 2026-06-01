@@ -626,6 +626,18 @@ pub struct DeliveryJob {
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct ItemFlowEvent {
+    pub id: EntityId,
+    pub tick: u64,
+    pub item: ItemKind,
+    pub amount: u32,
+    pub from_entity: EntityId,
+    pub to_entity: EntityId,
+    pub from: WorldPos,
+    pub to: WorldPos,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Drone {
     pub id: EntityId,
     pub home_port: EntityId,
@@ -733,6 +745,7 @@ pub struct GameSnapshot {
     pub selected_id: Option<EntityId>,
     pub behaviors: Vec<BehaviorSummary>,
     pub pending_jobs: Vec<DeliveryJob>,
+    pub item_flows: Vec<ItemFlowEvent>,
     pub status: GameStatus,
 }
 

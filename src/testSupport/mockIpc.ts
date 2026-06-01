@@ -26,6 +26,7 @@ import type {
   Enemy,
   GameSnapshot,
   Inventory,
+  ItemFlowEvent,
   ItemKind,
   LogEntry,
   LogLevel,
@@ -44,7 +45,7 @@ type CommandCall = {
 };
 
 type MutableBehavior = BehaviorSource;
-type IdKind = BlockKind | "behavior" | "drone";
+type IdKind = BlockKind | "behavior" | "drone" | "flow";
 type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
@@ -56,6 +57,7 @@ interface MockState {
   blocks: Block[];
   enemies: Enemy[];
   drones: Drone[];
+  itemFlows: ItemFlowEvent[];
   logs: LogEntry[];
   selectedId: string | null;
   behaviors: Record<string, MutableBehavior>;
@@ -157,6 +159,7 @@ function createInitialState(): MockState {
       }
     ],
     drones: [],
+    itemFlows: [],
     logs: [
       {
         tick: 0,
@@ -201,6 +204,7 @@ function snapshot(): GameSnapshot {
     selected_id: state.selectedId,
     behaviors: behaviorSummaries(),
     pending_jobs: pendingJobs,
+    item_flows: state.itemFlows.slice(-160),
     status: gameStatus(blocks, networks, enemies)
   });
 }
@@ -556,6 +560,7 @@ function transferFrom(block: Block) {
   addItem(dst.inventory, kind, 1);
   block.status = `sent ${kind}`;
   dst.status = `received ${kind}`;
+  recordItemFlow(block.id, dst.id, kind, 1, blockCenter(block), blockCenter(dst));
   return true;
 }
 
@@ -565,6 +570,14 @@ function inventoryTotal(inventory: Inventory) {
 
 function blockAt(blocks: Block[], pos: Pos) {
   return blocks.find((block) => footprintPositions(block.kind, block.pos).some((tile) => tile.x === pos.x && tile.y === pos.y));
+}
+
+function blockCenter(block: Block): Pos {
+  const [width, height] = blockFootprintSize(block.kind);
+  return {
+    x: block.pos.x + width / 2,
+    y: block.pos.y + height / 2
+  };
 }
 
 function footprintPositions(kind: BlockKind, pos: Pos) {
@@ -648,6 +661,22 @@ function inventoryCount(inventory: Inventory, item: ItemKind) {
 
 function addItem(inventory: Inventory, item: ItemKind, amount: number) {
   inventory.items[item] = inventoryCount(inventory, item) + amount;
+}
+
+function recordItemFlow(fromEntity: string, toEntity: string, item: ItemKind, amount: number, from: Pos, to: Pos) {
+  state.itemFlows.push({
+    id: makeId("flow"),
+    tick: state.tick,
+    item,
+    amount,
+    from_entity: fromEntity,
+    to_entity: toEntity,
+    from,
+    to
+  });
+  while (state.itemFlows.length > 160) {
+    state.itemFlows.shift();
+  }
 }
 
 function log(level: LogLevel, source: string, message: string) {

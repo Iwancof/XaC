@@ -90,6 +90,17 @@ export interface DeliveryJob {
   priority: number;
 }
 
+export interface ItemFlowEvent {
+  id: string;
+  tick: number;
+  item: ItemKind;
+  amount: number;
+  from_entity: string;
+  to_entity: string;
+  from: Pos;
+  to: Pos;
+}
+
 export interface Drone {
   id: string;
   home_port: string;
@@ -168,6 +179,7 @@ export interface GameSnapshot {
   selected_id: string | null;
   behaviors: BehaviorSummary[];
   pending_jobs: DeliveryJob[];
+  item_flows: ItemFlowEvent[];
   status: GameStatus;
 }
 

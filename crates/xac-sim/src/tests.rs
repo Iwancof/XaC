@@ -507,6 +507,13 @@ fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
         delivered > starting_core_ore,
         "drill ore should ride conveyors into the 4x4 core"
     );
+    assert!(
+        sim.snapshot()
+            .item_flows
+            .iter()
+            .any(|flow| flow.item == ItemKind::Ore && flow.to_entity == core_id),
+        "ore transfers should be exposed as visible item flow events"
+    );
 }
 
 #[test]
@@ -563,6 +570,13 @@ fn edited_drill_behavior_mines_and_belts_ore_to_four_by_four_core() {
     assert!(
         sim.blocks[&core_id].inventory.count(&ItemKind::Ore) > starting_core_ore,
         "ore mined by the edited drill behavior should ride conveyors into the 4x4 core"
+    );
+    assert!(
+        sim.snapshot()
+            .item_flows
+            .iter()
+            .any(|flow| flow.item == ItemKind::Ore && flow.from_entity == drill_id),
+        "the edited drill should emit item flow events when ore leaves the drill"
     );
 }
 
@@ -1389,6 +1403,13 @@ fn drone_port_builtin_delivers_core_ammo_to_turret_and_returns_home() {
     assert!(
         sim.blocks[&turret_id].inventory.count(&ItemKind::Ammo) >= 10,
         "carrier drone should deliver core ammo to the turret"
+    );
+    assert!(
+        sim.snapshot()
+            .item_flows
+            .iter()
+            .any(|flow| flow.item == ItemKind::Ammo && flow.to_entity == turret_id),
+        "drone delivery should be visible as an ammo item flow into the turret"
     );
     assert!(
         sim.blocks[&core_id].inventory.count(&ItemKind::Ammo) < starting_core_ammo,

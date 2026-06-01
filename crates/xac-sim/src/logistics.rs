@@ -1,6 +1,10 @@
-use xac_core::{BlockKind, Direction, ItemKind};
+use xac_core::{BlockKind, Direction, ItemFlowEvent, ItemKind};
 
+use crate::geometry::block_center;
 use crate::Simulation;
+
+const MAX_ITEM_FLOW_EVENTS: usize = 160;
+const ITEM_FLOW_RETENTION_TICKS: u64 = 80;
 
 impl Simulation {
     pub(crate) fn run_block_physics(&mut self) {
@@ -72,6 +76,9 @@ impl Simulation {
         else {
             return false;
         };
+        let Some((from, to)) = self.flow_endpoints(block_id, &dst_id) else {
+            return false;
+        };
         let moved = {
             let Some(src) = self.blocks.get_mut(block_id) else {
                 return false;
@@ -91,6 +98,7 @@ impl Simulation {
                 _ => format!("sent {}", item_kind.as_str()),
             };
         }
+        self.record_item_flow(block_id, &dst_id, item_kind, moved, from, to);
         true
     }
 
@@ -144,5 +152,50 @@ impl Simulation {
                     && dst.kind.can_accept_item(item_kind)
             })
             .map(|(kind, amount)| (kind.clone(), *amount))
+    }
+
+    fn flow_endpoints(
+        &self,
+        src_id: &str,
+        dst_id: &str,
+    ) -> Option<(xac_core::WorldPos, xac_core::WorldPos)> {
+        Some((
+            block_center(self.blocks.get(src_id)?),
+            block_center(self.blocks.get(dst_id)?),
+        ))
+    }
+
+    pub(crate) fn record_item_flow(
+        &mut self,
+        src_entity: &str,
+        dst_entity: &str,
+        item: ItemKind,
+        amount: u32,
+        from: xac_core::WorldPos,
+        to: xac_core::WorldPos,
+    ) {
+        let id = format!("flow_{}", self.next_flow_id);
+        self.next_flow_id += 1;
+        self.item_flows.push_back(ItemFlowEvent {
+            id,
+            tick: self.tick,
+            item,
+            amount,
+            from_entity: src_entity.to_string(),
+            to_entity: dst_entity.to_string(),
+            from,
+            to,
+        });
+        while self.item_flows.len() > MAX_ITEM_FLOW_EVENTS {
+            self.item_flows.pop_front();
+        }
+        while self
+            .item_flows
+            .front()
+            .map(|event| self.tick.saturating_sub(event.tick) > ITEM_FLOW_RETENTION_TICKS)
+            .unwrap_or(false)
+        {
+            self.item_flows.pop_front();
+        }
     }
 }
