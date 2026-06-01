@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
 use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
 
+use super::abi_codes::{direction_code, enemy_kind_code, item_code, recipe_code};
+
 const MAX_LOG_MESSAGE_BYTES: usize = 256;
 
 pub(crate) const ATTACK_POLICY_NEAREST: i32 = 2;
@@ -1151,7 +1153,7 @@ fn render_condition(condition: Condition) -> String {
         Condition::EnemyKindEq { index, kind } => {
             format!(
                 "(i32.eq (call $enemy_kind (i32.const {index})) (i32.const {}))",
-                enemy_kind_code(kind)
+                enemy_kind_code(&kind)
             )
         }
         Condition::EnemyHp {
@@ -1400,40 +1402,4 @@ fn wat_data_escape(bytes: &[u8]) -> String {
         }
     }
     out
-}
-
-fn direction_code(dir: Direction) -> i32 {
-    match dir {
-        Direction::North => 0,
-        Direction::East => 1,
-        Direction::South => 2,
-        Direction::West => 3,
-    }
-}
-
-fn recipe_code(recipe: &ItemKind) -> i32 {
-    match recipe {
-        ItemKind::Plate => 0,
-        ItemKind::Ammo => 1,
-        _ => 0,
-    }
-}
-
-fn item_code(item: &ItemKind) -> i32 {
-    match item {
-        ItemKind::Ore => 0,
-        ItemKind::Plate => 1,
-        ItemKind::Ammo => 2,
-        ItemKind::CpuPart => 3,
-        ItemKind::DronePart => 4,
-    }
-}
-
-fn enemy_kind_code(kind: EnemyKind) -> i32 {
-    match kind {
-        EnemyKind::Grunt => 0,
-        EnemyKind::Runner => 1,
-        EnemyKind::Armored => 2,
-        EnemyKind::WireCutter => 3,
-    }
 }
