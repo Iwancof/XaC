@@ -19,6 +19,7 @@ mod logistics;
 mod network;
 mod production;
 mod recipes;
+mod save;
 mod wave;
 
 use behavior::{load_behaviors, BehaviorPackage};

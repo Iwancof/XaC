@@ -136,6 +136,18 @@ fn build_behavior(
         .map_err(|err| err.to_string())
 }
 
+#[tauri::command]
+fn save_world(state: tauri::State<'_, AppState>, slot: String) -> Result<GameSnapshot, String> {
+    let mut sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.save_world(&slot).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn load_world(state: tauri::State<'_, AppState>, slot: String) -> Result<GameSnapshot, String> {
+    let mut sim = state.sim.lock().map_err(|err| err.to_string())?;
+    sim.load_world(&slot).map_err(|err| err.to_string())
+}
+
 pub fn run() {
     let config_root = config_root();
     fs::create_dir_all(config_root.join("projects/default_project/saves")).ok();
@@ -168,7 +180,9 @@ pub fn run() {
             fork_behavior,
             assign_behavior,
             save_behavior,
-            build_behavior
+            build_behavior,
+            save_world,
+            load_world
         ])
         .run(tauri::generate_context!())
         .expect("error while running XaC");

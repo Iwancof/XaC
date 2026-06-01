@@ -59,6 +59,7 @@ type CommandCall = {
 type MutableBehavior = BehaviorSource;
 type IdKind = BlockKind | "behavior" | "drone" | "enemy" | "flow" | "job";
 type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
+type SavedMockState = Omit<MockState, "calls" | "saves">;
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
   | { kind: "drone"; entity: Drone; behaviorKind: "carrier_drone" };
@@ -76,6 +77,7 @@ interface MockState {
   behaviors: Record<string, MutableBehavior>;
   idCounters: Partial<Record<IdKind, number>>;
   calls: CommandCall[];
+  saves: Record<string, SavedMockState>;
 }
 
 declare global {
@@ -133,6 +135,10 @@ mockIPC((cmd, args = {}) => {
       return saveBehavior(args as { behaviorId?: string; source?: string });
     case "build_behavior":
       return buildBehavior((args as { behaviorId?: string }).behaviorId ?? "");
+    case "save_world":
+      return saveWorld((args as { slot?: string }).slot ?? "quick");
+    case "load_world":
+      return loadWorld((args as { slot?: string }).slot ?? "quick");
     default:
       throw new Error(`Unhandled mock IPC command: ${cmd}`);
   }
@@ -194,7 +200,8 @@ function createInitialState(): MockState {
       core: 1,
       enemy: 1
     },
-    calls: []
+    calls: [],
+    saves: {}
   };
 }
 
@@ -443,6 +450,51 @@ function buildBehavior(behaviorId: string): BuildResult {
     message: "mock build succeeded",
     wasm_hash: "mocked-wasm-hash"
   };
+}
+
+function saveWorld(slot: string) {
+  const safeSlot = saveSlotName(slot);
+  log("info", "system", `world saved to ${safeSlot}`);
+  state.saves[safeSlot] = clone({
+    tick: state.tick,
+    running: state.running,
+    blocks: state.blocks,
+    enemies: state.enemies,
+    drones: state.drones,
+    pendingJobs: state.pendingJobs,
+    itemFlows: state.itemFlows,
+    logs: state.logs,
+    selectedId: state.selectedId,
+    behaviors: state.behaviors,
+    idCounters: state.idCounters
+  });
+  return snapshot();
+}
+
+function loadWorld(slot: string) {
+  const safeSlot = saveSlotName(slot);
+  const saved = state.saves[safeSlot];
+  if (!saved) {
+    throw new Error(`unknown save slot: ${safeSlot}`);
+  }
+  const calls = state.calls;
+  const saves = state.saves;
+  state = {
+    ...clone(saved),
+    calls,
+    saves
+  };
+  window.__XAC_TEST_STATE__!.calls = state.calls;
+  log("info", "system", `world loaded from ${safeSlot}`);
+  return snapshot();
+}
+
+function saveSlotName(slot: string) {
+  const trimmed = slot.trim();
+  if (!trimmed || !/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+    throw new Error("save slot can only contain letters, numbers, '-' and '_'");
+  }
+  return trimmed;
 }
 
 function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind)): Block {

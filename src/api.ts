@@ -62,3 +62,11 @@ export function saveBehavior(behaviorId: string, source: string) {
 export function buildBehavior(behaviorId: string) {
   return invoke<BuildResult>("build_behavior", { behaviorId });
 }
+
+export function saveWorld(slot = "quick") {
+  return invoke<GameSnapshot>("save_world", { slot });
+}
+
+export function loadWorld(slot = "quick") {
+  return invoke<GameSnapshot>("load_world", { slot });
+}

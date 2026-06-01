@@ -577,6 +577,44 @@ test("UI mock dispatches carrier drone ammo delivery", async ({ page }) => {
   await expect(page.getByTestId("tutorial-drone-delivery")).toHaveAttribute("data-state", "complete");
 });
 
+test("quick save and load restore the UI world state", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.getByTestId("grid-world").locator("canvas");
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await canvas.click({ position: tileCenter(20, 30) });
+  await expect(page.locator(".metrics")).toContainText("blocks 2");
+  await expect(page.locator(".inspector")).toContainText("drill");
+
+  await page.getByRole("button", { name: "Save World", exact: true }).click();
+  await expect(page.locator(".log-panel")).toContainText("world saved to quick");
+
+  await page.getByRole("button", { name: "Deconstruct", exact: true }).click();
+  await expect(page.locator(".metrics")).toContainText("blocks 1");
+  await expect(page.locator(".inspector")).toContainText("Select a block");
+
+  await page.getByRole("button", { name: "Load World", exact: true }).click();
+  await expect(page.locator(".metrics")).toContainText("blocks 2");
+  await expect(page.locator(".inspector")).toContainText("drill");
+  await expect(page.locator(".log-panel")).toContainText("world loaded from quick");
+
+  const restored = await page.evaluate(() => {
+    const snapshot = window.__XAC_TEST_STATE__!.snapshot();
+    return {
+      drill: snapshot.blocks.find((block) => block.id === "drill_1"),
+      selectedId: snapshot.selected_id,
+      saveCalls: window.__XAC_TEST_STATE__!.calls.filter((call) => call.cmd === "save_world"),
+      loadCalls: window.__XAC_TEST_STATE__!.calls.filter((call) => call.cmd === "load_world")
+    };
+  });
+  expect(restored.drill).toEqual(expect.objectContaining({ kind: "drill" }));
+  expect(restored.selectedId).toBe("drill_1");
+  expect(restored.saveCalls).toEqual([{ cmd: "save_world", args: { slot: "quick" } }]);
+  expect(restored.loadCalls).toEqual([{ cmd: "load_world", args: { slot: "quick" } }]);
+});
+
 test("wire cutter can sever a CPU network in the UI simulation", async ({ page }) => {
   await page.goto("/");
 

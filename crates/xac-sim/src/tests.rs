@@ -497,6 +497,53 @@ fn project_behavior_source_persists_under_config_root() {
 }
 
 #[test]
+fn world_save_round_trips_state_under_config_root() {
+    let config_root = test_config_root("world-save");
+    let mut sim = Simulation::new(&config_root).unwrap();
+    sim.place_block(BlockKind::CpuNode, Pos { x: 19, y: 29 }, Direction::East)
+        .unwrap();
+    for x in 20..=30 {
+        sim.place_block(BlockKind::Wire, Pos { x, y: 29 }, Direction::East)
+            .unwrap();
+    }
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    sim.step_ticks(40);
+    let saved_tick = sim.snapshot().tick;
+
+    sim.save_world("quick").unwrap();
+    let save_path = config_root.join("projects/default_project/saves/quick.json");
+    let save_source = fs::read_to_string(&save_path).unwrap();
+    assert!(save_source.contains("\"version\""));
+    assert!(save_source.contains(&drill_id));
+
+    sim.deconstruct_block(&drill_id).unwrap();
+    assert!(!sim.blocks.contains_key(&drill_id));
+    sim.step_ticks(5);
+
+    let restored = sim.load_world("quick").unwrap();
+    assert_eq!(restored.tick, saved_tick);
+    assert!(
+        sim.blocks.contains_key(&drill_id),
+        "loading the save should restore the deconstructed drill"
+    );
+    assert_eq!(sim.selected_id.as_deref(), Some(drill_id.as_str()));
+    assert!(restored
+        .logs
+        .iter()
+        .any(|entry| entry.message == "world loaded from quick"));
+
+    sim.place_block(BlockKind::Storage, Pos { x: 20, y: 31 }, Direction::East)
+        .unwrap();
+    assert_ne!(
+        sim.selected_id.as_deref(),
+        Some(drill_id.as_str()),
+        "loading should preserve the saved id counter so new blocks do not collide"
+    );
+}
+
+#[test]
 fn behavior_summary_tracks_source_language() {
     let mut sim = test_sim("sim");
     let builtin = sim.open_behavior("builtin.drill.basic").unwrap();

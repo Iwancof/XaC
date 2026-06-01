@@ -2,12 +2,14 @@ import {
   Activity,
   Cpu,
   FastForward,
+  FolderOpen,
   Layers,
   Pause,
   Play,
   Radar,
   RotateCw,
   Route,
+  Save,
   StepForward,
   X
 } from "lucide-react";
@@ -20,10 +22,12 @@ import {
   editBuiltinCopy,
   forkBehavior,
   getSnapshot,
+  loadWorld,
   openBehavior,
   placeBlock,
   rotateBlock,
   saveBehavior,
+  saveWorld,
   selectEntity,
   setRunning,
   stepTicks
@@ -264,6 +268,23 @@ export function App() {
     }
   };
 
+  const handleSaveWorld = async () => {
+    await runCommand(() => saveWorld("quick"));
+  };
+
+  const handleLoadWorld = async () => {
+    try {
+      setSnapshot(await loadWorld("quick"));
+      setBehavior(null);
+      setEditorValue("");
+      setSavedValue("");
+      setBuildResult(null);
+      setError(null);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
   const rotatePlacementDirection = () => {
     setDirection((current) => NEXT_DIRECTION[current]);
   };
@@ -291,6 +312,14 @@ export function App() {
           <button onClick={() => runCommand(() => stepTicks(40))}>
             <FastForward size={16} />
             +40
+          </button>
+          <button onClick={handleSaveWorld}>
+            <Save size={16} />
+            Save World
+          </button>
+          <button onClick={handleLoadWorld}>
+            <FolderOpen size={16} />
+            Load World
           </button>
         </div>
         <div className="metrics">
