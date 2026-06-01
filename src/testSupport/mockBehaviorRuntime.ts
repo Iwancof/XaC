@@ -1,6 +1,7 @@
 import type { Block, Direction, ItemKind, TerrainKind } from "../types";
 import { mockSourceWithoutComments } from "./mockBehaviorValidator";
 import { allDirections } from "./mockGeometry";
+import { inventoryCount, inventoryFree, inventoryTotal } from "./mockInventory";
 
 export type MockBehaviorResult = {
   mine: boolean;
@@ -88,11 +89,11 @@ function mockCondition(
     if (tokens[0] === "can_produce") return canMockProduce(block, context.assemblerRecipe);
     if (tokens[0] === "current_recipe" && tokens[1] === "==") return block.recipe === tokens[2];
     if ((tokens[0] === "input_count" || tokens[0] === "output_count") && isItem(tokens[1])) {
-      return compareNumber(inventoryCount(block, tokens[1]), tokens[2], Number(tokens[3]));
+      return compareNumber(inventoryCount(block.inventory, tokens[1]), tokens[2], Number(tokens[3]));
     }
   }
   if (block.kind === "turret") {
-    if (tokens[0] === "ammo_count") return compareNumber(inventoryCount(block, "ammo"), tokens[1], Number(tokens[2]));
+    if (tokens[0] === "ammo_count") return compareNumber(inventoryCount(block.inventory, "ammo"), tokens[1], Number(tokens[2]));
     if (tokens[0] === "scan_enemies") {
       return compareNumber(environment.visibleTurretTargetCount(), tokens[1], Number(tokens[2]));
     }
@@ -110,10 +111,10 @@ function mockCondition(
     return compareNumber(environment.stockCount(tokens[1]), tokens[2], Number(tokens[3]));
   }
   if (tokens[0] === "inventory_count" && isItem(tokens[1])) {
-    return compareNumber(inventoryCount(block, tokens[1]), tokens[2], Number(tokens[3]));
+    return compareNumber(inventoryCount(block.inventory, tokens[1]), tokens[2], Number(tokens[3]));
   }
   if (tokens[0] === "inventory_free") {
-    return compareNumber(block.inventory.capacity - inventoryTotal(block), tokens[1], Number(tokens[2]));
+    return compareNumber(inventoryFree(block.inventory), tokens[1], Number(tokens[2]));
   }
   if (tokens[0] === "fuel_remaining") {
     return compareNumber(Math.floor(block.fuel_bank), tokens[1], Number(tokens[2]));
@@ -187,20 +188,12 @@ function dronePortResult(result: MockBehaviorResult) {
 
 function canMockProduce(block: Block, recipe: string | null) {
   if (recipe === "plate") {
-    return inventoryCount(block, "ore") >= 2 && inventoryTotal(block) < block.inventory.capacity;
+    return inventoryCount(block.inventory, "ore") >= 2 && inventoryTotal(block.inventory) < block.inventory.capacity;
   }
   if (recipe === "ammo") {
-    return inventoryCount(block, "plate") >= 1 && inventoryTotal(block) + 1 < block.inventory.capacity;
+    return inventoryCount(block.inventory, "plate") >= 1 && inventoryTotal(block.inventory) + 1 < block.inventory.capacity;
   }
   return false;
-}
-
-function inventoryCount(block: Block, item: ItemKind) {
-  return block.inventory.items[item] ?? 0;
-}
-
-function inventoryTotal(block: Block) {
-  return Object.values(block.inventory.items).reduce((sum, amount) => sum + (amount ?? 0), 0);
 }
 
 function compareNumber(left: number, operator: string | undefined, right: number) {

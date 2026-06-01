@@ -31,6 +31,7 @@ import {
   rotateDirection,
   step
 } from "./mockGeometry";
+import { addItem, inventoryCount, inventoryFree, inventoryTotal, removeItem } from "./mockInventory";
 import { recomputeNetworks } from "./mockNetwork";
 import { validateMockBehaviorBuild } from "./mockBehaviorValidator";
 import type {
@@ -46,7 +47,6 @@ import type {
   Enemy,
   EnemyKind,
   GameSnapshot,
-  Inventory,
   ItemFlowEvent,
   ItemKind,
   LogEntry,
@@ -814,10 +814,6 @@ function outputAvailable(block: Block, dir: Direction, itemFilter: ItemKind | nu
   return Boolean(dst && canAcceptItem(dst.kind, item) && inventoryTotal(dst.inventory) < dst.inventory.capacity);
 }
 
-function inventoryTotal(inventory: Inventory) {
-  return Object.values(inventory.items).reduce((sum, amount) => sum + (amount ?? 0), 0);
-}
-
 function usedBy(behaviorId: string) {
   return (
     state.blocks.filter((block) => block.behavior_ref === behaviorId).length +
@@ -933,7 +929,7 @@ function createMockDeliveryJob(port: Block, item: ItemKind, amount: number, drop
       block.tags.includes(dropoffTag) &&
       canAcceptItem(block.kind, item) &&
       inventoryCount(block.inventory, item) < amount &&
-      block.inventory.capacity - inventoryTotal(block.inventory) >= amount
+      inventoryFree(block.inventory) >= amount
   );
   if (!dropoff) return false;
   if (state.pendingJobs.some((job) => job.dropoff === dropoff.id && job.item === item)) return false;
@@ -994,7 +990,7 @@ function continueMockDroneDelivery(drone: Drone) {
       return;
     }
     if (moveDroneTowardBlock(drone, pickup)) {
-      const loaded = Math.min(job.amount, inventoryCount(pickup.inventory, job.item), drone.cargo.capacity - inventoryTotal(drone.cargo));
+      const loaded = Math.min(job.amount, inventoryCount(pickup.inventory, job.item), inventoryFree(drone.cargo));
       if (loaded > 0) {
         removeItem(pickup.inventory, job.item, loaded);
         addItem(drone.cargo, job.item, loaded);
@@ -1011,7 +1007,7 @@ function continueMockDroneDelivery(drone: Drone) {
     return;
   }
   if (moveDroneTowardBlock(drone, dropoff)) {
-    const unloaded = Math.min(carrying, dropoff.inventory.capacity - inventoryTotal(dropoff.inventory));
+    const unloaded = Math.min(carrying, inventoryFree(dropoff.inventory));
     if (unloaded > 0) {
       removeItem(drone.cargo, job.item, unloaded);
       addItem(dropoff.inventory, job.item, unloaded);
@@ -1125,23 +1121,6 @@ function makeId(kind: IdKind) {
   const next = (state.idCounters[kind] ?? 0) + 1;
   state.idCounters[kind] = next;
   return `${kind}_${next}`;
-}
-
-function inventoryCount(inventory: Inventory, item: ItemKind) {
-  return inventory.items[item] ?? 0;
-}
-
-function addItem(inventory: Inventory, item: ItemKind, amount: number) {
-  inventory.items[item] = inventoryCount(inventory, item) + amount;
-}
-
-function removeItem(inventory: Inventory, item: ItemKind, amount: number) {
-  const next = Math.max(0, inventoryCount(inventory, item) - amount);
-  if (next === 0) {
-    delete inventory.items[item];
-  } else {
-    inventory.items[item] = next;
-  }
 }
 
 function recordItemFlow(fromEntity: string, toEntity: string, item: ItemKind, amount: number, from: Pos, to: Pos) {
