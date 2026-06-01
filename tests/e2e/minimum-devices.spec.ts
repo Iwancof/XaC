@@ -5,6 +5,8 @@ type IpcCall = {
   args: Record<string, unknown>;
 };
 
+type TestEnemyKind = "grunt" | "runner" | "armored" | "wire_cutter";
+
 declare global {
   interface Window {
     __XAC_TEST_STATE__?: {
@@ -22,9 +24,15 @@ declare global {
           block_ids: string[];
           read_only_cache: boolean;
         }>;
+        status: {
+          wire_threats: number;
+          damaged_wires: number;
+          network_cpu: number;
+        };
         selected_id: string | null;
       };
       spawnCarrierDrone: (homePortId?: string) => string;
+      spawnEnemy: (kind: TestEnemyKind, pos: { x: number; y: number }) => string;
       forceOverBudget: (entityId: string) => void;
     };
     __XAC_EDITOR__?: {
@@ -402,4 +410,54 @@ if can_produce produce
     { cmd: "save_behavior", args: { behaviorId: "behavior_4", source: assemblerSource } },
     { cmd: "build_behavior", args: { behaviorId: "behavior_4" } }
   ]);
+});
+
+test("wire cutter can sever a CPU network in the UI simulation", async ({ page }) => {
+  await page.goto("/");
+
+  const canvas = page.getByTestId("grid-world").locator("canvas");
+  await expect(canvas).toBeVisible();
+
+  await page.getByRole("button", { name: /CPU Node/ }).click();
+  await canvas.click({ position: tileCenter(19, 29) });
+  await page.getByRole("button", { name: /Wire/ }).click();
+  for (let x = 20; x <= 30; x += 1) {
+    await canvas.click({ position: tileCenter(x, 29) });
+  }
+  await page.getByRole("button", { name: /Ore Drill/ }).click();
+  await canvas.click({ position: tileCenter(20, 30) });
+
+  const connectedDrill = await page.evaluate(() =>
+    window.__XAC_TEST_STATE__?.snapshot().blocks.find((block) => block.id === "drill_1")
+  );
+  expect(connectedDrill).toEqual(expect.objectContaining({ network_id: 1, effective_cpu_rate: 201 }));
+
+  const cutterId = await page.evaluate(() => window.__XAC_TEST_STATE__!.spawnEnemy("wire_cutter", { x: 20.5, y: 29.5 }));
+  expect(cutterId).toBe("enemy_2");
+  const threatStatus = await page.evaluate(() => window.__XAC_TEST_STATE__!.snapshot().status);
+  expect(threatStatus.wire_threats).toBe(1);
+
+  await page.getByRole("button", { name: /\+40/ }).click();
+
+  const severed = await page.evaluate(() => {
+    const snapshot = window.__XAC_TEST_STATE__!.snapshot();
+    return {
+      drill: snapshot.blocks.find((block) => block.id === "drill_1"),
+      wire: snapshot.blocks.find((block) => block.id === "wire_1"),
+      networks: snapshot.networks,
+      logs: snapshot.logs
+    };
+  });
+
+  expect(severed.wire).toBeUndefined();
+  expect(severed.drill).toEqual(expect.objectContaining({ network_id: null, effective_cpu_rate: 1 }));
+  expect(severed.networks).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ cpu_pool: 80, block_ids: ["cpu_node_1"], read_only_cache: true }),
+      expect.objectContaining({ cpu_pool: 120, block_ids: expect.arrayContaining(["core_1"]), read_only_cache: false })
+    ])
+  );
+  expect(severed.logs).toEqual(
+    expect.arrayContaining([expect.objectContaining({ level: "warn", source: "wire_1", message: "block destroyed" })])
+  );
 });

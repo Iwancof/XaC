@@ -54,6 +54,18 @@ const ENEMY_ATTACK_COOLDOWN_TICKS: Record<EnemyKind, number> = {
   armored: 28,
   wire_cutter: 16
 };
+const ENEMY_MAX_HP: Record<EnemyKind, number> = {
+  grunt: 30,
+  runner: 20,
+  armored: 90,
+  wire_cutter: 38
+};
+const ENEMY_MOVE_SPEED: Record<EnemyKind, number> = {
+  grunt: 0.07,
+  runner: 0.14,
+  armored: 0.045,
+  wire_cutter: 0.1
+};
 
 type CommandCall = {
   cmd: string;
@@ -61,7 +73,7 @@ type CommandCall = {
 };
 
 type MutableBehavior = BehaviorSource;
-type IdKind = BlockKind | "behavior" | "drone" | "flow";
+type IdKind = BlockKind | "behavior" | "drone" | "enemy" | "flow";
 type RuntimeEntity = { behavior_runtime: BehaviorRuntimeStats | null };
 type BehaviorOwner =
   | { kind: "block"; entity: Block; behaviorKind: BehaviorSummary["base_kind"] }
@@ -88,6 +100,7 @@ declare global {
       reset: () => void;
       snapshot: () => GameSnapshot;
       spawnCarrierDrone: (homePortId?: string) => string;
+      spawnEnemy: (kind: EnemyKind, pos: Pos) => string;
       forceOverBudget: (entityId: string) => void;
     };
   }
@@ -147,6 +160,7 @@ window.__XAC_TEST_STATE__ = {
   },
   snapshot,
   spawnCarrierDrone,
+  spawnEnemy,
   forceOverBudget
 };
 
@@ -189,7 +203,8 @@ function createInitialState(): MockState {
     selectedId: core.id,
     behaviors: builtinBehaviors(),
     idCounters: {
-      core: 1
+      core: 1,
+      enemy: 1
     },
     calls: []
   };
@@ -317,6 +332,7 @@ function runTicks(count: number) {
       }
     }
     runEnemies();
+    cleanupDestroyed();
   }
 }
 
@@ -519,6 +535,23 @@ function spawnCarrierDrone(homePortId?: string) {
   return id;
 }
 
+function spawnEnemy(kind: EnemyKind, pos: Pos) {
+  const id = makeId("enemy");
+  state.enemies.push({
+    id,
+    kind,
+    pos: { ...pos },
+    hp: ENEMY_MAX_HP[kind],
+    max_hp: ENEMY_MAX_HP[kind],
+    move_speed: ENEMY_MOVE_SPEED[kind],
+    attack_cooldown: 0,
+    target_id: null
+  });
+  state.selectedId = id;
+  log("warn", id, `${kind} test contact`);
+  return id;
+}
+
 function forceOverBudget(entityId: string) {
   const block = state.blocks.find((candidate) => candidate.id === entityId);
   if (block) {
@@ -659,6 +692,31 @@ function runEnemies() {
       enemy.pos = moveToward(enemy.pos, target.pos, enemy.move_speed);
       target.block.status = `targeted by ${enemy.id}`;
     }
+  }
+}
+
+function cleanupDestroyed() {
+  const destroyedBlockIds = new Set(
+    state.blocks.filter((block) => block.kind !== "core" && block.hp <= 0).map((block) => block.id)
+  );
+  if (destroyedBlockIds.size > 0) {
+    for (const id of destroyedBlockIds) {
+      log("warn", id, "block destroyed");
+    }
+    state.blocks = state.blocks.filter((block) => !destroyedBlockIds.has(block.id));
+    if (state.selectedId && destroyedBlockIds.has(state.selectedId)) {
+      state.selectedId = null;
+    }
+  }
+
+  const core = state.blocks.find((block) => block.kind === "core");
+  if (core && core.hp <= 0) {
+    core.hp = 0;
+    if (core.status !== "core breached") {
+      core.status = "core breached";
+      log("error", core.id, "core destroyed; simulation halted");
+    }
+    state.running = false;
   }
 }
 
