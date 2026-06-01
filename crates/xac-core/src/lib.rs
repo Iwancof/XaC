@@ -264,6 +264,29 @@ impl BlockKind {
             BlockKind::Core | BlockKind::Wire | BlockKind::CpuNode | BlockKind::DronePort
         )
     }
+
+    pub fn inventory_capacity(self) -> u32 {
+        match self {
+            BlockKind::Core => 1000,
+            BlockKind::Storage => 300,
+            BlockKind::Conveyor | BlockKind::Router => 1,
+            BlockKind::Turret => 80,
+            BlockKind::Assembler => 100,
+            BlockKind::Drill => 10,
+            BlockKind::DronePort => 120,
+            BlockKind::Wire | BlockKind::CpuNode => 0,
+        }
+    }
+
+    pub fn can_accept_item(self, item: &ItemKind) -> bool {
+        match self {
+            BlockKind::Wire | BlockKind::CpuNode | BlockKind::Drill => false,
+            BlockKind::Turret => item == &ItemKind::Ammo,
+            BlockKind::Conveyor | BlockKind::Router => true,
+            BlockKind::Assembler => matches!(item, ItemKind::Ore | ItemKind::Plate),
+            BlockKind::Core | BlockKind::Storage | BlockKind::DronePort => true,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -522,4 +545,40 @@ pub struct GameSnapshot {
     pub behaviors: Vec<BehaviorSummary>,
     pub pending_jobs: Vec<DeliveryJob>,
     pub status: GameStatus,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mvp_block_storage_contract_matches_factory_roles() {
+        assert_eq!(BlockKind::Core.inventory_capacity(), 1000);
+        assert_eq!(BlockKind::Storage.inventory_capacity(), 300);
+        assert_eq!(BlockKind::Conveyor.inventory_capacity(), 1);
+        assert_eq!(BlockKind::Router.inventory_capacity(), 1);
+        assert_eq!(BlockKind::Drill.inventory_capacity(), 10);
+        assert_eq!(BlockKind::Assembler.inventory_capacity(), 100);
+        assert_eq!(BlockKind::Turret.inventory_capacity(), 80);
+        assert_eq!(BlockKind::DronePort.inventory_capacity(), 120);
+        assert_eq!(BlockKind::Wire.inventory_capacity(), 0);
+        assert_eq!(BlockKind::CpuNode.inventory_capacity(), 0);
+
+        assert!(BlockKind::Core.can_accept_item(&ItemKind::CpuPart));
+        assert!(BlockKind::Storage.can_accept_item(&ItemKind::Ore));
+        assert!(BlockKind::Conveyor.can_accept_item(&ItemKind::Ammo));
+        assert!(BlockKind::Router.can_accept_item(&ItemKind::Plate));
+        assert!(BlockKind::DronePort.can_accept_item(&ItemKind::DronePart));
+
+        assert!(BlockKind::Assembler.can_accept_item(&ItemKind::Ore));
+        assert!(BlockKind::Assembler.can_accept_item(&ItemKind::Plate));
+        assert!(!BlockKind::Assembler.can_accept_item(&ItemKind::Ammo));
+
+        assert!(BlockKind::Turret.can_accept_item(&ItemKind::Ammo));
+        assert!(!BlockKind::Turret.can_accept_item(&ItemKind::Ore));
+
+        assert!(!BlockKind::Drill.can_accept_item(&ItemKind::Ore));
+        assert!(!BlockKind::Wire.can_accept_item(&ItemKind::Ore));
+        assert!(!BlockKind::CpuNode.can_accept_item(&ItemKind::Ore));
+    }
 }

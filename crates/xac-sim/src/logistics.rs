@@ -1,6 +1,5 @@
 use xac_core::{BlockKind, Direction, ItemKind};
 
-use crate::block_defs::can_accept_item;
 use crate::Simulation;
 
 impl Simulation {
@@ -35,7 +34,7 @@ impl Simulation {
         !self
             .blocks
             .get(&dst_id)
-            .map(|dst| can_accept_item(dst.kind, &ItemKind::Ore) && dst.inventory.has_space(1))
+            .map(|dst| dst.kind.can_accept_item(&ItemKind::Ore) && dst.inventory.has_space(1))
             .unwrap_or(false)
     }
 
@@ -142,7 +141,7 @@ impl Simulation {
             .find(|(item_kind, available)| {
                 **available > 0
                     && item_filter.is_none_or(|filter| filter == *item_kind)
-                    && can_accept_item(dst.kind, item_kind)
+                    && dst.kind.can_accept_item(item_kind)
             })
             .map(|(kind, amount)| (kind.clone(), *amount))
     }

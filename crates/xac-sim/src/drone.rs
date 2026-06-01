@@ -3,7 +3,6 @@ use xac_core::{
 };
 use xac_wasm::{BehaviorHostInput, BehaviorIntent, DroneCommand, DronePortCommand};
 
-use crate::block_defs::can_accept_item;
 use crate::cpu::FuelPolicy;
 use crate::geometry::{block_center, closest_point_on_block};
 use crate::Simulation;
@@ -168,7 +167,7 @@ impl Simulation {
             .values()
             .find(|block| {
                 block.tags.iter().any(|tag| tag == dropoff_tag)
-                    && can_accept_item(block.kind, item)
+                    && block.kind.can_accept_item(item)
                     && block.inventory.count(item) < amount
                     && block.inventory.has_space(amount)
             })
@@ -313,7 +312,7 @@ impl Simulation {
         let free = i32::try_from(free).unwrap_or(i32::MAX);
         let space_counts = ItemKind::all()
             .into_iter()
-            .filter(|item| can_accept_item(block.kind, item))
+            .filter(|item| block.kind.can_accept_item(item))
             .map(|item| (item, free))
             .collect();
         (inventory_counts, space_counts)
@@ -450,7 +449,7 @@ impl Simulation {
         let Some(block) = self.blocks.get(&block_id) else {
             return;
         };
-        if !can_accept_item(block.kind, &item) {
+        if !block.kind.can_accept_item(&item) {
             return;
         }
         let free = block

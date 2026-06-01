@@ -6,7 +6,6 @@ use xac_wasm::{
     DrillCommand, NetStoreOp,
 };
 
-use crate::block_defs::can_accept_item;
 use crate::cpu::FuelPolicy;
 use crate::Simulation;
 
@@ -338,7 +337,7 @@ impl Simulation {
                 *total = total.saturating_add(i32::try_from(*amount).unwrap_or(i32::MAX));
             }
             for item in ItemKind::all() {
-                if !can_accept_item(block.kind, &item) {
+                if !block.kind.can_accept_item(&item) {
                     continue;
                 }
                 let total_capacity = capacity.entry(item.clone()).or_insert(0_i32);
