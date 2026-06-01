@@ -1,6 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use sha2::{Digest, Sha256};
-use wasmtime::{Config, Instance, Linker, Module, Store};
+use wasmtime::{Config, Instance, Linker, Module, Store, Trap};
 #[cfg(test)]
 use xac_core::Pos;
 use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind};
@@ -144,8 +144,8 @@ impl BehaviorRuntime {
                 let tick = instance
                     .get_typed_func::<(), ()>(&mut store, "tick")
                     .context("load tick export")?;
-                if tick.call(&mut store, ()).is_err() {
-                    return Ok(over_budget_eval(&mut store, fuel, compiled));
+                if let Err(error) = tick.call(&mut store, ()) {
+                    return Ok(trap_eval(&mut store, fuel, compiled, error));
                 }
                 store.data().intent.clone()
             }
@@ -155,9 +155,19 @@ impl BehaviorRuntime {
                     .context("load tick export")?;
                 let action_code = match tick.call(&mut store, ()) {
                     Ok(code) => code,
-                    Err(_) => return Ok(over_budget_eval(&mut store, fuel, compiled)),
+                    Err(error) => return Ok(trap_eval(&mut store, fuel, compiled, error)),
                 };
-                action_code_to_intent(compiled.kind, action_code)?
+                match action_code_to_intent(compiled.kind, action_code) {
+                    Ok(intent) => intent,
+                    Err(error) => {
+                        return Ok(runtime_error_eval(
+                            &mut store,
+                            fuel,
+                            compiled,
+                            error.to_string(),
+                        ));
+                    }
+                }
             }
         };
         if store.data().host_over_budget {
@@ -172,9 +182,25 @@ impl BehaviorRuntime {
             fuel_spent: fuel.saturating_sub(fuel_remaining),
             fuel_remaining,
             over_budget: false,
+            runtime_error: None,
             wasm_hash: compiled.wasm_hash.clone(),
         })
     }
+}
+
+fn trap_eval(
+    store: &mut Store<BehaviorHostState>,
+    fuel: u64,
+    compiled: &CompiledBehavior,
+    error: anyhow::Error,
+) -> BehaviorEval {
+    if let Some(trap) = error.downcast_ref::<Trap>() {
+        if *trap == Trap::OutOfFuel {
+            return over_budget_eval(store, fuel, compiled);
+        }
+        return runtime_error_eval(store, fuel, compiled, format!("wasm trap: {trap:?}"));
+    }
+    runtime_error_eval(store, fuel, compiled, error.to_string())
 }
 
 fn validate_tick_abi(instance: &Instance, store: &mut Store<BehaviorHostState>) -> Result<TickAbi> {
@@ -222,6 +248,26 @@ fn over_budget_eval(
         fuel_spent: fuel.saturating_sub(fuel_remaining),
         fuel_remaining,
         over_budget: true,
+        runtime_error: None,
+        wasm_hash: compiled.wasm_hash.clone(),
+    }
+}
+
+fn runtime_error_eval(
+    store: &mut Store<BehaviorHostState>,
+    fuel: u64,
+    compiled: &CompiledBehavior,
+    message: String,
+) -> BehaviorEval {
+    let fuel_remaining = store.get_fuel().unwrap_or(0);
+    BehaviorEval {
+        intent: BehaviorIntent::Noop,
+        net_ops: Vec::new(),
+        logs: Vec::new(),
+        fuel_spent: fuel.saturating_sub(fuel_remaining),
+        fuel_remaining,
+        over_budget: false,
+        runtime_error: Some(message),
         wasm_hash: compiled.wasm_hash.clone(),
     }
 }

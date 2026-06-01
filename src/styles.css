@@ -243,6 +243,12 @@ button.danger:hover:not(:disabled) {
   color: #fca5a5;
 }
 
+.runtime-card.runtime-error span {
+  border-color: #7a3325;
+  background: #2b1814;
+  color: #fecaca;
+}
+
 .behavior-picker {
   font-size: 12px;
 }

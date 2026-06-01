@@ -845,6 +845,7 @@ fn lazy_runtime_compile_persists_wasm_cache_for_saved_behavior() {
     assert!(stats.fuel_spent > 0);
     assert!(stats.fuel_remaining < stats.fuel_budget);
     assert!(!stats.over_budget);
+    assert!(stats.runtime_error.is_none());
     assert_eq!(stats.wasm_hash.as_deref(), Some(wasm_hash.as_str()));
 
     let cached_wasm = fs::read(
@@ -905,6 +906,7 @@ fn block_behavior_over_budget_is_reported_in_snapshot() {
     assert!(stats.fuel_spent > 0);
     assert_eq!(stats.fuel_remaining, 0);
     assert!(stats.over_budget);
+    assert!(stats.runtime_error.is_none());
     assert!(stats.wasm_hash.is_some());
     assert!(sim
         .logs
@@ -925,6 +927,65 @@ fn block_behavior_over_budget_is_reported_in_snapshot() {
             .expect("snapshot should expose runtime telemetry")
             .over_budget
     );
+}
+
+#[test]
+fn block_behavior_runtime_error_is_reported_in_snapshot() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    assign_script(
+        &mut sim,
+        &drill_id,
+        r#"
+        (module
+          (func (export "tick")
+            unreachable))
+        "#,
+    );
+
+    sim.fuel_banks.insert(drill_id.clone(), 100.0);
+    sim.step_ticks(1);
+
+    let block = &sim.blocks[&drill_id];
+    assert_eq!(block.status, "runtime error");
+    let stats = block
+        .behavior_runtime
+        .as_ref()
+        .expect("runtime error should still record telemetry");
+    assert_eq!(stats.last_tick, Some(1));
+    assert_eq!(stats.run_count, 1);
+    assert_eq!(stats.fuel_budget, 40);
+    assert!(stats.fuel_spent > 0);
+    assert!(!stats.over_budget);
+    assert!(stats.wasm_hash.is_some());
+    assert!(stats
+        .runtime_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("UnreachableCodeReached"));
+    assert!(sim.logs.iter().any(|entry| {
+        entry.source == drill_id && entry.message.contains("UnreachableCodeReached")
+    }));
+
+    let snapshot = sim.snapshot();
+    let snapshot_block = snapshot
+        .blocks
+        .iter()
+        .find(|block| block.id == drill_id)
+        .expect("snapshot should include the drill");
+    assert_eq!(snapshot_block.status, "runtime error");
+    let snapshot_stats = snapshot_block
+        .behavior_runtime
+        .as_ref()
+        .expect("snapshot should expose runtime telemetry");
+    assert!(!snapshot_stats.over_budget);
+    assert!(snapshot_stats
+        .runtime_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("UnreachableCodeReached"));
 }
 
 #[test]

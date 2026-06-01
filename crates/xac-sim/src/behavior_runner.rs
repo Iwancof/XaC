@@ -55,8 +55,20 @@ impl Simulation {
 
             match self.runtime.evaluate_compiled(&compiled, fuel, host_input) {
                 Ok(eval) => {
+                    let runtime_error = eval.runtime_error.clone();
+                    let wasm_hash = eval.wasm_hash.clone();
                     self.record_block_behavior_runtime(&id, fuel, &eval);
                     self.spend_fuel_bank(&id, eval.fuel_spent);
+                    if let Some(error) = runtime_error {
+                        if let Some(package) = self.behaviors.get_mut(&behavior_ref) {
+                            package.wasm_hash = Some(wasm_hash);
+                        }
+                        if let Some(block) = self.blocks.get_mut(&id) {
+                            block.status = "runtime error".to_string();
+                        }
+                        self.log(LogLevel::Error, id, error);
+                        continue;
+                    }
                     if eval.over_budget {
                         if let Some(block) = self.blocks.get_mut(&id) {
                             block.status = "over_budget".to_string();
@@ -69,18 +81,27 @@ impl Simulation {
                         continue;
                     }
                     if let Some(package) = self.behaviors.get_mut(&behavior_ref) {
-                        package.wasm_hash = Some(eval.wasm_hash);
+                        package.wasm_hash = Some(wasm_hash);
                     }
                     self.apply_net_ops(&id, eval.net_ops);
                     self.apply_behavior_logs(&id, eval.logs);
                     self.apply_behavior_intent(&id, eval.intent);
                 }
                 Err(error) => {
+                    let message = error.to_string();
                     self.spend_fuel_bank(&id, fuel);
+                    self.record_block_behavior_runtime_error(
+                        &id,
+                        fuel,
+                        fuel,
+                        0,
+                        Some(compiled.wasm_hash().to_string()),
+                        message.clone(),
+                    );
                     if let Some(block) = self.blocks.get_mut(&id) {
                         block.status = "runtime error".to_string();
                     }
-                    self.log(LogLevel::Error, id, error.to_string());
+                    self.log(LogLevel::Error, id, message);
                 }
             }
         }

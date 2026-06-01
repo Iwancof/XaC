@@ -134,20 +134,50 @@ fn reports_over_budget_when_fuel_is_exhausted() {
         .unwrap();
 
     assert!(eval.over_budget);
+    assert!(eval.runtime_error.is_none());
     assert!(matches!(eval.intent, BehaviorIntent::Noop));
 }
 
 #[test]
-fn validates_action_code_against_block_kind() {
+fn reports_invalid_action_code_as_runtime_error() {
     let runtime = BehaviorRuntime::new().unwrap();
     let compiled = runtime
         .compile_wat(BehaviorKind::Drill, &wat_const_action(30))
         .unwrap();
 
-    let err = runtime
+    let eval = runtime
         .evaluate_compiled(&compiled, 20, BehaviorHostInput::default())
-        .unwrap_err();
-    assert!(err.to_string().contains("invalid action code 30"));
+        .unwrap();
+    assert!(!eval.over_budget);
+    assert!(eval
+        .runtime_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("invalid action code 30"));
+    assert!(matches!(eval.intent, BehaviorIntent::Noop));
+}
+
+#[test]
+fn reports_wasm_trap_as_runtime_error_not_over_budget() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let compiled = runtime
+        .compile_wat(
+            BehaviorKind::Drill,
+            r#"(module (func (export "tick") unreachable))"#,
+        )
+        .unwrap();
+
+    let eval = runtime
+        .evaluate_compiled(&compiled, 20, BehaviorHostInput::default())
+        .unwrap();
+    assert!(!eval.over_budget);
+    assert!(eval.fuel_spent > 0);
+    assert!(eval
+        .runtime_error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("UnreachableCodeReached"));
+    assert!(matches!(eval.intent, BehaviorIntent::Noop));
 }
 
 #[test]

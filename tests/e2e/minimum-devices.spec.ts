@@ -44,6 +44,7 @@ declare global {
       spawnEnemy: (kind: TestEnemyKind, pos: { x: number; y: number }) => string;
       setBlockInventory: (blockId: string, items: Partial<Record<string, number>>) => void;
       forceOverBudget: (entityId: string) => void;
+      forceRuntimeError: (entityId: string, message?: string) => void;
     };
     __XAC_EDITOR__?: {
       getValue: () => string;
@@ -212,6 +213,13 @@ test("places minimum devices from the right block list and opens drill behavior"
   await expect(page.locator(".inspector")).toContainText("over budget");
   await expect(page.locator(".inspector")).toContainText("fuel 40/40");
   await expect(page.locator(".log-panel")).toContainText("over_budget with 40 fuel");
+  await page.evaluate(() => window.__XAC_TEST_STATE__!.forceRuntimeError("drill_1", "mocked wasm unreachable trap"));
+  await page.keyboard.press("Escape");
+  await canvas.click({ position: tileCenter(20, 30) });
+  await expect(page.locator(".inspector")).toContainText("runtime error");
+  await expect(page.locator(".inspector")).toContainText("mocked wasm unreachable trap");
+  await expect(page.locator(".inspector")).toContainText("fuel 12/40");
+  await expect(page.locator(".log-panel")).toContainText("mocked wasm unreachable trap");
   await canvas.click({ position: tileCenter(32, 32) });
   await expect(page.locator(".inspector")).toContainText("core");
   await expect(page.locator(".inspector")).toContainText("Ore: 41");

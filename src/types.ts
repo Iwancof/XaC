@@ -40,6 +40,7 @@ export interface BehaviorRuntimeStats {
   fuel_spent: number;
   fuel_remaining: number;
   over_budget: boolean;
+  runtime_error: string | null;
   wasm_hash: string | null;
 }
 

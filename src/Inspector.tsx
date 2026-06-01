@@ -283,9 +283,11 @@ function InventoryRows({ inventory, emptyLabel }: { inventory: Inventory; emptyL
 
 function RuntimeStats({ stats }: { stats: BehaviorRuntimeStats }) {
   const hash = stats.wasm_hash ? stats.wasm_hash.slice(0, 10) : "none";
+  const runtimeError = stats.runtime_error;
+  const stateClass = runtimeError ? "runtime-error" : stats.over_budget ? "over-budget" : "";
   return (
-    <div className={stats.over_budget ? "runtime-card over-budget" : "runtime-card"}>
-      <span>{stats.over_budget ? "over budget" : "budget ok"}</span>
+    <div className={["runtime-card", stateClass].filter(Boolean).join(" ")}>
+      <span>{runtimeError ? "runtime error" : stats.over_budget ? "over budget" : "budget ok"}</span>
       <span>runtime tick {stats.last_tick ?? "never"}</span>
       <span>runs {stats.run_count}</span>
       <span>
@@ -293,6 +295,7 @@ function RuntimeStats({ stats }: { stats: BehaviorRuntimeStats }) {
       </span>
       <span>left {stats.fuel_remaining}</span>
       <span>wasm {hash}</span>
+      {runtimeError && <span>{runtimeError}</span>}
     </div>
   );
 }

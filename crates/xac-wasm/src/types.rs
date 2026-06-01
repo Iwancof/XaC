@@ -79,6 +79,7 @@ pub struct BehaviorEval {
     pub fuel_spent: u64,
     pub fuel_remaining: u64,
     pub over_budget: bool,
+    pub runtime_error: Option<String>,
     pub wasm_hash: String,
 }
 

@@ -275,6 +275,8 @@ function drawBlocks(g: Graphics, blocks: Block[], selectedId: string | null) {
     }
     if (block.status === "over_budget") {
       g.rect(x + 3, y + 3, pixelWidth - 6, pixelHeight - 6).stroke({ width: 2, color: 0xfacc15 });
+    } else if (block.status === "runtime error") {
+      g.rect(x + 3, y + 3, pixelWidth - 6, pixelHeight - 6).stroke({ width: 2, color: 0xf87171 });
     }
     if (selectedId === block.id) {
       g.rect(x + 1, y + 1, pixelWidth - 2, pixelHeight - 2).stroke({ width: 2, color: 0xffffff });

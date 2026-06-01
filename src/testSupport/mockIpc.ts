@@ -90,6 +90,7 @@ declare global {
       spawnEnemy: (kind: EnemyKind, pos: Pos) => string;
       setBlockInventory: (blockId: string, items: Partial<Record<ItemKind, number>>) => void;
       forceOverBudget: (entityId: string) => void;
+      forceRuntimeError: (entityId: string, message?: string) => void;
     };
   }
 }
@@ -156,7 +157,8 @@ window.__XAC_TEST_STATE__ = {
   spawnCarrierDrone,
   spawnEnemy,
   setBlockInventory,
-  forceOverBudget
+  forceOverBudget,
+  forceRuntimeError
 };
 
 function createInitialState(): MockState {
@@ -649,6 +651,25 @@ function forceOverBudget(entityId: string) {
   if (drone) {
     recordRuntime(drone, 40, 40, 0, "mocked-over-budget-wasm", true);
     log("warn", entityId, "drone over_budget with 40 fuel");
+    return;
+  }
+
+  throw new Error(`unknown runtime entity: ${entityId}`);
+}
+
+function forceRuntimeError(entityId: string, message = "mocked wasm unreachable trap") {
+  const block = state.blocks.find((candidate) => candidate.id === entityId);
+  if (block) {
+    block.status = "runtime error";
+    recordRuntime(block, 40, 12, 28, "mocked-runtime-error-wasm", false, message);
+    log("error", entityId, message);
+    return;
+  }
+
+  const drone = state.drones.find((candidate) => candidate.id === entityId);
+  if (drone) {
+    recordRuntime(drone, 40, 12, 28, "mocked-runtime-error-wasm", false, message);
+    log("error", entityId, message);
     return;
   }
 
@@ -1260,7 +1281,8 @@ function recordRuntime(
   fuelSpent: number,
   fuelRemaining: number,
   wasmHash: string,
-  overBudget = false
+  overBudget = false,
+  runtimeError: string | null = null
 ) {
   entity.behavior_runtime = {
     last_tick: state.tick,
@@ -1269,6 +1291,7 @@ function recordRuntime(
     fuel_spent: fuelSpent,
     fuel_remaining: fuelRemaining,
     over_budget: overBudget,
+    runtime_error: runtimeError,
     wasm_hash: wasmHash
   };
 }

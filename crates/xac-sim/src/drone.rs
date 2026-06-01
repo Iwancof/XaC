@@ -253,19 +253,29 @@ impl Simulation {
         let eval = match self.runtime.evaluate_compiled(&compiled, fuel, input) {
             Ok(eval) => eval,
             Err(error) => {
+                let message = error.to_string();
                 self.spend_fuel_bank(drone_id, fuel);
                 self.spend_drone_logic_fuel(drone_id, fuel);
-                self.log(
-                    xac_core::LogLevel::Error,
-                    drone_id.to_string(),
-                    error.to_string(),
+                self.record_drone_behavior_runtime_error(
+                    drone_id,
+                    fuel,
+                    fuel,
+                    0,
+                    Some(compiled.wasm_hash().to_string()),
+                    message.clone(),
                 );
+                self.log(xac_core::LogLevel::Error, drone_id.to_string(), message);
                 return None;
             }
         };
+        let runtime_error = eval.runtime_error.clone();
         self.record_drone_behavior_runtime(drone_id, fuel, &eval);
         self.spend_fuel_bank(drone_id, eval.fuel_spent);
         self.spend_drone_logic_fuel(drone_id, eval.fuel_spent);
+        if let Some(error) = runtime_error {
+            self.log(xac_core::LogLevel::Error, drone_id.to_string(), error);
+            return None;
+        }
         if eval.over_budget {
             self.log(
                 xac_core::LogLevel::Warn,

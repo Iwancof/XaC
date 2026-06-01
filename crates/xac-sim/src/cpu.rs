@@ -67,6 +67,52 @@ impl Simulation {
             ));
         }
     }
+
+    pub(crate) fn record_block_behavior_runtime_error(
+        &mut self,
+        block_id: &str,
+        fuel_budget: u64,
+        fuel_spent: u64,
+        fuel_remaining: u64,
+        wasm_hash: Option<String>,
+        runtime_error: String,
+    ) {
+        let tick = self.tick;
+        if let Some(block) = self.blocks.get_mut(block_id) {
+            block.behavior_runtime = Some(next_runtime_error_stats(
+                block.behavior_runtime.as_ref(),
+                tick,
+                fuel_budget,
+                fuel_spent,
+                fuel_remaining,
+                wasm_hash,
+                runtime_error,
+            ));
+        }
+    }
+
+    pub(crate) fn record_drone_behavior_runtime_error(
+        &mut self,
+        drone_id: &str,
+        fuel_budget: u64,
+        fuel_spent: u64,
+        fuel_remaining: u64,
+        wasm_hash: Option<String>,
+        runtime_error: String,
+    ) {
+        let tick = self.tick;
+        if let Some(drone) = self.drones.get_mut(drone_id) {
+            drone.behavior_runtime = Some(next_runtime_error_stats(
+                drone.behavior_runtime.as_ref(),
+                tick,
+                fuel_budget,
+                fuel_spent,
+                fuel_remaining,
+                wasm_hash,
+                runtime_error,
+            ));
+        }
+    }
 }
 
 fn next_runtime_stats(
@@ -82,6 +128,28 @@ fn next_runtime_stats(
         fuel_spent: eval.fuel_spent,
         fuel_remaining: eval.fuel_remaining,
         over_budget: eval.over_budget,
+        runtime_error: eval.runtime_error.clone(),
         wasm_hash: Some(eval.wasm_hash.clone()),
+    }
+}
+
+fn next_runtime_error_stats(
+    previous: Option<&BehaviorRuntimeStats>,
+    tick: u64,
+    fuel_budget: u64,
+    fuel_spent: u64,
+    fuel_remaining: u64,
+    wasm_hash: Option<String>,
+    runtime_error: String,
+) -> BehaviorRuntimeStats {
+    BehaviorRuntimeStats {
+        last_tick: Some(tick),
+        run_count: previous.map(|stats| stats.run_count).unwrap_or(0) + 1,
+        fuel_budget,
+        fuel_spent,
+        fuel_remaining,
+        over_budget: false,
+        runtime_error: Some(runtime_error),
+        wasm_hash,
     }
 }
