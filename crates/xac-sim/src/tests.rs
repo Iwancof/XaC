@@ -957,6 +957,61 @@ fn router_item_script_only_pushes_requested_item() {
 }
 
 #[test]
+fn router_script_reads_local_inventory_count_and_free_space() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
+        .unwrap();
+    let router_id = sim.selected_id.clone().unwrap();
+    assign_script(
+        &mut sim,
+        &router_id,
+        "if inventory_count ammo > 0 push ammo east\nif inventory_free > 0 log local free",
+    );
+    sim.place_block(BlockKind::Conveyor, Pos { x: 35, y: 30 }, Direction::East)
+        .unwrap();
+    let conveyor_id = sim.selected_id.clone().unwrap();
+
+    sim.fuel_banks.insert(router_id.clone(), 100.0);
+    sim.step_ticks(1);
+
+    assert_eq!(
+        sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ammo),
+        0,
+        "network stock in the core should not satisfy local inventory_count"
+    );
+    assert!(
+        sim.logs
+            .iter()
+            .any(|entry| entry.source == router_id && entry.message == "local free"),
+        "router code should read its local inventory free space"
+    );
+
+    sim.blocks
+        .get_mut(&router_id)
+        .unwrap()
+        .inventory
+        .add(ItemKind::Ammo, 1);
+    let free_log_count = sim
+        .logs
+        .iter()
+        .filter(|entry| entry.source == router_id && entry.message == "local free")
+        .count();
+    sim.fuel_banks.insert(router_id.clone(), 100.0);
+    sim.step_ticks(1);
+
+    assert_eq!(sim.blocks[&router_id].inventory.count(&ItemKind::Ammo), 0);
+    assert_eq!(sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ammo), 1);
+    assert_eq!(
+        sim.logs
+            .iter()
+            .filter(|entry| entry.source == router_id && entry.message == "local free")
+            .count(),
+        free_log_count,
+        "inventory_free should be false after the router inventory is filled"
+    );
+}
+
+#[test]
 fn router_script_can_read_core_network_stock() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)

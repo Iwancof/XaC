@@ -212,7 +212,8 @@ impl Parser {
                     number_arg(line, &name, &args, 1)?
                 ))
             }
-            "input_count" | "output_count" | "stock_count" | "stock_capacity" | "cargo_count" => {
+            "input_count" | "output_count" | "inventory_count" | "stock_count"
+            | "stock_capacity" | "cargo_count" => {
                 require_arg_count(line, &name, &args, 1)?;
                 let comparison = self.expect_comparison()?;
                 let value = self.expect_number_any()?;
@@ -221,7 +222,7 @@ impl Parser {
                     ident_arg(line, &name, &args, 0)?
                 ))
             }
-            "docked_drone_count" | "pending_job_count" => {
+            "inventory_free" | "docked_drone_count" | "pending_job_count" => {
                 require_arg_count(line, &name, &args, 0)?;
                 let comparison = self.expect_comparison()?;
                 let value = self.expect_number_any()?;

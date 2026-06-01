@@ -49,6 +49,35 @@ pub(super) fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Res
     )?;
     linker.func_wrap(
         "xac:common",
+        "inventory_count",
+        |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
+            if !charge_host(&mut caller, host_cost::INVENTORY_COUNT) {
+                return 0;
+            }
+            let Some(item) = item_from_code(item) else {
+                return 0;
+            };
+            caller
+                .data()
+                .input
+                .inventory_counts
+                .get(&item)
+                .copied()
+                .unwrap_or(0)
+        },
+    )?;
+    linker.func_wrap(
+        "xac:common",
+        "inventory_free",
+        |mut caller: Caller<'_, BehaviorHostState>| -> i32 {
+            if !charge_host(&mut caller, host_cost::INVENTORY_FREE) {
+                return 0;
+            }
+            caller.data().input.inventory_free
+        },
+    )?;
+    linker.func_wrap(
+        "xac:common",
         "stock_count",
         |mut caller: Caller<'_, BehaviorHostState>, item: i32| -> i32 {
             if !charge_host(&mut caller, host_cost::STOCK_COUNT) {

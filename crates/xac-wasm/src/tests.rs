@@ -994,6 +994,90 @@ fn xac_script_can_read_common_network_stock() {
 }
 
 #[test]
+fn xac_script_can_read_local_inventory_profile() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let count_script = "if inventory_count ore > 1 push ore east";
+    let wat = compile_source_to_wat(BehaviorKind::Router, count_script).unwrap();
+    assert!(wat.contains(r#""xac:common" "inventory_count""#));
+    let compiled = runtime
+        .compile_wat(BehaviorKind::Router, count_script)
+        .unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                inventory_counts: item_counts(ItemKind::Ore, 2),
+                router_item_output_available: router_item_available(ItemKind::Ore, Direction::East),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Router { item, preferred }
+            if item == Some(ItemKind::Ore) && preferred == vec![Direction::East]
+    ));
+
+    let free_script = "if inventory_free >= 3 push ammo east";
+    let wat = compile_source_to_wat(BehaviorKind::Router, free_script).unwrap();
+    assert!(wat.contains(r#""xac:common" "inventory_free""#));
+    let compiled = runtime
+        .compile_wat(BehaviorKind::Router, free_script)
+        .unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                inventory_free: 3,
+                router_item_output_available: router_item_available(
+                    ItemKind::Ammo,
+                    Direction::East,
+                ),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Router { item, preferred }
+            if item == Some(ItemKind::Ammo) && preferred == vec![Direction::East]
+    ));
+}
+
+#[test]
+fn tiny_source_can_read_local_inventory_profile() {
+    let runtime = BehaviorRuntime::new().unwrap();
+    let source = r#"
+        fn tick() {
+            if (inventory_count(ore) > 1) {
+                push(ore, east);
+            }
+        }
+    "#;
+    let wat = compile_source_to_wat(BehaviorKind::Router, source).unwrap();
+    assert!(wat.contains(r#""xac:common" "inventory_count""#));
+    let compiled = runtime.compile_wat(BehaviorKind::Router, source).unwrap();
+    let eval = runtime
+        .evaluate_compiled(
+            &compiled,
+            80,
+            BehaviorHostInput {
+                inventory_counts: item_counts(ItemKind::Ore, 2),
+                router_item_output_available: router_item_available(ItemKind::Ore, Direction::East),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        eval.intent,
+        BehaviorIntent::Router { item, preferred }
+            if item == Some(ItemKind::Ore) && preferred == vec![Direction::East]
+    ));
+}
+
+#[test]
 fn xac_script_can_select_assembler_recipe_from_inventory_counts() {
     let runtime = BehaviorRuntime::new().unwrap();
     let source = r#"

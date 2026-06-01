@@ -41,6 +41,8 @@ interface common-api {
   /// Writes a short behavior log message. Raw core ABI: xac:common/log(ptr,len).
   log: func(message: string) -> bool;
   fuel-remaining: func() -> u64;
+  inventory-count: func(item: item-kind) -> s32;
+  inventory-free: func() -> s32;
   stock-count: func(item: item-kind) -> s32;
   stock-capacity: func(item: item-kind) -> s32;
   has-space: func(item: item-kind, amount: s32) -> bool;

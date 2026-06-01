@@ -1,5 +1,7 @@
 pub const LOG_BASE: u64 = 1;
 pub const FUEL_REMAINING: u64 = 0;
+pub const INVENTORY_COUNT: u64 = 1;
+pub const INVENTORY_FREE: u64 = 1;
 pub const OUTPUT_BLOCKED: u64 = 1;
 pub const MINE: u64 = 2;
 pub const DRILL_OUTPUT: u64 = 1;

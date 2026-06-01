@@ -111,6 +111,8 @@ enum HostImport {
     DroneCargoCount,
     DroneIdle,
     CommonFuelRemaining,
+    CommonInventoryCount,
+    CommonInventoryFree,
     CommonStockCount,
     CommonStockCapacity,
     CommonHasSpace,
@@ -253,6 +255,12 @@ impl HostImport {
             HostImport::CommonFuelRemaining => {
                 r#"  (import "xac:common" "fuel_remaining" (func $fuel_remaining (result i64)))"#
             }
+            HostImport::CommonInventoryCount => {
+                r#"  (import "xac:common" "inventory_count" (func $inventory_count (param i32) (result i32)))"#
+            }
+            HostImport::CommonInventoryFree => {
+                r#"  (import "xac:common" "inventory_free" (func $inventory_free (result i32)))"#
+            }
             HostImport::CommonStockCount => {
                 r#"  (import "xac:common" "stock_count" (func $stock_count (param i32) (result i32)))"#
             }
@@ -321,6 +329,15 @@ enum Condition {
     },
     CanAttack {
         index: i32,
+    },
+    InventoryCount {
+        item: ItemKind,
+        comparison: CountComparison,
+        value: i32,
+    },
+    InventoryFree {
+        comparison: CountComparison,
+        value: i32,
     },
     StockCount {
         item: ItemKind,
@@ -566,6 +583,21 @@ fn parse_condition<'a>(line_no: usize, tokens: &'a [&str]) -> Result<(Condition,
         ["if", "can_attack", index, rest @ ..] => Ok((
             Condition::CanAttack {
                 index: parse_i32(line_no, "scan enemy index", index)?,
+            },
+            rest,
+        )),
+        ["if", "inventory_count", item, comparison, value, rest @ ..] => Ok((
+            Condition::InventoryCount {
+                item: parse_item_or_err(line_no, item)?,
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "inventory count threshold", value)?,
+            },
+            rest,
+        )),
+        ["if", "inventory_free", comparison, value, rest @ ..] => Ok((
+            Condition::InventoryFree {
+                comparison: parse_count_comparison(line_no, comparison)?,
+                value: parse_i32(line_no, "inventory free threshold", value)?,
             },
             rest,
         )),
@@ -904,6 +936,12 @@ fn add_condition_import(
             ensure_kind(kind, BehaviorKind::Turret, line_no, "can_attack")?;
             imports.insert(HostImport::TurretCanAttack);
         }
+        Condition::InventoryCount { .. } => {
+            imports.insert(HostImport::CommonInventoryCount);
+        }
+        Condition::InventoryFree { .. } => {
+            imports.insert(HostImport::CommonInventoryFree);
+        }
         Condition::StockCount { .. } => {
             imports.insert(HostImport::CommonStockCount);
         }
@@ -1168,6 +1206,14 @@ fn render_condition(condition: Condition) -> String {
         } => render_indexed_f32_condition("enemy_distance", index, comparison, value),
         Condition::CanAttack { index } => {
             format!("(call $can_attack (i32.const {index}))")
+        }
+        Condition::InventoryCount {
+            item,
+            comparison,
+            value,
+        } => render_count_condition("inventory_count", &item, comparison, value),
+        Condition::InventoryFree { comparison, value } => {
+            render_scalar_count_condition("inventory_free", comparison, value)
         }
         Condition::StockCount {
             item,

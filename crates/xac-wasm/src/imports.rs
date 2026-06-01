@@ -47,6 +47,18 @@ pub(crate) const HOST_IMPORT_SPECS: &[HostImportSpec] = &[
     },
     HostImportSpec {
         module: "xac:common",
+        name: "inventory_count",
+        wit_name: "inventory-count: func",
+        kinds: ALL_BEHAVIOR_KINDS,
+    },
+    HostImportSpec {
+        module: "xac:common",
+        name: "inventory_free",
+        wit_name: "inventory-free: func",
+        kinds: ALL_BEHAVIOR_KINDS,
+    },
+    HostImportSpec {
+        module: "xac:common",
         name: "stock_count",
         wit_name: "stock-count: func",
         kinds: ALL_BEHAVIOR_KINDS,

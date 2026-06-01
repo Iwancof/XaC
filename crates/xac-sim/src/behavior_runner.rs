@@ -104,6 +104,14 @@ impl Simulation {
             Vec::new()
         };
         BehaviorHostInput {
+            inventory_counts: block_inventory_counts.clone(),
+            inventory_free: i32::try_from(
+                block
+                    .inventory
+                    .capacity
+                    .saturating_sub(block.inventory.total()),
+            )
+            .unwrap_or(i32::MAX),
             output_blocked: self.output_blocked(block_id),
             drill_ore_kind: self.drill_ore_kind(block_id),
             drill_can_mine: self.drill_can_mine(block_id),

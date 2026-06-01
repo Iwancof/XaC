@@ -106,6 +106,8 @@ pub enum NetStoreOp {
 
 #[derive(Clone, Debug, Default)]
 pub struct BehaviorHostInput {
+    pub inventory_counts: BTreeMap<ItemKind, i32>,
+    pub inventory_free: i32,
     pub output_blocked: bool,
     pub drill_ore_kind: Option<ItemKind>,
     pub drill_can_mine: bool,
