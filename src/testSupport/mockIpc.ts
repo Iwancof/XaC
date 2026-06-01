@@ -422,6 +422,7 @@ function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind))
     active: isProgrammableBlock(kind),
     network_id: isNetworkNode(kind) ? 1 : null,
     effective_cpu_rate: blockLocalCpuRate(kind),
+    fuel_bank: 0,
     progress: 0,
     status: "idle"
   };

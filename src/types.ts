@@ -54,6 +54,7 @@ export interface Block {
   active: boolean;
   network_id: number | null;
   effective_cpu_rate: number;
+  fuel_bank: number;
   progress: number;
   status: string;
 }

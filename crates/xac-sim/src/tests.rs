@@ -1010,6 +1010,31 @@ fn cpu_node_increases_wasm_driven_drill_throughput() {
 }
 
 #[test]
+fn snapshot_exposes_block_wasm_fuel_bank() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Turret, Pos { x: 42, y: 32 }, Direction::East)
+        .unwrap();
+    let turret_id = sim.selected_id.clone().unwrap();
+
+    sim.step_ticks(20);
+
+    let snapshot = sim.snapshot();
+    let turret = snapshot
+        .blocks
+        .iter()
+        .find(|block| block.id == turret_id)
+        .unwrap();
+    assert_eq!(
+        turret.effective_cpu_rate,
+        BlockKind::Turret.local_cpu_rate()
+    );
+    assert!(
+        turret.fuel_bank > 0.0 && turret.fuel_bank < 40.0,
+        "isolated programmable blocks should expose banked local CPU fuel before the next Wasm invocation"
+    );
+}
+
+#[test]
 fn local_cpu_banks_fuel_until_api_heavy_behavior_can_run() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Turret, Pos { x: 42, y: 32 }, Direction::East)

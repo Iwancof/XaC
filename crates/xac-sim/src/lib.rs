@@ -192,7 +192,15 @@ impl Simulation {
             width: self.width,
             height: self.height,
             tiles: self.tiles.clone(),
-            blocks: self.blocks.values().cloned().collect(),
+            blocks: self
+                .blocks
+                .values()
+                .cloned()
+                .map(|mut block| {
+                    block.fuel_bank = self.fuel_banks.get(&block.id).copied().unwrap_or(0.0);
+                    block
+                })
+                .collect(),
             enemies: self.enemies.values().cloned().collect(),
             drones: self.drones.values().cloned().collect(),
             networks: self.networks.values().cloned().collect(),

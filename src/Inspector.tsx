@@ -62,6 +62,8 @@ export function Inspector({
             <strong>{selectedBlock.hp}</strong>
             <span>CPU</span>
             <strong>{selectedBlock.effective_cpu_rate.toFixed(1)} fuel/s</strong>
+            <span>Fuel Bank</span>
+            <strong>{selectedBlock.fuel_bank.toFixed(1)}</strong>
             {selectedBlock.recipe && (
               <>
                 <span>Recipe</span>

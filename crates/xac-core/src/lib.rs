@@ -478,6 +478,7 @@ pub struct Block {
     pub active: bool,
     pub network_id: Option<u32>,
     pub effective_cpu_rate: f32,
+    pub fuel_bank: f32,
     pub progress: u32,
     pub status: String,
 }
