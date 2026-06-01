@@ -2,6 +2,8 @@ use anyhow::{anyhow, Result};
 use std::collections::BTreeSet;
 use xac_core::{BehaviorKind, Direction, ItemKind};
 
+const MAX_LOG_MESSAGE_BYTES: usize = 256;
+
 pub(crate) const ATTACK_POLICY_NEAREST: i32 = 2;
 pub(crate) const ATTACK_POLICY_LOWEST_HP: i32 = 3;
 pub(crate) const ATTACK_POLICY_RUNNER: i32 = 4;
@@ -20,6 +22,7 @@ pub(crate) fn is_wat_source(source: &str) -> bool {
 pub(crate) fn compile_xac_script(kind: BehaviorKind, source: &str) -> Result<String> {
     let mut imports = BTreeSet::new();
     let mut statements = Vec::new();
+    let mut log_data = Vec::new();
 
     for (index, raw_line) in source.lines().enumerate() {
         let line_no = index + 1;
@@ -27,12 +30,28 @@ pub(crate) fn compile_xac_script(kind: BehaviorKind, source: &str) -> Result<Str
         if line.is_empty() {
             continue;
         }
-        statements.push(parse_script_statement(kind, line_no, &line, &mut imports)?);
+        statements.push(parse_script_statement(
+            kind,
+            line_no,
+            &line,
+            &mut imports,
+            &mut log_data,
+        )?);
     }
 
     let mut out = vec!["(module".to_string()];
     for import in imports {
         out.push(import.wat().to_string());
+    }
+    if !log_data.is_empty() {
+        out.push(r#"  (memory (export "memory") 1)"#.to_string());
+        for entry in &log_data {
+            out.push(format!(
+                r#"  (data (i32.const {}) "{}")"#,
+                entry.offset,
+                wat_data_escape(&entry.bytes)
+            ));
+        }
     }
     out.push(r#"  (func (export "tick")"#.to_string());
     for statement in &statements {
@@ -45,6 +64,7 @@ pub(crate) fn compile_xac_script(kind: BehaviorKind, source: &str) -> Result<Str
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum HostImport {
+    CommonLog,
     DrillOutputBlocked,
     DrillMine,
     DrillOutput,
@@ -94,6 +114,9 @@ enum HostImport {
 impl HostImport {
     fn wat(self) -> &'static str {
         match self {
+            HostImport::CommonLog => {
+                r#"  (import "xac:common" "log" (func $log (param i32 i32) (result i32)))"#
+            }
             HostImport::DrillOutputBlocked => {
                 r#"  (import "xac:drill" "output_blocked" (func $output_blocked (result i32)))"#
             }
@@ -360,10 +383,20 @@ enum ScriptAction {
         amount: i32,
     },
     Idle,
+    Log {
+        offset: u32,
+        len: u32,
+    },
     NetSet {
         key: i32,
         value: i32,
     },
+}
+
+#[derive(Clone, Debug)]
+struct LogData {
+    offset: u32,
+    bytes: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
@@ -390,16 +423,17 @@ fn parse_script_statement(
     line_no: usize,
     line: &str,
     imports: &mut BTreeSet<HostImport>,
+    log_data: &mut Vec<LogData>,
 ) -> Result<ScriptStatement> {
     let tokens: Vec<_> = line.split_whitespace().collect();
     if tokens.first() == Some(&"if") {
         let (condition, action_tokens) = parse_condition(line_no, &tokens)?;
         add_condition_import(kind, line_no, &condition, imports)?;
-        let action = parse_script_action(kind, line_no, action_tokens, imports)?;
+        let action = parse_script_action(kind, line_no, action_tokens, imports, log_data)?;
         Ok(ScriptStatement::If { condition, action })
     } else {
         Ok(ScriptStatement::Action(parse_script_action(
-            kind, line_no, &tokens, imports,
+            kind, line_no, &tokens, imports, log_data,
         )?))
     }
 }
@@ -541,10 +575,17 @@ fn parse_script_action(
     line_no: usize,
     tokens: &[&str],
     imports: &mut BTreeSet<HostImport>,
+    log_data: &mut Vec<LogData>,
 ) -> Result<ScriptAction> {
     match tokens {
         ["return"] | ["stop"] => Ok(ScriptAction::Return),
         ["noop"] => Ok(ScriptAction::Noop),
+        ["log", message @ ..] if !message.is_empty() => {
+            let message = message.join(" ");
+            let (offset, len) = register_log_message(line_no, &message, log_data)?;
+            imports.insert(HostImport::CommonLog);
+            Ok(ScriptAction::Log { offset, len })
+        }
         ["mine"] => {
             ensure_kind(kind, BehaviorKind::Drill, line_no, "mine")?;
             imports.insert(HostImport::DrillMine);
@@ -1130,10 +1171,56 @@ fn render_action(action: ScriptAction, indent: &str, out: &mut Vec<String>) {
             item_code(&item)
         )),
         ScriptAction::Idle => out.push(format!("{indent}(drop (call $idle))")),
+        ScriptAction::Log { offset, len } => out.push(format!(
+            "{indent}(drop (call $log (i32.const {offset}) (i32.const {len})))"
+        )),
         ScriptAction::NetSet { key, value } => out.push(format!(
             "{indent}(drop (call $net_set_i32 (i32.const {key}) (i32.const {value})))"
         )),
     }
+}
+
+fn register_log_message(
+    line_no: usize,
+    message: &str,
+    log_data: &mut Vec<LogData>,
+) -> Result<(u32, u32)> {
+    let bytes = message.as_bytes();
+    if bytes.len() > MAX_LOG_MESSAGE_BYTES {
+        return Err(anyhow!(
+            "line {line_no}: log message must be at most {MAX_LOG_MESSAGE_BYTES} bytes"
+        ));
+    }
+    let offset = log_data
+        .last()
+        .map(|entry| entry.offset as usize + entry.bytes.len())
+        .unwrap_or(0);
+    let end = offset
+        .checked_add(bytes.len())
+        .ok_or_else(|| anyhow!("line {line_no}: log data offset overflow"))?;
+    if end > u16::MAX as usize {
+        return Err(anyhow!("line {line_no}: too much static log data"));
+    }
+    let offset = u32::try_from(offset).expect("guarded by static log data limit");
+    let len = u32::try_from(bytes.len()).expect("log message length fits u32");
+    log_data.push(LogData {
+        offset,
+        bytes: bytes.to_vec(),
+    });
+    Ok((offset, len))
+}
+
+fn wat_data_escape(bytes: &[u8]) -> String {
+    let mut out = String::new();
+    for byte in bytes {
+        match byte {
+            b'"' => out.push_str("\\\""),
+            b'\\' => out.push_str("\\\\"),
+            0x20..=0x7e => out.push(char::from(*byte)),
+            _ => out.push_str(&format!("\\{byte:02x}")),
+        }
+    }
+    out
 }
 
 fn direction_code(dir: Direction) -> i32 {

@@ -623,6 +623,27 @@ mod tests {
     }
 
     #[test]
+    fn xac_script_log_writes_game_log() {
+        let mut sim = test_sim("sim");
+        sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+            .unwrap();
+        let drill_id = sim.selected_id.clone().unwrap();
+        assign_script(&mut sim, &drill_id, "log drill ready");
+        sim.fuel_banks.insert(drill_id.clone(), 100.0);
+
+        sim.step_ticks(1);
+
+        assert!(
+            sim.logs.iter().any(|entry| {
+                entry.level == LogLevel::Info
+                    && entry.source == drill_id
+                    && entry.message == "drill ready"
+            }),
+            "behavior log output should be copied into the game log"
+        );
+    }
+
+    #[test]
     fn router_output_available_script_waits_for_free_destination() {
         let mut sim = test_sim("sim");
         sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)

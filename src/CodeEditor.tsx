@@ -25,6 +25,7 @@ export function CodeEditor({ value, onChange }: CodeEditorProps) {
         "return",
         "stop",
         "noop",
+        "log",
         "push",
         "push_any",
         "set_recipe",

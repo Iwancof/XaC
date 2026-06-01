@@ -255,6 +255,7 @@ impl Simulation {
             );
             return None;
         }
+        self.apply_behavior_logs(drone_id, eval.logs);
         match eval.intent {
             BehaviorIntent::CarrierDrone { command } => Some(command),
             _ => None,

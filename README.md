@@ -99,6 +99,12 @@ net_set 7 42
 if net 7 == 42 attack_best lowest_hp
 ```
 
+Debug messages can be emitted from behavior code and appear in the game log:
+
+```text
+log drill ready
+```
+
 Programmable blocks can read same-network inventory supplied by core, storage,
 and other stock-holding blocks:
 

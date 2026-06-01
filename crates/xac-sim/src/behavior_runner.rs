@@ -2,8 +2,8 @@ use anyhow::{anyhow, Result};
 use std::collections::BTreeMap;
 use xac_core::{BehaviorKind, Direction, ItemKind, LogLevel, TerrainKind};
 use xac_wasm::{
-    AssemblerCommand, BehaviorHostInput, BehaviorIntent, CompiledBehavior, DrillCommand,
-    NetStoreWrite,
+    AssemblerCommand, BehaviorHostInput, BehaviorIntent, BehaviorLog, CompiledBehavior,
+    DrillCommand, NetStoreWrite,
 };
 
 use crate::block_defs::can_accept_item;
@@ -68,6 +68,7 @@ impl Simulation {
                         package.wasm_hash = Some(eval.wasm_hash);
                     }
                     self.apply_net_writes(&id, eval.net_writes);
+                    self.apply_behavior_logs(&id, eval.logs);
                     self.apply_behavior_intent(&id, eval.intent);
                 }
                 Err(error) => {
@@ -166,6 +167,12 @@ impl Simulation {
             network
                 .store
                 .insert(write.key.to_string(), serde_json::Value::from(write.value));
+        }
+    }
+
+    pub(crate) fn apply_behavior_logs(&mut self, block_id: &str, logs: Vec<BehaviorLog>) {
+        for entry in logs {
+            self.log(LogLevel::Info, block_id.to_string(), entry.message);
         }
     }
 

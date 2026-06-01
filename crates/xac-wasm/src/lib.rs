@@ -2,7 +2,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use wasmtime::{Caller, Config, Instance, Linker, Module, Store};
+use wasmtime::{Caller, Config, Extern, Instance, Linker, Module, Store};
 use xac_core::{BehaviorKind, Direction, EnemyKind, ItemKind, Pos};
 
 mod script;
@@ -85,10 +85,16 @@ pub enum TargetRule {
 pub struct BehaviorEval {
     pub intent: BehaviorIntent,
     pub net_writes: Vec<NetStoreWrite>,
+    pub logs: Vec<BehaviorLog>,
     pub fuel_spent: u64,
     pub fuel_remaining: u64,
     pub over_budget: bool,
     pub wasm_hash: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct BehaviorLog {
+    pub message: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -129,6 +135,7 @@ struct BehaviorHostState {
     intent: BehaviorIntent,
     assembler_recipe: ItemKind,
     net_writes: Vec<NetStoreWrite>,
+    logs: Vec<BehaviorLog>,
     host_over_budget: bool,
 }
 
@@ -143,12 +150,14 @@ impl BehaviorHostState {
             intent: BehaviorIntent::Noop,
             assembler_recipe,
             net_writes: Vec::new(),
+            logs: Vec::new(),
             host_over_budget: false,
         }
     }
 }
 
 mod host_cost {
+    pub const LOG_BASE: u64 = 1;
     pub const FUEL_REMAINING: u64 = 0;
     pub const OUTPUT_BLOCKED: u64 = 1;
     pub const MINE: u64 = 2;
@@ -185,6 +194,8 @@ mod host_cost {
     pub const NET_GET_I32: u64 = 2;
     pub const NET_SET_I32: u64 = 4;
 }
+
+const MAX_LOG_MESSAGE_BYTES: usize = 256;
 
 #[derive(Clone, Copy, Debug)]
 enum TickAbi {
@@ -291,6 +302,7 @@ impl BehaviorRuntime {
         Ok(BehaviorEval {
             intent,
             net_writes: store.data().net_writes.clone(),
+            logs: store.data().logs.clone(),
             fuel_spent: fuel.saturating_sub(fuel_remaining),
             fuel_remaining,
             over_budget: false,
@@ -339,7 +351,7 @@ fn allowed_common_import(module: &str, name: &str) -> bool {
     match module {
         "xac:common" => matches!(
             name,
-            "fuel_remaining" | "stock_count" | "stock_capacity" | "has_space"
+            "log" | "fuel_remaining" | "stock_count" | "stock_capacity" | "has_space"
         ),
         "xac:net" => matches!(name, "store_get_i32" | "store_set_i32"),
         _ => false,
@@ -442,6 +454,7 @@ fn over_budget_eval(
     BehaviorEval {
         intent: BehaviorIntent::Noop,
         net_writes: Vec::new(),
+        logs: Vec::new(),
         fuel_spent: fuel.saturating_sub(fuel_remaining),
         fuel_remaining,
         over_budget: true,
@@ -450,6 +463,30 @@ fn over_budget_eval(
 }
 
 fn define_host_imports(linker: &mut Linker<BehaviorHostState>) -> Result<()> {
+    linker.func_wrap(
+        "xac:common",
+        "log",
+        |mut caller: Caller<'_, BehaviorHostState>, ptr: i32, len: i32| -> i32 {
+            let Ok(len) = usize::try_from(len) else {
+                return 0;
+            };
+            let Ok(ptr) = usize::try_from(ptr) else {
+                return 0;
+            };
+            if len > MAX_LOG_MESSAGE_BYTES {
+                return 0;
+            }
+            let cost = host_cost::LOG_BASE + (len as u64 / 32);
+            if !charge_host(&mut caller, cost) {
+                return 0;
+            }
+            let Some(message) = read_guest_string(&mut caller, ptr, len) else {
+                return 0;
+            };
+            caller.data_mut().logs.push(BehaviorLog { message });
+            1
+        },
+    )?;
     linker.func_wrap(
         "xac:common",
         "fuel_remaining",
@@ -1221,6 +1258,20 @@ fn push_drone_port_command(state: &mut BehaviorHostState, command: DronePortComm
             };
         }
     }
+}
+
+fn read_guest_string(
+    caller: &mut Caller<'_, BehaviorHostState>,
+    ptr: usize,
+    len: usize,
+) -> Option<String> {
+    let memory = match caller.get_export("memory")? {
+        Extern::Memory(memory) => memory,
+        _ => return None,
+    };
+    let mut bytes = vec![0_u8; len];
+    memory.read(caller, ptr, &mut bytes).ok()?;
+    String::from_utf8(bytes).ok()
 }
 
 fn charge_host(caller: &mut Caller<'_, BehaviorHostState>, cost: u64) -> bool {
@@ -2444,6 +2495,56 @@ mod tests {
         assert!(
             eval.fuel_spent >= host_cost::MINE,
             "host API mine should charge explicit fuel"
+        );
+    }
+
+    #[test]
+    fn common_log_reads_guest_memory() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let compiled = runtime
+            .compile_wat(
+                BehaviorKind::Drill,
+                r#"(module
+                  (import "xac:common" "log" (func $log (param i32 i32) (result i32)))
+                  (memory (export "memory") 1)
+                  (data (i32.const 8) "ready")
+                  (func (export "tick")
+                    (drop (call $log (i32.const 8) (i32.const 5)))))"#,
+            )
+            .unwrap();
+
+        let eval = runtime
+            .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+            .unwrap();
+        assert_eq!(
+            eval.logs,
+            vec![BehaviorLog {
+                message: "ready".to_string()
+            }]
+        );
+        assert!(
+            eval.fuel_spent >= host_cost::LOG_BASE,
+            "log should charge explicit host fuel"
+        );
+    }
+
+    #[test]
+    fn xac_script_can_emit_log_message() {
+        let runtime = BehaviorRuntime::new().unwrap();
+        let source = "log drill ready";
+        let wat = compile_source_to_wat(BehaviorKind::Drill, source).unwrap();
+        assert!(wat.contains(r#""log""#));
+        assert!(wat.contains(r#"(memory (export "memory") 1)"#));
+
+        let compiled = runtime.compile_wat(BehaviorKind::Drill, source).unwrap();
+        let eval = runtime
+            .evaluate_compiled(&compiled, 40, BehaviorHostInput::default())
+            .unwrap();
+        assert_eq!(
+            eval.logs,
+            vec![BehaviorLog {
+                message: "drill ready".to_string()
+            }]
         );
     }
 
