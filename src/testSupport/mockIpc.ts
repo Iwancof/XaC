@@ -13,7 +13,7 @@ import {
 } from "../gameMetadata";
 import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
 import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
-import { enemyAttackCooldownTicks, enemyAttackDamage, enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
+import { enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
 import { MAP_HEIGHT, MAP_WIDTH, terrainAt } from "../mapSeed";
 import {
   emptyMockBehaviorResult,
@@ -24,12 +24,18 @@ import { commonTemplates } from "./mockCommonTemplates";
 import {
   blockAt,
   blockCenter,
-  closestPointOnBlock,
   distance,
   footprintPositions,
   moveToward,
   rotateDirection
 } from "./mockGeometry";
+import {
+  cleanupDestroyed,
+  coreDefeated,
+  currentCoreHp,
+  runEnemies,
+  type MockCombatContext
+} from "./mockCombat";
 import { addItem, inventoryCount, inventoryFree, inventoryTotal, removeItem } from "./mockInventory";
 import {
   networkBlocks,
@@ -63,7 +69,6 @@ import type {
   Tile
 } from "../types";
 
-const ENEMY_ATTACK_RANGE = 0.2;
 const MOCK_ASSEMBLER_RECIPE_TICKS = 20;
 const MOCK_TURRET_DAMAGE = 12;
 
@@ -359,18 +364,13 @@ function runTicks(count: number) {
       }
     }
     runMockDrones();
-    runEnemies();
-    cleanupDestroyed();
+    runEnemies(combatContext());
+    const combatCleanup = cleanupDestroyed(combatContext());
+    state.blocks = combatCleanup.blocks;
+    state.enemies = combatCleanup.enemies;
+    state.selectedId = combatCleanup.selectedId;
+    state.running = combatCleanup.running;
   }
-}
-
-function currentCoreHp(blocks: Block[]) {
-  const core = blocks.find((block) => block.kind === "core");
-  return Math.max(0, core?.hp ?? 0);
-}
-
-function coreDefeated(blocks: Block[]) {
-  return currentCoreHp(blocks) <= 0;
 }
 
 function openBehavior(behaviorId: string): BehaviorSource {
@@ -695,80 +695,6 @@ function forceRuntimeError(entityId: string, message = "mocked wasm unreachable 
   throw new Error(`unknown runtime entity: ${entityId}`);
 }
 
-function runEnemies() {
-  for (const enemy of state.enemies) {
-    if (enemy.hp <= 0) continue;
-    const target = nearestEnemyTarget(enemy);
-    if (!target) continue;
-
-    enemy.target_id = target.block.id;
-    if (enemy.attack_cooldown > 0) {
-      enemy.attack_cooldown -= 1;
-    }
-
-    if (distance(enemy.pos, target.pos) <= ENEMY_ATTACK_RANGE) {
-      if (enemy.attack_cooldown === 0) {
-        target.block.hp = Math.max(0, target.block.hp - enemyAttackDamage(enemy.kind));
-        enemy.attack_cooldown = enemyAttackCooldownTicks(enemy.kind);
-      } else {
-        target.block.status = `under attack by ${enemy.id}`;
-      }
-    } else {
-      enemy.pos = moveToward(enemy.pos, target.pos, enemy.move_speed);
-      target.block.status = `targeted by ${enemy.id}`;
-    }
-  }
-}
-
-function cleanupDestroyed() {
-  const defeatedEnemyIds = new Set(state.enemies.filter((enemy) => enemy.hp <= 0).map((enemy) => enemy.id));
-  if (defeatedEnemyIds.size > 0) {
-    for (const id of defeatedEnemyIds) {
-      log("info", id, "enemy destroyed");
-    }
-    state.enemies = state.enemies.filter((enemy) => !defeatedEnemyIds.has(enemy.id));
-    if (state.selectedId && defeatedEnemyIds.has(state.selectedId)) {
-      state.selectedId = null;
-    }
-  }
-
-  const destroyedBlockIds = new Set(
-    state.blocks.filter((block) => block.kind !== "core" && block.hp <= 0).map((block) => block.id)
-  );
-  if (destroyedBlockIds.size > 0) {
-    for (const id of destroyedBlockIds) {
-      log("warn", id, "block destroyed");
-    }
-    state.blocks = state.blocks.filter((block) => !destroyedBlockIds.has(block.id));
-    if (state.selectedId && destroyedBlockIds.has(state.selectedId)) {
-      state.selectedId = null;
-    }
-  }
-
-  const core = state.blocks.find((block) => block.kind === "core");
-  if (core && core.hp <= 0) {
-    core.hp = 0;
-    if (core.status !== "core breached") {
-      core.status = "core breached";
-      log("error", core.id, "core destroyed; simulation halted");
-    }
-    state.running = false;
-  }
-}
-
-function nearestEnemyTarget(enemy: Enemy) {
-  const targetKinds =
-    enemy.kind === "wire_cutter" ? new Set<BlockKind>(["wire", "cpu_node", "drone_port"]) : new Set<BlockKind>(["core"]);
-  return nearestBlockTarget(enemy.pos, (kind) => targetKinds.has(kind)) ?? nearestBlockTarget(enemy.pos, (kind) => kind === "core");
-}
-
-function nearestBlockTarget(origin: Pos, predicate: (kind: BlockKind) => boolean) {
-  return state.blocks
-    .filter((block) => predicate(block.kind))
-    .map((block) => ({ block, pos: closestPointOnBlock(origin, block) }))
-    .sort((a, b) => distance(origin, a.pos) - distance(origin, b.pos))[0];
-}
-
 function buildTiles(blocks: Block[]): Tile[] {
   const tiles: Tile[] = [];
   for (let y = 0; y < MAP_HEIGHT; y += 1) {
@@ -1088,6 +1014,16 @@ function logisticsContext(): MockLogisticsContext {
   return {
     blocks: state.blocks,
     recordItemFlow
+  };
+}
+
+function combatContext(): MockCombatContext {
+  return {
+    blocks: state.blocks,
+    enemies: state.enemies,
+    selectedId: state.selectedId,
+    running: state.running,
+    log
   };
 }
 
