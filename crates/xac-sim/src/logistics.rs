@@ -29,11 +29,8 @@ impl Simulation {
         let Some(block) = self.blocks.get(block_id) else {
             return true;
         };
-        if !block.inventory.has_space(1) {
-            return true;
-        }
         let Some(dst_id) = self.block_id_at(block.pos.step(block.dir)) else {
-            return false;
+            return true;
         };
         !self
             .blocks

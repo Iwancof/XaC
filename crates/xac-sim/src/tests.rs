@@ -930,6 +930,54 @@ fn drill_script_outputs_selected_ore_kind_to_conveyor() {
 }
 
 #[test]
+fn drill_output_blocked_tracks_output_lane_not_internal_buffer() {
+    let mut sim = test_sim("sim");
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    assign_script(&mut sim, &drill_id, "if output_blocked return\noutput ore");
+    {
+        let drill = sim.blocks.get_mut(&drill_id).unwrap();
+        drill.inventory.add(ItemKind::Ore, drill.inventory.capacity);
+    }
+    sim.place_block(BlockKind::Conveyor, Pos { x: 21, y: 30 }, Direction::East)
+        .unwrap();
+    let conveyor_id = sim.selected_id.clone().unwrap();
+    sim.fuel_banks.insert(drill_id.clone(), 100.0);
+
+    sim.step_ticks(1);
+
+    assert_eq!(
+        sim.blocks[&drill_id].inventory.count(&ItemKind::Ore),
+        9,
+        "a full drill buffer should still be able to output into an open lane"
+    );
+    assert_eq!(sim.blocks[&conveyor_id].inventory.count(&ItemKind::Ore), 1);
+
+    let mut blocked = test_sim("blocked");
+    blocked
+        .place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let blocked_drill_id = blocked.selected_id.clone().unwrap();
+    assign_script(
+        &mut blocked,
+        &blocked_drill_id,
+        "if output_blocked return\nmine",
+    );
+    blocked.fuel_banks.insert(blocked_drill_id.clone(), 100.0);
+
+    blocked.step_ticks(260);
+
+    assert_eq!(
+        blocked.blocks[&blocked_drill_id]
+            .inventory
+            .count(&ItemKind::Ore),
+        0,
+        "the built-in output guard should stop mining when no output lane exists"
+    );
+}
+
+#[test]
 fn router_item_script_only_pushes_requested_item() {
     let mut sim = test_sim("sim");
     sim.place_block(BlockKind::Router, Pos { x: 34, y: 30 }, Direction::East)
@@ -1260,22 +1308,34 @@ fn cpu_node_increases_wasm_driven_drill_throughput() {
         }
         sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
             .unwrap();
-        let drill_id = sim.selected_id.clone().unwrap();
-        (sim, drill_id)
+        sim.place_block(BlockKind::Storage, Pos { x: 21, y: 30 }, Direction::East)
+            .unwrap();
+        let storage_id = sim.selected_id.clone().unwrap();
+        (sim, storage_id)
     }
 
-    let (mut slow_sim, slow_drill_id) = setup(false);
-    let (mut fast_sim, fast_drill_id) = setup(true);
+    let (mut slow_sim, slow_storage_id) = setup(false);
+    let (mut fast_sim, fast_storage_id) = setup(true);
 
     slow_sim.step_ticks(260);
     fast_sim.step_ticks(260);
 
-    let slow_rate = slow_sim.blocks[&slow_drill_id].effective_cpu_rate;
-    let fast_rate = fast_sim.blocks[&fast_drill_id].effective_cpu_rate;
-    let slow_ore = slow_sim.blocks[&slow_drill_id]
+    let slow_rate = slow_sim
+        .blocks
+        .values()
+        .find(|block| block.kind == BlockKind::Drill)
+        .unwrap()
+        .effective_cpu_rate;
+    let fast_rate = fast_sim
+        .blocks
+        .values()
+        .find(|block| block.kind == BlockKind::Drill)
+        .unwrap()
+        .effective_cpu_rate;
+    let slow_ore = slow_sim.blocks[&slow_storage_id]
         .inventory
         .count(&ItemKind::Ore);
-    let fast_ore = fast_sim.blocks[&fast_drill_id]
+    let fast_ore = fast_sim.blocks[&fast_storage_id]
         .inventory
         .count(&ItemKind::Ore);
 
