@@ -13,6 +13,7 @@ import {
   isProgrammableBlock
 } from "../gameMetadata";
 import { BUILTIN_BEHAVIOR_PRESETS } from "../builtinBehaviors";
+import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
 import type {
   BehaviorRuntimeStats,
   BehaviorSource,
@@ -345,6 +346,7 @@ function copyBehavior(entityId: string, fork: boolean): BehaviorSource {
       display_name: `${original.summary.display_name} ${fork ? "Fork" : "Copy"}`,
       builtin: false,
       used_by: 1,
+      source_language: detectBehaviorSourceLanguage(original.source),
       source_path: sourcePath,
       build_status: fork ? "forked" : "copied"
     },
@@ -401,6 +403,7 @@ function saveBehavior({ behaviorId = "", source = "" }: { behaviorId?: string; s
     throw new Error("builtin presets are read-only; create a copy first");
   }
   behavior.source = source;
+  behavior.summary.source_language = detectBehaviorSourceLanguage(source);
   behavior.summary.build_status = "saved";
   log("info", behaviorId, "source saved");
   return openBehavior(behaviorId);
@@ -452,6 +455,7 @@ function builtinBehaviors(): Record<string, MutableBehavior> {
           display_name: preset.displayName,
           base_kind: preset.baseKind,
           world: preset.world,
+          source_language: detectBehaviorSourceLanguage(preset.source),
           builtin: true,
           used_by: 0,
           source_path: preset.sourcePath,

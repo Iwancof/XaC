@@ -5,7 +5,8 @@ use xac_core::{
 
 use crate::behavior::{
     persist_compiled_behavior_cache, persist_project_behavior_index,
-    persist_project_behavior_source, project_behavior_source_path, BehaviorPackage,
+    persist_project_behavior_source, project_behavior_source_path, source_language,
+    BehaviorPackage,
 };
 use crate::Simulation;
 
@@ -49,6 +50,7 @@ impl Simulation {
             display_name,
             base_kind: original.summary.base_kind,
             world: original.summary.world,
+            source_language: source_language(&original.source).to_string(),
             builtin: false,
             used_by: 0,
             source_path,
@@ -87,6 +89,7 @@ impl Simulation {
             display_name: format!("{} Fork", original.summary.display_name),
             base_kind: original.summary.base_kind,
             world: original.summary.world,
+            source_language: source_language(&original.source).to_string(),
             builtin: false,
             used_by: 0,
             source_path,
@@ -151,6 +154,7 @@ impl Simulation {
             }
             package.source = source;
             package.wasm_hash = None;
+            package.summary.source_language = source_language(&package.source).to_string();
             package.summary.build_status = "saved".to_string();
             persist_project_behavior_source(package)?;
         }

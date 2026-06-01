@@ -476,6 +476,26 @@ fn project_behavior_source_persists_under_config_root() {
 }
 
 #[test]
+fn behavior_summary_tracks_source_language() {
+    let mut sim = test_sim("sim");
+    let builtin = sim.open_behavior("builtin.drill.basic").unwrap();
+    assert_eq!(builtin.summary.source_language, "XaC Script");
+
+    sim.place_block(BlockKind::Drill, Pos { x: 20, y: 30 }, Direction::East)
+        .unwrap();
+    let drill_id = sim.selected_id.clone().unwrap();
+    let copied = sim.edit_builtin_copy(&drill_id).unwrap();
+    let behavior_id = copied.summary.id.clone();
+    let tiny = "fn tick() { if (output_blocked()) { return; } mine(); }";
+    let saved = sim.save_behavior(&behavior_id, tiny.to_string()).unwrap();
+    assert_eq!(saved.summary.source_language, "Tiny Function");
+
+    let wat = xac_wasm::wat_const_action(0);
+    let saved = sim.save_behavior(&behavior_id, wat).unwrap();
+    assert_eq!(saved.summary.source_language, "WAT");
+}
+
+#[test]
 fn minimum_devices_place_and_drill_mines_ore_with_builtin_loop_source() {
     let mut sim = test_sim("sim");
 
@@ -2307,6 +2327,7 @@ fn install_test_drone_behavior_source(sim: &mut Simulation, source: &str) -> Beh
                 display_name: "Test Drone Claim".to_string(),
                 base_kind: BehaviorKind::CarrierDrone,
                 world: "carrier-drone-behavior".to_string(),
+                source_language: crate::behavior::source_language(source).to_string(),
                 builtin: false,
                 used_by: 0,
                 source_path: "test://carrier-drone-claim.wat".to_string(),

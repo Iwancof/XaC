@@ -239,6 +239,7 @@ export function Inspector({
           </div>
           <div>
             <span>{behavior.summary.world}</span>
+            <span>{behavior.summary.source_language}</span>
             <span>{behavior.summary.used_by} placements</span>
             <span>{behavior.summary.builtin ? "read-only preset" : "project behavior"}</span>
             <span>status {behavior.summary.build_status}</span>

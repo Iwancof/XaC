@@ -130,6 +130,7 @@ export interface BehaviorSummary {
   display_name: string;
   base_kind: BehaviorKind;
   world: string;
+  source_language: string;
   builtin: boolean;
   used_by: number;
   source_path: string;

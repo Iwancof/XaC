@@ -154,6 +154,7 @@ test("places minimum devices from the right block list and opens drill behavior"
   await page.getByRole("button", { name: "Open", exact: true }).click();
   await expect(page.locator(".behavior-meta")).toContainText("Basic Drill");
   await expect(page.locator(".behavior-meta")).toContainText("builtin.drill.basic");
+  await expect(page.locator(".behavior-meta")).toContainText("XaC Script");
   await expect(page.locator(".behavior-meta")).toContainText("read-only preset");
   await expect(page.locator(".behavior-meta")).toContainText("status builtin");
   await expect(page.locator(".behavior-meta")).toContainText("assets/builtin/drill/basic.xac");

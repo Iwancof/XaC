@@ -66,6 +66,7 @@ pub fn load_behaviors(config_root: &Path) -> Result<BTreeMap<BehaviorId, Behavio
                     display_name: record.display_name,
                     base_kind: record.base_kind,
                     world: record.world,
+                    source_language: source_language(&source).to_string(),
                     builtin: false,
                     used_by: 0,
                     source_path: record.source_path,
@@ -243,6 +244,7 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
                     display_name: display_name.to_string(),
                     base_kind,
                     world: world.to_string(),
+                    source_language: source_language(source).to_string(),
                     builtin: true,
                     used_by: 0,
                     source_path: source_path.to_string(),
@@ -256,4 +258,40 @@ pub fn builtin_behaviors() -> BTreeMap<BehaviorId, BehaviorPackage> {
         );
     }
     packages
+}
+
+pub(crate) fn source_language(source: &str) -> &'static str {
+    for raw_line in source.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("xac-lang: tiny")
+            || lower.contains("xac_lang: tiny")
+            || lower.contains("xac:lang=tiny")
+        {
+            return "Tiny Function";
+        }
+        if lower.starts_with("//")
+            || lower.starts_with('#')
+            || lower.starts_with(";;")
+            || lower.starts_with("/*")
+            || lower.starts_with('*')
+        {
+            continue;
+        }
+        if lower.starts_with("(module") {
+            return "WAT";
+        }
+        if lower.starts_with("fn tick")
+            || lower.starts_with("export fn tick")
+            || lower.starts_with("pub fn tick")
+            || lower.starts_with("void tick")
+        {
+            return "Tiny Function";
+        }
+        return "XaC Script";
+    }
+    "XaC Script"
 }

@@ -158,3 +158,34 @@ export const BEHAVIOR_LANGUAGE_KEYWORDS = uniqueKeywords([
   ...DROPOFF_TAG_KEYWORDS,
   ...WAT_KEYWORDS
 ]);
+
+export function detectBehaviorSourceLanguage(source: string) {
+  for (const rawLine of source.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const lower = line.toLowerCase();
+    if (lower.includes("xac-lang: tiny") || lower.includes("xac_lang: tiny") || lower.includes("xac:lang=tiny")) {
+      return "Tiny Function";
+    }
+    if (
+      lower.startsWith("//") ||
+      lower.startsWith("#") ||
+      lower.startsWith(";;") ||
+      lower.startsWith("/*") ||
+      lower.startsWith("*")
+    ) {
+      continue;
+    }
+    if (lower.startsWith("(module")) return "WAT";
+    if (
+      lower.startsWith("fn tick") ||
+      lower.startsWith("export fn tick") ||
+      lower.startsWith("pub fn tick") ||
+      lower.startsWith("void tick")
+    ) {
+      return "Tiny Function";
+    }
+    return "XaC Script";
+  }
+  return "XaC Script";
+}

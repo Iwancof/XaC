@@ -752,6 +752,7 @@ pub struct BehaviorSummary {
     pub display_name: String,
     pub base_kind: BehaviorKind,
     pub world: String,
+    pub source_language: String,
     pub builtin: bool,
     pub used_by: u32,
     pub source_path: String,
