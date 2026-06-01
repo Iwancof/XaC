@@ -1446,6 +1446,19 @@ fn turret_priority_script_targets_wire_cutter_before_nearest_grunt() {
     sim.step_ticks(1);
 
     assert_eq!(
+        sim.blocks[&turret_id].target_id.as_deref(),
+        Some(cutter_id.as_str()),
+        "turret target_id should expose the current attack target for the attack overlay"
+    );
+    assert_eq!(
+        sim.snapshot()
+            .blocks
+            .iter()
+            .find(|block| block.id == turret_id)
+            .and_then(|block| block.target_id.as_deref()),
+        Some(cutter_id.as_str())
+    );
+    assert_eq!(
         sim.enemies[&grunt_id].hp, 30,
         "nearest grunt should not be targeted while a prioritized wire_cutter is in range"
     );

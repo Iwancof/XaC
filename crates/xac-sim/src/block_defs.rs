@@ -46,6 +46,7 @@ pub fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Bl
         fuel_bank: 0.0,
         behavior_runtime: None,
         progress: 0,
+        target_id: None,
         status: "idle".to_string(),
     }
 }

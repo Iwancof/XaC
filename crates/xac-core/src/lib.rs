@@ -645,6 +645,7 @@ pub struct Block {
     pub fuel_bank: f32,
     pub behavior_runtime: Option<BehaviorRuntimeStats>,
     pub progress: u32,
+    pub target_id: Option<EntityId>,
     pub status: String,
 }
 

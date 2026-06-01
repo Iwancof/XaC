@@ -10,7 +10,11 @@ impl Simulation {
         let Some(turret) = self.blocks.get(turret_id).cloned() else {
             return;
         };
-        if turret.kind != BlockKind::Turret || turret.inventory.count(&ItemKind::Ammo) == 0 {
+        if turret.kind != BlockKind::Turret {
+            return;
+        }
+        self.clear_block_target(turret_id);
+        if turret.inventory.count(&ItemKind::Ammo) == 0 {
             return;
         }
         let target = self.choose_target(turret.pos, priority);
@@ -20,6 +24,7 @@ impl Simulation {
             }
             if let Some(block) = self.blocks.get_mut(turret_id) {
                 block.inventory.remove(&ItemKind::Ammo, 1);
+                block.target_id = Some(enemy_id.clone());
                 block.status = format!("attacking {enemy_id}");
             }
         }
@@ -29,7 +34,11 @@ impl Simulation {
         let Some(turret) = self.blocks.get(turret_id).cloned() else {
             return;
         };
-        if turret.kind != BlockKind::Turret || turret.inventory.count(&ItemKind::Ammo) == 0 {
+        if turret.kind != BlockKind::Turret {
+            return;
+        }
+        self.clear_block_target(turret_id);
+        if turret.inventory.count(&ItemKind::Ammo) == 0 {
             return;
         }
         let Some(enemy_id) = self
@@ -44,7 +53,14 @@ impl Simulation {
         }
         if let Some(block) = self.blocks.get_mut(turret_id) {
             block.inventory.remove(&ItemKind::Ammo, 1);
+            block.target_id = Some(enemy_id.clone());
             block.status = format!("attacking scanned {index}: {enemy_id}");
+        }
+    }
+
+    fn clear_block_target(&mut self, block_id: &str) {
+        if let Some(block) = self.blocks.get_mut(block_id) {
+            block.target_id = None;
         }
     }
 

@@ -437,6 +437,7 @@ function makeBlock(kind: BlockKind, pos: Pos, dir: Direction, id = makeId(kind))
     fuel_bank: 0,
     behavior_runtime: null,
     progress: 0,
+    target_id: null,
     status: "idle"
   };
 }

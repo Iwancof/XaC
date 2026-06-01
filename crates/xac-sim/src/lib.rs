@@ -288,9 +288,18 @@ impl Simulation {
             .filter(|e| e.hp <= 0)
             .map(|e| e.id.clone())
             .collect();
-        for id in dead_enemies {
-            self.enemies.remove(&id);
-            self.log(LogLevel::Info, id, "enemy destroyed".to_string());
+        for id in &dead_enemies {
+            self.enemies.remove(id);
+            self.log(LogLevel::Info, id.clone(), "enemy destroyed".to_string());
+        }
+        for block in self.blocks.values_mut() {
+            if block
+                .target_id
+                .as_ref()
+                .is_some_and(|target_id| dead_enemies.contains(target_id))
+            {
+                block.target_id = None;
+            }
         }
 
         let destroyed_blocks: Vec<_> = self

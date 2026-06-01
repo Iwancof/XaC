@@ -67,6 +67,7 @@ export interface Block {
   fuel_bank: number;
   behavior_runtime: BehaviorRuntimeStats | null;
   progress: number;
+  target_id: string | null;
   status: string;
 }
 

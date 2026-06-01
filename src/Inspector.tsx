@@ -82,6 +82,12 @@ export function Inspector({
                 <strong>{selectedBlock.recipe}</strong>
               </>
             )}
+            {selectedBlock.target_id && (
+              <>
+                <span>Target</span>
+                <strong>{selectedBlock.target_id}</strong>
+              </>
+            )}
             <span>Network</span>
             <strong>{selectedBlock.network_id ?? "local"}</strong>
           </div>

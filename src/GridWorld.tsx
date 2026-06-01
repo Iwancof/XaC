@@ -231,6 +231,17 @@ function drawOverlays(g: Graphics, snapshot: GameSnapshot, overlay: Overlay) {
         color: 0xf43f5e,
         alpha: 0.18
       });
+      const target = snapshot.enemies.find((enemy) => enemy.id === block.target_id);
+      if (target) {
+        g.moveTo(center.x, center.y);
+        g.lineTo(target.pos.x * TILE, target.pos.y * TILE);
+        g.stroke({ width: 2, color: 0xf43f5e, alpha: 0.78 });
+        g.circle(target.pos.x * TILE, target.pos.y * TILE, 9).stroke({
+          width: 2,
+          color: 0xf43f5e,
+          alpha: 0.82
+        });
+      }
     }
   }
 
