@@ -243,6 +243,14 @@ impl BlockKind {
         }
     }
 
+    pub fn max_hp(self) -> i32 {
+        match self {
+            BlockKind::Wire => 15,
+            BlockKind::Core => 500,
+            _ => 90,
+        }
+    }
+
     pub fn footprint_size(self) -> (i32, i32) {
         match self {
             BlockKind::Core => (4, 4),
@@ -265,6 +273,42 @@ pub enum EnemyKind {
     Runner,
     Armored,
     WireCutter,
+}
+
+impl EnemyKind {
+    pub fn max_hp(self) -> i32 {
+        match self {
+            EnemyKind::Grunt => 30,
+            EnemyKind::Runner => 20,
+            EnemyKind::Armored => 90,
+            EnemyKind::WireCutter => 38,
+        }
+    }
+
+    pub fn speed_ticks(self) -> u32 {
+        match self {
+            EnemyKind::Grunt => 8,
+            EnemyKind::Runner => 3,
+            EnemyKind::Armored => 12,
+            EnemyKind::WireCutter => 5,
+        }
+    }
+
+    pub fn move_speed(self) -> f32 {
+        match self {
+            EnemyKind::Grunt => 0.07,
+            EnemyKind::Runner => 0.14,
+            EnemyKind::Armored => 0.045,
+            EnemyKind::WireCutter => 0.10,
+        }
+    }
+
+    pub fn attack_damage(self) -> i32 {
+        match self {
+            EnemyKind::Armored => 8,
+            _ => 5,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -455,6 +499,9 @@ pub struct LogEntry {
 pub struct GameStatus {
     pub wave: u32,
     pub next_wave_in: u32,
+    pub core_hp: i32,
+    pub core_max_hp: i32,
+    pub defeated: bool,
     pub wire_threats: u32,
     pub damaged_wires: u32,
     pub network_cpu: f32,

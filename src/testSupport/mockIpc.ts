@@ -64,7 +64,7 @@ mockIPC((cmd, args = {}) => {
     case "get_snapshot":
       return snapshot();
     case "set_running":
-      state.running = Boolean((args as { running?: boolean }).running);
+      state.running = Boolean((args as { running?: boolean }).running) && !coreDefeated(state.blocks);
       return snapshot();
     case "step_ticks":
       runTicks(Number((args as { count?: number }).count ?? 0));
@@ -167,9 +167,13 @@ function snapshot(): GameSnapshot {
 
 function gameStatus(blocks: Block[], networks: Network[], enemies: Enemy[]) {
   const wavePhase = state.tick % 80;
+  const coreHp = currentCoreHp(blocks);
   return {
     wave: Math.floor(state.tick / 80) + 1,
     next_wave_in: wavePhase < 20 ? 20 - wavePhase : 100 - wavePhase,
+    core_hp: coreHp,
+    core_max_hp: 500,
+    defeated: coreHp <= 0,
     wire_threats: enemies.filter((enemy) => enemy.kind === "wire_cutter" && enemy.hp > 0).length,
     damaged_wires: blocks.filter((block) => block.kind === "wire" && block.hp < 15).length,
     network_cpu: networks.reduce((total, network) => total + network.cpu_pool, 0)
@@ -222,6 +226,10 @@ function rotateBlock(blockId: string) {
 
 function runTicks(count: number) {
   for (let i = 0; i < Math.max(0, Math.min(500, count)); i += 1) {
+    if (coreDefeated(state.blocks)) {
+      state.running = false;
+      break;
+    }
     state.tick += 1;
 
     for (const block of state.blocks) {
@@ -240,6 +248,15 @@ function runTicks(count: number) {
       }
     }
   }
+}
+
+function currentCoreHp(blocks: Block[]) {
+  const core = blocks.find((block) => block.kind === "core");
+  return Math.max(0, core?.hp ?? 0);
+}
+
+function coreDefeated(blocks: Block[]) {
+  return currentCoreHp(blocks) <= 0;
 }
 
 function openBehavior(behaviorId: string): BehaviorSource {

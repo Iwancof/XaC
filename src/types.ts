@@ -134,6 +134,9 @@ export interface LogEntry {
 export interface GameStatus {
   wave: number;
   next_wave_in: number;
+  core_hp: number;
+  core_max_hp: number;
+  defeated: boolean;
   wire_threats: number;
   damaged_wires: number;
   network_cpu: number;

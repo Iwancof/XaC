@@ -257,6 +257,10 @@ export function App() {
           <span>tick {snapshot?.tick ?? 0}</span>
           <span>wave {snapshot?.status.wave ?? 1}</span>
           <span>next {snapshot?.status.next_wave_in ?? 0}</span>
+          <span>
+            core HP {snapshot?.status.core_hp ?? 0}/{snapshot?.status.core_max_hp ?? 0}
+          </span>
+          {snapshot?.status.defeated && <span>DEFEATED</span>}
           <span>blocks {snapshot?.blocks.length ?? 0}</span>
           <span>enemies {snapshot?.enemies.length ?? 0}</span>
           <span>wire {snapshot?.status.wire_threats ?? 0}</span>

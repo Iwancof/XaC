@@ -77,7 +77,7 @@ impl Simulation {
     }
 
     pub fn set_running(&mut self, running: bool) -> GameSnapshot {
-        self.running = running;
+        self.running = running && !self.core_defeated();
         self.snapshot()
     }
 
@@ -208,9 +208,13 @@ impl Simulation {
         } else {
             100 - wave_phase
         };
+        let core_hp = self.core_hp();
         GameStatus {
             wave: (self.tick / 80) as u32 + 1,
             next_wave_in,
+            core_hp,
+            core_max_hp: BlockKind::Core.max_hp(),
+            defeated: core_hp <= 0,
             wire_threats: self
                 .enemies
                 .values()
@@ -219,7 +223,9 @@ impl Simulation {
             damaged_wires: self
                 .blocks
                 .values()
-                .filter(|block| block.kind == BlockKind::Wire && block.hp < 15)
+                .filter(|block| {
+                    block.kind == BlockKind::Wire && block.hp < BlockKind::Wire.max_hp()
+                })
                 .count() as u32,
             network_cpu: self.networks.values().map(|network| network.cpu_pool).sum(),
         }
@@ -245,6 +251,10 @@ impl Simulation {
     }
 
     fn tick_once(&mut self) {
+        if self.core_defeated() {
+            self.running = false;
+            return;
+        }
         self.tick += 1;
         if self.tick % 80 == 20 {
             self.spawn_wave_enemy();
@@ -285,7 +295,43 @@ impl Simulation {
             self.remove_block_references(&id);
             self.log(LogLevel::Warn, id, "block destroyed".to_string());
         }
+        if let Some(core_id) = self
+            .blocks
+            .values()
+            .find(|block| block.kind == BlockKind::Core && block.hp <= 0)
+            .map(|block| block.id.clone())
+        {
+            let should_log = self
+                .blocks
+                .get(&core_id)
+                .map(|block| block.status != "core breached")
+                .unwrap_or(false);
+            if let Some(core) = self.blocks.get_mut(&core_id) {
+                core.hp = 0;
+                core.status = "core breached".to_string();
+            }
+            self.running = false;
+            if should_log {
+                self.log(
+                    LogLevel::Error,
+                    core_id,
+                    "core destroyed; simulation halted".to_string(),
+                );
+            }
+        }
         self.recompute_networks();
+    }
+
+    fn core_hp(&self) -> i32 {
+        self.blocks
+            .values()
+            .find(|block| block.kind == BlockKind::Core)
+            .map(|block| block.hp.max(0))
+            .unwrap_or(0)
+    }
+
+    fn core_defeated(&self) -> bool {
+        self.core_hp() <= 0
     }
 
     fn make_id(&mut self, prefix: &str) -> String {
@@ -425,6 +471,40 @@ mod tests {
         let err = sim.deconstruct_block(&core_id).unwrap_err();
         assert!(err.to_string().contains("core cannot be deconstructed"));
         assert!(sim.blocks.contains_key(&core_id));
+    }
+
+    #[test]
+    fn core_defeat_stops_simulation() {
+        let mut sim = test_sim("sim");
+        let core_id = sim.block_id_at(Pos { x: 30, y: 30 }).unwrap();
+        sim.blocks.get_mut(&core_id).unwrap().hp = EnemyKind::Grunt.attack_damage();
+        sim.set_running(true);
+
+        let enemy_id = sim.make_id("enemy");
+        sim.enemies.insert(
+            enemy_id.clone(),
+            combat::enemy_at(enemy_id, EnemyKind::Grunt, WorldPos { x: 30.5, y: 30.5 }),
+        );
+
+        sim.step_ticks(1);
+
+        let snapshot = sim.snapshot();
+        assert!(snapshot.status.defeated);
+        assert_eq!(snapshot.status.core_hp, 0);
+        assert_eq!(snapshot.status.core_max_hp, BlockKind::Core.max_hp());
+        assert!(!snapshot.running);
+        assert_eq!(sim.blocks[&core_id].status, "core breached");
+        assert!(sim
+            .logs
+            .iter()
+            .any(|entry| entry.source == core_id && entry.message.contains("core destroyed")));
+
+        let defeated_tick = sim.tick;
+        sim.step_ticks(1);
+        assert_eq!(
+            sim.tick, defeated_tick,
+            "manual ticking should not advance a defeated simulation"
+        );
     }
 
     #[test]

@@ -87,11 +87,7 @@ impl Simulation {
             enemy.target_id = Some(target_id.clone());
             if enemy.pos.distance(target_pos) <= 0.2 {
                 if let Some(block) = self.blocks.get_mut(&target_id) {
-                    block.hp -= if enemy.kind == EnemyKind::Armored {
-                        8
-                    } else {
-                        5
-                    };
+                    block.hp -= enemy.kind.attack_damage();
                 }
             } else {
                 enemy.pos = enemy.pos.move_toward(target_pos, enemy.move_speed);
@@ -173,21 +169,16 @@ impl Simulation {
 }
 
 pub(crate) fn enemy_at(id: String, kind: EnemyKind, pos: WorldPos) -> Enemy {
-    let (hp, speed_ticks, move_speed) = match kind {
-        EnemyKind::Grunt => (30, 8, 0.07),
-        EnemyKind::Runner => (20, 3, 0.14),
-        EnemyKind::Armored => (90, 12, 0.045),
-        EnemyKind::WireCutter => (38, 5, 0.10),
-    };
+    let hp = kind.max_hp();
     Enemy {
         id,
         kind,
         pos,
         hp,
         max_hp: hp,
-        speed_ticks,
+        speed_ticks: kind.speed_ticks(),
         move_cooldown: 0,
-        move_speed,
+        move_speed: kind.move_speed(),
         target_id: None,
     }
 }

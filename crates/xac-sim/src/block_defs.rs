@@ -37,7 +37,7 @@ pub fn make_block(id: EntityId, kind: BlockKind, pos: Pos, dir: Direction) -> Bl
         kind,
         pos,
         dir,
-        hp: block_hp(kind),
+        hp: kind.max_hp(),
         inventory: Inventory::with_capacity(inventory_capacity(kind)),
         recipe: None,
         behavior_ref: None,
@@ -102,13 +102,5 @@ fn inventory_capacity(kind: BlockKind) -> u32 {
         BlockKind::Drill => 10,
         BlockKind::DronePort => 120,
         _ => 0,
-    }
-}
-
-fn block_hp(kind: BlockKind) -> i32 {
-    match kind {
-        BlockKind::Wire => 15,
-        BlockKind::Core => 500,
-        _ => 90,
     }
 }
