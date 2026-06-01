@@ -1,21 +1,16 @@
 import { mockIPC } from "@tauri-apps/api/mocks";
-import {
-  blockAttackRangeTiles,
-  blockMaxHp,
-  canAcceptItem,
-  displayBlockKind,
-  DRILL_MINE_BASE_TICKS
-} from "../gameMetadata";
+import { blockMaxHp, canAcceptItem, displayBlockKind } from "../gameMetadata";
 import { detectBehaviorSourceLanguage } from "../behaviorLanguage";
 import { enemyMaxHp, enemyMoveSpeed } from "../enemyMetadata";
 import { MAP_HEIGHT, MAP_WIDTH, terrainAt } from "../mapSeed";
 import {
-  emptyMockBehaviorResult,
-  evaluateMockBehaviorScript,
-  type MockBehaviorResult
-} from "./mockBehaviorRuntime";
+  forceMockOverBudget,
+  forceMockRuntimeError,
+  runMockBlockBehavior,
+  type MockBehaviorExecutionContext
+} from "./mockBehaviorExecutor";
 import { commonTemplates } from "./mockCommonTemplates";
-import { blockAt, distance, footprintPositions, rotateDirection } from "./mockGeometry";
+import { blockAt, footprintPositions, rotateDirection } from "./mockGeometry";
 import {
   cleanupDestroyed,
   coreDefeated,
@@ -24,17 +19,12 @@ import {
   type MockCombatContext
 } from "./mockCombat";
 import {
-  dockedDroneCountAtPort,
-  runMockDronePort,
   runMockDrones,
   spawnCarrierDrone as spawnCarrierDroneWithContext,
   type MockDroneContext
 } from "./mockDrones";
-import { addItem, inventoryCount, inventoryTotal, removeItem } from "./mockInventory";
+import { inventoryTotal } from "./mockInventory";
 import {
-  networkStockCount,
-  outputAvailable,
-  outputBlocked,
   transferFrom,
   type MockLogisticsContext
 } from "./mockLogistics";
@@ -47,8 +37,7 @@ import {
   type BehaviorOwner,
   type CommandCall,
   type IdKind,
-  type MockState,
-  type RuntimeEntity
+  type MockState
 } from "./mockState";
 import type {
   BehaviorSource,
@@ -66,9 +55,6 @@ import type {
   Pos,
   Tile
 } from "../types";
-
-const MOCK_ASSEMBLER_RECIPE_TICKS = 20;
-const MOCK_TURRET_DAMAGE = 12;
 
 declare global {
   interface Window {
@@ -274,10 +260,9 @@ function runTicks(count: number) {
     state.tick += 1;
     recomputeNetworks(state.blocks, state.drones);
 
+    const behaviorContext = mockBehaviorContext();
     for (const block of state.blocks) {
-      if (block.active && block.behavior_ref) {
-        applyMockBehavior(block, runMockBehavior(block));
-      }
+      runMockBlockBehavior(behaviorContext, block);
     }
     for (const block of state.blocks) {
       if (block.kind === "drill" || block.kind === "conveyor" || block.kind === "assembler") {
@@ -504,41 +489,11 @@ function setBlockInventory(blockId: string, items: Partial<Record<ItemKind, numb
 }
 
 function forceOverBudget(entityId: string) {
-  const block = state.blocks.find((candidate) => candidate.id === entityId);
-  if (block) {
-    block.status = "over_budget";
-    recordRuntime(block, 40, 40, 0, "mocked-over-budget-wasm", true);
-    log("warn", entityId, "over_budget with 40 fuel");
-    return;
-  }
-
-  const drone = state.drones.find((candidate) => candidate.id === entityId);
-  if (drone) {
-    recordRuntime(drone, 40, 40, 0, "mocked-over-budget-wasm", true);
-    log("warn", entityId, "drone over_budget with 40 fuel");
-    return;
-  }
-
-  throw new Error(`unknown runtime entity: ${entityId}`);
+  forceMockOverBudget(mockBehaviorContext(), entityId);
 }
 
 function forceRuntimeError(entityId: string, message = "mocked wasm unreachable trap") {
-  const block = state.blocks.find((candidate) => candidate.id === entityId);
-  if (block) {
-    block.status = "runtime error";
-    recordRuntime(block, 40, 12, 28, "mocked-runtime-error-wasm", false, message);
-    log("error", entityId, message);
-    return;
-  }
-
-  const drone = state.drones.find((candidate) => candidate.id === entityId);
-  if (drone) {
-    recordRuntime(drone, 40, 12, 28, "mocked-runtime-error-wasm", false, message);
-    log("error", entityId, message);
-    return;
-  }
-
-  throw new Error(`unknown runtime entity: ${entityId}`);
+  forceMockRuntimeError(mockBehaviorContext(), entityId, message);
 }
 
 function buildTiles(blocks: Block[]): Tile[] {
@@ -569,149 +524,19 @@ function usedBy(behaviorId: string) {
   );
 }
 
-function runMockBehavior(block: Block) {
-  const minInvocationFuel = 40;
-  const fuelRate = block.effective_cpu_rate;
-  const maxBank = Math.max(fuelRate * 8, minInvocationFuel);
-  block.fuel_bank = Math.min(maxBank, block.fuel_bank + fuelRate / 20);
-  if (block.fuel_bank < minInvocationFuel) return emptyMockBehaviorResult();
-
-  const fuelBudget = Math.floor(block.fuel_bank);
-  const fuelSpent = Math.min(8, fuelBudget);
-  block.fuel_bank = Math.max(0, block.fuel_bank - fuelSpent);
-  recordRuntime(block, fuelBudget, fuelSpent, fuelBudget - fuelSpent, "mocked-wasm-hash");
-  const source = block.behavior_ref ? state.behaviors[block.behavior_ref]?.source ?? "" : "";
-  return evaluateMockBehaviorScript(block, source, {
-    outputBlocked: () => outputBlocked(logisticsContext(), block),
-    outputAvailable: (dir, item) => outputAvailable(logisticsContext(), block, dir, item),
-    terrainAtSelf: () => terrainAt(block.pos),
-    visibleTurretTargetCount: () => visibleTurretTargets(block).length,
-    canAttackTurretIndex: (index) => Boolean(visibleTurretTargets(block)[index]),
-    stockCount: (item) => networkStockCount(state.blocks, block, item),
-    dockedDroneCount: () => dockedDroneCountAtPort(droneContext(), block.id),
-    pendingJobCount: () => state.pendingJobs.length
-  });
-}
-
-function applyMockBehavior(block: Block, behavior: MockBehaviorResult) {
-  if (behavior.mine) runMockDrill(block);
-  if (behavior.output) transferFrom(logisticsContext(), block, behavior.output.dir, behavior.output.item);
-  if (behavior.router) runMockRouter(block, behavior.router);
-  if (behavior.assembler) runMockAssembler(block, behavior.assembler);
-  if (behavior.turret) runMockTurret(block, behavior.turret.priority);
-  if (behavior.dronePort) runMockDronePort(droneContext(), block, behavior.dronePort);
-}
-
-function runMockDrill(block: Block) {
-  if (block.kind !== "drill" || terrainAt(block.pos) !== "ore_patch" || outputBlocked(logisticsContext(), block)) return;
-  block.progress += 1;
-  if (block.progress >= DRILL_MINE_BASE_TICKS && inventoryCount(block.inventory, "ore") < block.inventory.capacity) {
-    block.progress = 0;
-    addItem(block.inventory, "ore", 1);
-    block.status = "mined ore";
-    log("info", block.id, "mined ore");
-  }
-}
-
-function runMockRouter(block: Block, router: { item: ItemKind | null; dirs: Direction[] }) {
-  if (block.kind !== "router") return;
-  for (const dir of router.dirs) {
-    if (transferFrom(logisticsContext(), block, dir, router.item)) break;
-  }
-}
-
-function runMockAssembler(block: Block, assembler: { recipe: ItemKind | null; produce: boolean }) {
-  if (block.kind !== "assembler") return;
-  if (assembler.recipe) {
-    block.recipe = assembler.recipe;
-    block.status = `recipe: ${assembler.recipe}`;
-  }
-  if (!assembler.produce || !canMockProduce(block, block.recipe)) return;
-  block.progress += 1;
-  if (block.progress < MOCK_ASSEMBLER_RECIPE_TICKS) return;
-  block.progress = 0;
-  if (block.recipe === "plate") {
-    removeItem(block.inventory, "ore", 2);
-    addItem(block.inventory, "plate", 1);
-    block.status = "produced plate";
-  } else if (block.recipe === "ammo") {
-    removeItem(block.inventory, "plate", 1);
-    addItem(block.inventory, "ammo", 2);
-    block.status = "produced ammo";
-  }
-}
-
-function runMockTurret(block: Block, priority: string[]) {
-  if (block.kind !== "turret" || inventoryCount(block.inventory, "ammo") <= 0) return;
-  const target = chooseTurretTarget(block, priority);
-  if (!target) return;
-  target.hp -= MOCK_TURRET_DAMAGE;
-  removeItem(block.inventory, "ammo", 1);
-  block.target_id = target.id;
-  block.status = `attacking ${target.id}`;
-}
-
-function canMockProduce(block: Block, recipe: string | null) {
-  if (recipe === "plate") {
-    return inventoryCount(block.inventory, "ore") >= 2 && inventoryTotal(block.inventory) < block.inventory.capacity;
-  }
-  if (recipe === "ammo") {
-    return inventoryCount(block.inventory, "plate") >= 1 && inventoryTotal(block.inventory) + 1 < block.inventory.capacity;
-  }
-  return false;
-}
-
-function chooseTurretTarget(block: Block, priority: string[]) {
-  const targets = visibleTurretTargets(block);
-  if (targets.length === 0) return null;
-  for (const rawRule of priority) {
-    for (const rule of rawRule.split(",").map((part) => part.trim()).filter(Boolean)) {
-      if (rule.startsWith("index:")) {
-        const target = targets[Number(rule.slice("index:".length))];
-        if (target) return target;
-      }
-      if (rule === "lowest_hp" || rule === "weakest") return [...targets].sort((a, b) => a.hp - b.hp)[0];
-      if (rule === "nearest") return targets[0];
-      const byKind = targets.find((target) => target.kind === rule || (rule === "wire-cutter" && target.kind === "wire_cutter"));
-      if (byKind) return byKind;
-    }
-  }
-  return targets[0];
-}
-
-function visibleTurretTargets(block: Block) {
-  const range = blockAttackRangeTiles("turret") ?? 0;
-  const origin = { x: block.pos.x + 0.5, y: block.pos.y + 0.5 };
-  return state.enemies
-    .filter((enemy) => enemy.hp > 0 && distance(origin, enemy.pos) <= range)
-    .sort((a, b) => distance(origin, a.pos) - distance(origin, b.pos));
-}
-
-function recordRuntime(
-  entity: RuntimeEntity,
-  fuelBudget: number,
-  fuelSpent: number,
-  fuelRemaining: number,
-  wasmHash: string,
-  overBudget = false,
-  runtimeError: string | null = null
-) {
-  entity.behavior_runtime = {
-    last_tick: state.tick,
-    run_count: (entity.behavior_runtime?.run_count ?? 0) + 1,
-    fuel_budget: fuelBudget,
-    fuel_spent: fuelSpent,
-    fuel_remaining: fuelRemaining,
-    over_budget: overBudget,
-    runtime_error: runtimeError,
-    wasm_hash: wasmHash
-  };
-}
-
 function logisticsContext(): MockLogisticsContext {
   return {
     blocks: state.blocks,
     recordItemFlow
+  };
+}
+
+function mockBehaviorContext(): MockBehaviorExecutionContext {
+  return {
+    state,
+    logistics: logisticsContext,
+    drones: droneContext,
+    log
   };
 }
 
