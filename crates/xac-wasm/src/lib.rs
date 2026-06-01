@@ -24,6 +24,7 @@ use script::{
     ATTACK_POLICY_WIRE_CUTTER,
 };
 mod script_imports;
+mod script_render;
 mod tiny;
 use tiny::{compile_tiny_source, is_tiny_source};
 
